@@ -1,0 +1,6 @@
+requests
+python-dotenv
+ta
+pandas
+schedule
+websocket-client
