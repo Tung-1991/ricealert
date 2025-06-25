@@ -4,11 +4,37 @@ load_dotenv()
 
 import os
 import time
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 from alert_manager import send_discord_alert
+
+COOLDOWN_FILE = "cooldown_tracker.json"
+ALERT_COOLDOWN_MINUTES = 90
+
+# 🧠 Load cooldown từ file (nếu có)
+def load_cooldown():
+    if os.path.exists(COOLDOWN_FILE):
+        try:
+            with open(COOLDOWN_FILE, "r") as f:
+                data = json.load(f)
+                now = datetime.now()
+                return {
+                    k: datetime.fromisoformat(v)
+                    for k, v in data.items()
+                    if now - datetime.fromisoformat(v) < timedelta(hours=24)
+                }
+        except Exception as e:
+            print(f"⚠️ Không thể load cooldown file: {e}")
+    return {}
+
+# 💾 Save cooldown ra file
+def save_cooldown(cooldown_dict):
+    with open(COOLDOWN_FILE, "w") as f:
+        data = {k: v.isoformat() for k, v in cooldown_dict.items()}
+        json.dump(data, f)
 
 def is_report_time():
     now = datetime.now()
@@ -49,8 +75,9 @@ def render_portfolio():
 
     return portfolio_lines
 
-def format_symbol_report(symbol, indicators_1h, indicators_4h):
-    def format_block(ind, interval):
+def format_symbol_report(symbol, indicator_dict):
+    blocks = []
+    for interval, ind in indicator_dict.items():
         macd_cross = ind.get("macd_cross", "N/A")
         adx = ind.get("adx", "N/A")
         rsi_div = ind.get("rsi_divergence", "None")
@@ -73,52 +100,69 @@ def format_symbol_report(symbol, indicators_1h, indicators_4h):
 🧠 Signal: **{signal}** {f"→ {reason}" if reason else ""}"""
 
         if signal in ["ALERT", "CRITICAL"]:
-            block += f"""\n🎯 **Trade Plan**
+            block += f"""
+🎯 **Trade Plan**
 - Entry: {trade_plan.get('entry')}
 - TP:     {trade_plan.get('tp')}
 - SL:     {trade_plan.get('sl')}"""
-        return block
+        blocks.append(block)
 
-    return f"{format_block(indicators_1h, '1h')}\n\n{format_block(indicators_4h, '4h')}"
+    return "\n\n".join(blocks)
 
 def main():
     print("🔁 Bắt đầu vòng check...\n")
-    symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT,INJUSDT,LINKUSDT,SUIUSDT").split(",")
+    symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
+    intervals = [i.strip() for i in os.getenv("INTERVALS", "1h,4h").split(",")]
     should_report = is_report_time()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Load cooldown từ file
+    last_alert_time = load_cooldown()
 
     if should_report:
-        print(f"⏱️ {now} | Gửi portfolio lên Discord...")
+        print(f"⏱️ {now_str} | Gửi portfolio lên Discord...")
         portfolio_lines = render_portfolio()
-        message = f"⏱️ **Report Time: {now}**\n\n💰 **Portfolio**\n" + "\n".join(portfolio_lines)
+        message = f"⏱️ **Report Time: {now_str}**\n\n💰 **Portfolio**\n" + "\n".join(portfolio_lines)
         send_discord_alert(message)
     else:
         print("⏩ Không phải giờ gửi report, bỏ qua gửi portfolio")
 
     for symbol in symbols:
         try:
-            df_1h = get_price_data(symbol, "1h")
-            ind_1h = calculate_indicators(df_1h, symbol, "1h")
-            signal_1h, _ = check_signal(ind_1h)
+            indicator_dict = {}
+            sendable_intervals = []
 
-            df_4h = get_price_data(symbol, "4h")
-            ind_4h = calculate_indicators(df_4h, symbol, "4h")
-            signal_4h, _ = check_signal(ind_4h)
+            for interval in intervals:
+                df = get_price_data(symbol, interval)
+                ind = calculate_indicators(df, symbol, interval)
+                indicator_dict[interval] = ind
 
-            report_text = format_symbol_report(symbol, ind_1h, ind_4h)
-            print(report_text + "\n" + "-" * 50)
+                sig, _ = check_signal(ind)
+                if sig in ["ALERT", "CRITICAL"]:
+                    key = f"{symbol}_{interval}"
+                    last_time = last_alert_time.get(key)
+                    if not last_time or now - last_time >= timedelta(minutes=ALERT_COOLDOWN_MINUTES):
+                        sendable_intervals.append(interval)
+                        last_alert_time[key] = now
+                    else:
+                        print(f"⏳ Đã gửi alert cho {symbol} - {interval} gần đây, bỏ qua Discord")
 
-            if should_report or signal_1h in ["ALERT", "CRITICAL"] or signal_4h in ["ALERT", "CRITICAL"]:
-                title = ""
+            report_text = format_symbol_report(symbol, indicator_dict)
+            print(report_text + "\n" + "-"*50)
+
+            if should_report or sendable_intervals:
                 if not should_report:
-                    active_signal = signal_1h if signal_1h != "HOLD" else signal_4h
-                    title = f"🚨 **[{symbol}] Cảnh báo {active_signal}** | ⏱️ {now}"
-                report_text = f"{title}\n\n{report_text}" if title else report_text
+                    title = f"🚨 [{symbol}] Cảnh báo từ {', '.join(sendable_intervals)} | ⏱️ {now_str}"
+                    report_text = f"{title}\n\n{report_text}"
                 send_discord_alert(report_text)
                 time.sleep(3)
 
         except Exception as e:
             print(f"❌ Lỗi xử lý {symbol}: {e}")
+
+    # ✅ Save cooldown về file
+    save_cooldown(last_alert_time)
 
 if __name__ == "__main__":
     main()

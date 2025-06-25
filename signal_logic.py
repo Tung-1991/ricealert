@@ -1,5 +1,5 @@
 def check_signal(indicators: dict) -> tuple:
-    """Phân tích kỹ thuật → trả về tín hiệu (HOLD, ALERT, CRITICAL) và lý do"""
+    """Phân tích kỹ thuật → trả về tín hiệu (HOLD, ALERT, CRITICAL) + phân loại SCALP/SWING + lý do"""
 
     rsi = indicators.get('rsi_14')
     macd = indicators.get('macd_line')
@@ -34,7 +34,7 @@ def check_signal(indicators: dict) -> tuple:
     if rsi > 70 and macd_cross == "bearish" and doji == "gravestone" and adx > 20:
         reasons.append("RSI > 70 + MACD crossover xuống + Gravestone Doji + Trend mạnh")
 
-    # RSI cả 1h và 4h đều quá bán → tín hiệu mạnh
+    # RSI cả 1h và 4h đều quá bán/quá mua
     if rsi_1h and rsi_4h and rsi_1h < 30 and rsi_4h < 30:
         reasons.append("RSI 1h và 4h cùng < 30 → xu hướng đảo chiều mạnh (BUY)")
     if rsi_1h and rsi_4h and rsi_1h > 70 and rsi_4h > 70:
@@ -51,23 +51,28 @@ def check_signal(indicators: dict) -> tuple:
         reasons.append("Phân kỳ RSI dương → khả năng đảo chiều tăng")
     if rsi_div == "bearish":
         reasons.append("Phân kỳ RSI âm → khả năng đảo chiều giảm")
-
-    # Breakout volume mạnh
     if volume > 2 * vol_ma:
         reasons.append("Khối lượng tăng đột biến → breakout tiềm năng")
     if adx < 15:
         reasons.append("Trend yếu (ADX < 15) → thị trường sideway, dễ nhiễu")
-
-    # Hội tụ RSI + MACD + BB
     if rsi > 70 and macd_cross == "bearish" and price >= bb_upper:
         reasons.append("RSI cao + MACD bearish + giá chạm BB trên → đảo chiều giảm")
     if rsi < 30 and macd_cross == "bullish" and price <= bb_lower:
         reasons.append("RSI thấp + MACD bullish + giá chạm BB dưới → đảo chiều tăng")
 
     # ====== Tổng hợp kết luận ======
+    signal_type = "HOLD"
     if any("RSI" in r or "MACD" in r or "Phân kỳ" in r for r in reasons if "Doji" in r or "trend" in r):
-        return "CRITICAL", " + ".join(reasons)
+        signal_type = "CRITICAL"
     elif reasons:
-        return "ALERT", " + ".join(reasons)
+        signal_type = "ALERT"
     else:
         return "HOLD", "Không tín hiệu rõ ràng"
+
+    # ====== Phân loại SCALP / SWING ======
+    tag = "SCALP"
+    if adx and adx > 25 and rsi_1h and rsi_4h:
+        if (rsi_1h > 50 and rsi_4h > 50) or (rsi_1h < 50 and rsi_4h < 50):
+            tag = "SWING"
+
+    return signal_type, f"{tag} → {' + '.join(reasons)}"
