@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import time
 from datetime import datetime
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
@@ -48,58 +49,76 @@ def render_portfolio():
 
     return portfolio_lines
 
+def format_symbol_report(symbol, indicators_1h, indicators_4h):
+    def format_block(ind, interval):
+        macd_cross = ind.get("macd_cross", "N/A")
+        adx = ind.get("adx", "N/A")
+        rsi_div = ind.get("rsi_divergence", "None")
+        trade_plan = ind.get("trade_plan", {})
+        doji_note = f"{ind['doji_type'].capitalize()} Doji" if ind.get("doji_type") else "No"
+        signal, reason = check_signal(ind)
+
+        block = f"""📊 **{symbol} ({interval})**
+🔹 Price: {ind['price']}
+📈 EMA20: {ind['ema_20']}
+💪 RSI14: {ind['rsi_14']} ({rsi_div})
+📉 MACD Line: {ind['macd_line']}
+📊 MACD Signal: {ind['macd_signal']} → {macd_cross}
+📊 ADX: {adx}
+🔺 BB Upper: {ind['bb_upper']}
+🔻 BB Lower: {ind['bb_lower']}
+🔊 Volume: {ind['volume']} / MA20: {ind['vol_ma20']}
+🌀 Fibo 0.618: {ind['fib_0_618']}
+🕯️ Doji: {doji_note}
+🧠 Signal: **{signal}** {f"→ {reason}" if reason else ""}"""
+
+        if signal in ["ALERT", "CRITICAL"]:
+            block += f"""\n🎯 **Trade Plan**
+- Entry: {trade_plan.get('entry')}
+- TP:     {trade_plan.get('tp')}
+- SL:     {trade_plan.get('sl')}"""
+        return block
+
+    return f"{format_block(indicators_1h, '1h')}\n\n{format_block(indicators_4h, '4h')}"
+
 def main():
     print("🔁 Bắt đầu vòng check...\n")
-
-    symbols = os.getenv("SYMBOLS", "ETHUSDT").split(",")
-    intervals = os.getenv("INTERVALS", "1h").split(",")
+    symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT,INJUSDT,LINKUSDT,SUIUSDT").split(",")
     should_report = is_report_time()
-    portfolio_lines = render_portfolio() if should_report else ["(ẩn - chỉ hiển thị lúc gửi report)"]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if should_report:
+        print(f"⏱️ {now} | Gửi portfolio lên Discord...")
+        portfolio_lines = render_portfolio()
+        message = f"⏱️ **Report Time: {now}**\n\n💰 **Portfolio**\n" + "\n".join(portfolio_lines)
+        send_discord_alert(message)
+    else:
+        print("⏩ Không phải giờ gửi report, bỏ qua gửi portfolio")
 
     for symbol in symbols:
-        for interval in intervals:
-            try:
-                df = get_price_data(symbol, interval)
-                indicators = calculate_indicators(df, symbol, interval)
-                signal, reason = check_signal(indicators)
+        try:
+            df_1h = get_price_data(symbol, "1h")
+            ind_1h = calculate_indicators(df_1h, symbol, "1h")
+            signal_1h, _ = check_signal(ind_1h)
 
-                print(f"\n📊 {symbol} ({interval}) Indicator Report")
-                print(f"🔹 Price: {indicators['price']}")
-                print(f"📈 EMA20: {indicators['ema_20']}")
-                print(f"💪 RSI14: {indicators['rsi_14']}")
-                print(f"🔺 BB Upper: {indicators['bb_upper']}")
-                print(f"🔻 BB Lower: {indicators['bb_lower']}")
-                print(f"📉 MACD Line: {indicators['macd_line']}")
-                print(f"📊 MACD Signal: {indicators['macd_signal']}")
-                print(f"🔊 Volume: {indicators['volume']} / MA20: {indicators['vol_ma20']}")
-                print(f"🌀 Fibo 0.618: {indicators['fib_0_618']}")
-                doji_note = f"{indicators['doji_type'].capitalize()} Doji" if indicators.get("doji_type") else "No"
-                print(f"🕯️ Doji: {doji_note}")
-                print(f"🧠 Signal: {signal} {'→ ' + reason if reason else ''}")
+            df_4h = get_price_data(symbol, "4h")
+            ind_4h = calculate_indicators(df_4h, symbol, "4h")
+            signal_4h, _ = check_signal(ind_4h)
 
-                # Quyết định có gửi hay không
-                if should_report or signal in ["ALERT", "CRITICAL"]:
-                    message = f"""📊 **{symbol} ({interval}) Report**
-🔹 Price: {indicators['price']}
-📈 EMA20: {indicators['ema_20']}
-💪 RSI14: {indicators['rsi_14']}
-🔺 BB Upper: {indicators['bb_upper']}
-🔻 BB Lower: {indicators['bb_lower']}
-📉 MACD Line: {indicators['macd_line']}
-📊 MACD Signal: {indicators['macd_signal']}
-🔊 Volume: {indicators['volume']} / MA20: {indicators['vol_ma20']}
-🌀 Fibo 0.618: {indicators['fib_0_618']}
-🕯️ Doji: {doji_note}
-🧠 Signal: **{signal}** {f"→ {reason}" if reason else ""}
+            report_text = format_symbol_report(symbol, ind_1h, ind_4h)
+            print(report_text + "\n" + "-" * 50)
 
-💰 **Portfolio**
-""" + "\n".join(portfolio_lines)
+            if should_report or signal_1h in ["ALERT", "CRITICAL"] or signal_4h in ["ALERT", "CRITICAL"]:
+                title = ""
+                if not should_report:
+                    active_signal = signal_1h if signal_1h != "HOLD" else signal_4h
+                    title = f"🚨 **[{symbol}] Cảnh báo {active_signal}** | ⏱️ {now}"
+                report_text = f"{title}\n\n{report_text}" if title else report_text
+                send_discord_alert(report_text)
+                time.sleep(3)
 
-                    send_discord_alert(message)
-
-            except Exception as e:
-                print(f"❌ Lỗi {symbol} ({interval}): {e}")
+        except Exception as e:
+            print(f"❌ Lỗi xử lý {symbol}: {e}")
 
 if __name__ == "__main__":
     main()
-
