@@ -10,11 +10,15 @@ from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 from alert_manager import send_discord_alert
+from csv_logger import log_to_csv, write_named_log
 
 COOLDOWN_FILE = "cooldown_tracker.json"
-ALERT_COOLDOWN_MINUTES = 90
+COOLDOWN_MAP = {
+    "1h": 150,   # 2h30
+    "4h": 90,    # 1h30
+    "1d": 90     # 1h30
+}
 
-# 🧠 Load cooldown từ file (nếu có)
 def load_cooldown():
     if os.path.exists(COOLDOWN_FILE):
         try:
@@ -30,7 +34,6 @@ def load_cooldown():
             print(f"⚠️ Không thể load cooldown file: {e}")
     return {}
 
-# 💾 Save cooldown ra file
 def save_cooldown(cooldown_dict):
     with open(COOLDOWN_FILE, "w") as f:
         data = {k: v.isoformat() for k, v in cooldown_dict.items()}
@@ -83,6 +86,8 @@ def format_symbol_report(symbol, indicator_dict):
         rsi_div = ind.get("rsi_divergence", "None")
         trade_plan = ind.get("trade_plan", {})
         doji_note = f"{ind['doji_type'].capitalize()} Doji" if ind.get("doji_type") else "No"
+        trend = ind.get("trend", "unknown")
+        cmf = ind.get("cmf", "N/A")
         signal, reason = check_signal(ind)
 
         block = f"""📊 **{symbol} ({interval})**
@@ -97,7 +102,9 @@ def format_symbol_report(symbol, indicator_dict):
 🔊 Volume: {ind['volume']} / MA20: {ind['vol_ma20']}
 🌀 Fibo 0.618: {ind['fib_0_618']}
 🕯️ Doji: {doji_note}
-🧠 Signal: **{signal}** {f"→ {reason}" if reason else ""}"""
+🔺 Trend: {trend}
+💸 CMF: {cmf}
+🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''}"""
 
         if signal in ["ALERT", "CRITICAL"]:
             block += f"""
@@ -117,8 +124,8 @@ def main():
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Load cooldown từ file
     last_alert_time = load_cooldown()
+    all_logs = []
 
     if should_report:
         print(f"⏱️ {now_str} | Gửi portfolio lên Discord...")
@@ -132,28 +139,44 @@ def main():
         try:
             indicator_dict = {}
             sendable_intervals = []
+            alert_levels = []
 
             for interval in intervals:
                 df = get_price_data(symbol, interval)
                 ind = calculate_indicators(df, symbol, interval)
                 indicator_dict[interval] = ind
-
+                ind["interval"] = interval
                 sig, _ = check_signal(ind)
+                key = f"{symbol}_{interval}"
+
                 if sig in ["ALERT", "CRITICAL"]:
-                    key = f"{symbol}_{interval}"
                     last_time = last_alert_time.get(key)
-                    if not last_time or now - last_time >= timedelta(minutes=ALERT_COOLDOWN_MINUTES):
+                    cooldown_minutes = COOLDOWN_MAP.get(interval, 90)
+                    if not last_time or now - last_time >= timedelta(minutes=cooldown_minutes):
+                        log_to_csv(
+                            symbol=symbol,
+                            interval=interval,
+                            signal=sig,
+                            tag=ind.get("tag", "swing"),
+                            price=ind["price"] if ind["price"] is not None else 0,
+                            trade_plan=ind.get("trade_plan", {})
+                        )
+                        print(f"📤 Đã lưu vào CSV: {symbol} - {interval} ({sig})")
                         sendable_intervals.append(interval)
+                        alert_levels.append(sig)
                         last_alert_time[key] = now
                     else:
-                        print(f"⏳ Đã gửi alert cho {symbol} - {interval} gần đây, bỏ qua Discord")
+                        print(f"⏳ {symbol} - {interval} trong cooldown, không gửi Discord và không ghi CSV")
 
             report_text = format_symbol_report(symbol, indicator_dict)
             print(report_text + "\n" + "-"*50)
+            all_logs.append(report_text)
 
             if should_report or sendable_intervals:
-                if not should_report:
-                    title = f"🚨 [{symbol}] Cảnh báo từ {', '.join(sendable_intervals)} | ⏱️ {now_str}"
+                if sendable_intervals:
+                    level = "CRITICAL" if "CRITICAL" in alert_levels else "ALERT"
+                    icon = "🚨" if level == "CRITICAL" else "📣"
+                    title = f"{icon} [{symbol}] **{level}** từ khung {', '.join(sendable_intervals)} | ⏱️ {now_str}"
                     report_text = f"{title}\n\n{report_text}"
                 send_discord_alert(report_text)
                 time.sleep(3)
@@ -161,8 +184,12 @@ def main():
         except Exception as e:
             print(f"❌ Lỗi xử lý {symbol}: {e}")
 
-    # ✅ Save cooldown về file
+    if all_logs:
+        full_log = "\n\n" + ("\n" + "="*60 + "\n\n").join(all_logs)
+        write_named_log(full_log, f"{now.strftime('%H%M')}.txt")
+
     save_cooldown(last_alert_time)
 
 if __name__ == "__main__":
     main()
+
