@@ -8,20 +8,35 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 load_dotenv()
 
-CSV_PATH = "output/signal_log.csv"
-BACKUP_PATH = "log/signal_log.csv.bak"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 🔒 Đường dẫn tuyệt đối thư mục script
+CSV_PATH = os.path.join(BASE_DIR, "output/signal_log.csv")
+BAK_DIR = os.path.join(BASE_DIR, "output")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
-CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_JSON", "ricealert-ec406ac4f2f7.json")
+CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_JSON", os.path.join(BASE_DIR, "ricealert-ec406ac4f2f7.json"))
+
+
+def cleanup_old_backups(keep=1):
+    files = [f for f in os.listdir(BAK_DIR) if f.endswith(".csv.bak")]
+    files = sorted(files, key=lambda f: os.path.getmtime(os.path.join(BAK_DIR, f)), reverse=True)
+    for f in files[keep:]:
+        path = os.path.join(BAK_DIR, f)
+        os.remove(path)
+        print(f"[CLEANUP] Đã xoá file backup cũ: {path}")
 
 def sync_csv_to_google_sheet():
     if not os.path.exists(CSV_PATH):
         print("[INFO] Không có file CSV để sync → bỏ qua.")
         return
 
-    # 🧠 Backup trước khi xoá
-    os.makedirs("log", exist_ok=True)
-    shutil.copy(CSV_PATH, BACKUP_PATH)
-    print(f"[BACKUP] Đã tạo bản backup tại: {BACKUP_PATH}")
+    # 🔒 Backup theo timestamp
+    os.makedirs(BAK_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_file = os.path.join(BAK_DIR, f"signal_log_{timestamp}.csv.bak")
+    shutil.copy(CSV_PATH, backup_file)
+    print(f"[BACKUP] Đã tạo bản backup tại: {backup_file}")
+
+    # 🧹 Dọn backup cũ (chỉ giữ lại 1 bản mới nhất)
+    cleanup_old_backups(keep=1)
 
     # 🔑 Auth Google Sheets API
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -35,12 +50,16 @@ def sync_csv_to_google_sheet():
         worksheet = sheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
         worksheet = sheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
+        worksheet.append_row([
+            "timestamp", "symbol", "interval", "signal", "tag", "price",
+            "trade_plan", "real_entry", "real_exit", "pnl_percent", "status"
+        ], value_input_option="USER_ENTERED")
 
-    # 📊 Ghi đè toàn bộ
+    # 📊 Đọc và append
     df = pd.read_csv(CSV_PATH)
-    worksheet.clear()
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
-    print(f"[SYNC] Đã sync dữ liệu lên Google Sheet: {sheet_name}")
+    rows = df.values.tolist()
+    worksheet.append_rows(rows, value_input_option="USER_ENTERED")
+    print(f"[SYNC] Đã append {len(rows)} dòng lên Google Sheet: {sheet_name}")
 
     # ❌ Xóa CSV sau sync
     os.remove(CSV_PATH)

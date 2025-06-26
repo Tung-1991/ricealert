@@ -14,9 +14,9 @@ from csv_logger import log_to_csv, write_named_log
 
 COOLDOWN_FILE = "cooldown_tracker.json"
 COOLDOWN_MAP = {
-    "1h": 150,   # 2h30
-    "4h": 90,    # 1h30
-    "1d": 90     # 1h30
+    "1h": 210,   # 3h30
+    "4h": 270,    # 4h30
+    "1d": 1470     # 24h30
 }
 
 def load_cooldown():
