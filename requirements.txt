@@ -4,3 +4,6 @@ ta
 pandas
 schedule
 websocket-client
+gspread
+oauth2client
+
