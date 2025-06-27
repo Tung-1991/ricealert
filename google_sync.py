@@ -8,12 +8,11 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 🔒 Đường dẫn tuyệt đối thư mục script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "output/signal_log.csv")
 BAK_DIR = os.path.join(BASE_DIR, "output")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_JSON", os.path.join(BASE_DIR, "ricealert-ec406ac4f2f7.json"))
-
 
 def cleanup_old_backups(keep=1):
     files = [f for f in os.listdir(BAK_DIR) if f.endswith(".csv.bak")]
@@ -52,7 +51,7 @@ def sync_csv_to_google_sheet():
         worksheet = sheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
         worksheet.append_row([
             "timestamp", "symbol", "interval", "signal", "tag", "price",
-            "trade_plan", "real_entry", "real_exit", "pnl_percent", "status"
+            "trade_plan", "entry_exit_pnl", "status", "money"  # ✅ Thêm money
         ], value_input_option="USER_ENTERED")
 
     # 📊 Đọc và append

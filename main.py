@@ -14,8 +14,8 @@ from csv_logger import log_to_csv, write_named_log
 
 COOLDOWN_FILE = "cooldown_tracker.json"
 COOLDOWN_MAP = {
-    "1h": 210,   # 3h30
-    "4h": 270,    # 4h30
+    "1h": 510,   # 8h30
+    "4h": 750,    # 12h30
     "1d": 1470     # 24h30
 }
 
@@ -159,7 +159,8 @@ def main():
                             signal=sig,
                             tag=ind.get("tag", "swing"),
                             price=ind["price"] if ind["price"] is not None else 0,
-                            trade_plan=ind.get("trade_plan", {})
+                            trade_plan=ind.get("trade_plan", {}),
+                            timestamp=now_str
                         )
                         print(f"📤 Đã lưu vào CSV: {symbol} - {interval} ({sig})")
                         sendable_intervals.append(interval)

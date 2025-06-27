@@ -11,7 +11,6 @@ def check_signal(indicators: dict) -> tuple:
     doji_raw = indicators.get('doji_type')
     doji = doji_raw.lower() if isinstance(doji_raw, str) else ""
 
-    # New indicators
     macd_cross = indicators.get('macd_cross')
     adx = indicators.get('adx')
     rsi_div = indicators.get('rsi_divergence')
@@ -23,6 +22,7 @@ def check_signal(indicators: dict) -> tuple:
     rsi_4h = indicators.get("rsi_4h")
 
     if any(v is None for v in [rsi, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma, macd_cross, adx]):
+        indicators["tag"] = "avoid"
         return "HOLD", "Thiếu dữ liệu"
 
     reasons = []
@@ -77,24 +77,41 @@ def check_signal(indicators: dict) -> tuple:
     if candle == "shooting_star":
         reasons.append("Shooting Star → đỉnh tiềm năng")
 
-    # ====== Tổng hợp kết luận ======
+    # ====== Tổng hợp tín hiệu ======
     signal_type = "HOLD"
     if any("RSI" in r or "MACD" in r or "Phân kỳ" in r for r in reasons if "Doji" in r or "trend" in r):
         signal_type = "CRITICAL"
     elif reasons:
         signal_type = "ALERT"
     else:
+        indicators["tag"] = "avoid"
         return "HOLD", "Không tín hiệu rõ ràng"
 
     # ====== Lọc ALERT 1h nếu volume thấp ======
     if signal_type == "ALERT" and interval == "1h":
         if volume < 0.6 * vol_ma:
+            indicators["tag"] = "avoid"
             return "HOLD", "Volume thấp hơn 60% MA20 → bỏ ALERT"
 
-    # ====== Phân loại SCALP / SWING ======
-    tag = "SCALP"
-    if adx and adx > 25 and rsi_1h and rsi_4h:
-        if (rsi_1h > 50 and rsi_4h > 50) or (rsi_1h < 50 and rsi_4h < 50):
-            tag = "SWING"
+    # ====== Gán tag 7 cấp độ ======
+    tag = "hold"  # Mặc định trung lập
+    if signal_type in ["ALERT", "CRITICAL"]:
+        if trend == "downtrend" and rsi > 70 and rsi_div == "bearish":
+            tag = "short_strong"
+        elif trend == "downtrend" and rsi > 60:
+            tag = "short_soft"
+        elif trend == "uptrend" and rsi > 60 and cmf and cmf > 0.05:
+            tag = "buy_strong"
+        elif adx > 25 and (rsi_1h and rsi_4h) and (rsi_1h > 50 and rsi_4h > 50):
+            tag = "swing_trade"
+        elif volume > 1.5 * vol_ma:
+            tag = "scalp"
+        else:
+            tag = "hold"
+    elif signal_type == "HOLD":
+        if adx < 15 or cmf < -0.05:
+            tag = "avoid"
 
-    return signal_type, f"{tag} → {' + '.join(reasons)}"
+    indicators["tag"] = tag
+    return signal_type, " + ".join(reasons)
+

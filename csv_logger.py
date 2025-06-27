@@ -1,12 +1,12 @@
+# csv_logger.py
 import os
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import timezone, timedelta
 
 VN_TZ = timezone(timedelta(hours=7))
 CSV_PATH = "output/signal_log.csv"
-LOG_DIR = "log"
 
-def log_to_csv(symbol, interval, signal, tag, price, trade_plan):
+def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp):
     os.makedirs("output", exist_ok=True)
 
     entry = trade_plan.get("entry", 0)
@@ -14,18 +14,21 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan):
     sl = trade_plan.get("sl", 0)
     trade_plan_str = f"{entry}/{tp}/{sl}"
 
+    # Gộp entry/exit/pnl lại → tách riêng status
+    entry_exit_pnl = "0/0/0"
+    status = "No"
+
     log_entry = {
-        "timestamp": datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": timestamp,
         "symbol": str(symbol) if symbol else "No",
         "interval": str(interval) if interval else "No",
         "signal": str(signal) if signal else "No",
         "tag": str(tag) if tag else "No",
         "price": price if price is not None else 0,
         "trade_plan": trade_plan_str,
-        "real_entry": 0,
-        "real_exit": 0,
-        "pnl_percent": 0,
-        "status": "No"
+        "entry_exit_pnl": entry_exit_pnl,
+        "status": status,
+        "money": 0  # ✅ Trường mới
     }
 
     df_new = pd.DataFrame([log_entry])
@@ -44,12 +47,12 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan):
     print(f"✅ Ghi CSV: {log_entry['symbol']}-{log_entry['interval']} @ {log_entry['price']} | Time VN: {log_entry['timestamp']}")
     return df_combined.tail(1)
 
-def write_named_log(text, filename):
+def write_named_log(content: str, filename: str):
+    from datetime import datetime
     today = datetime.now(VN_TZ).strftime("%Y-%m-%d")
-    folder_path = os.path.join(LOG_DIR, today)
-    os.makedirs(folder_path, exist_ok=True)
-
-    full_path = os.path.join(folder_path, filename)
-    with open(full_path, "w", encoding="utf-8") as f:
-        f.write(text)
+    log_dir = os.path.join("log", today)
+    os.makedirs(log_dir, exist_ok=True)
+    file_path = os.path.join(log_dir, filename)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
