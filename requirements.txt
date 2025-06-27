@@ -6,4 +6,4 @@ schedule
 websocket-client
 gspread
 oauth2client
-
+gspread-formatting

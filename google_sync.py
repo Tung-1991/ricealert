@@ -5,6 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from gspread_formatting import CellFormat, TextFormat, format_cell_range  # ✅ THÊM
 
 load_dotenv()
 
@@ -57,7 +58,22 @@ def sync_csv_to_google_sheet():
     # 📊 Đọc và append
     df = pd.read_csv(CSV_PATH)
     rows = df.values.tolist()
+
+    # 🔢 Đếm dòng hiện tại trước khi append
+    existing_rows = len(worksheet.get_all_values())
+
+    # ⬇️ Append dữ liệu
     worksheet.append_rows(rows, value_input_option="USER_ENTERED")
+
+    # 🎯 Tính vùng cần format
+    start_row = existing_rows + 1
+    end_row = existing_rows + len(rows)
+    range_str = f"A{start_row}:J{end_row}"
+
+    # 📐 Áp dụng font size 12 cho dòng mới
+    fmt = CellFormat(textFormat=TextFormat(fontSize=12))
+    format_cell_range(worksheet, range_str, fmt)
+
     print(f"[SYNC] Đã append {len(rows)} dòng lên Google Sheet: {sheet_name}")
 
     # ❌ Xóa CSV sau sync
@@ -66,4 +82,3 @@ def sync_csv_to_google_sheet():
 
 if __name__ == "__main__":
     sync_csv_to_google_sheet()
-

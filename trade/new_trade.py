@@ -96,10 +96,12 @@ if __name__ == "__main__":
             print("📥 Dán dòng 1 từ Excel (timestamp<TAB>symbol<TAB>interval):")
             line1 = input(">>> ")
             parts = re.split(r"\s+", line1.strip())
-            if len(parts) != 3:
+            if len(parts) < 4:
                 print("❌ Dòng nhập không hợp lệ, cần định dạng: timestamp    SYMBOL    interval")
                 exit(1)
-            timestamp, symbol, interval = parts
+            timestamp = parts[0] + " " + parts[1]
+            symbol = parts[2].upper()
+            interval = parts[3]
 
             plan = input("📥 Dán dòng 2: trade_plan (entry/tp/sl):\n>>> ").strip()
             entry, tp, sl = [float(x.strip()) for x in plan.split("/")]
@@ -110,7 +112,7 @@ if __name__ == "__main__":
 
             trade = {
                 "id": timestamp,
-                "symbol": symbol.upper(),
+                "symbol": symbol,
                 "interval": interval,
                 "trade_plan": plan,
                 "entry": entry,
@@ -136,11 +138,13 @@ if __name__ == "__main__":
             print("📥 Dán dòng từ Excel: timestamp<TAB>symbol<TAB>interval:")
             line = input(">>> ").strip()
             parts = re.split(r"\s+", line)
-            if len(parts) != 3:
+            if len(parts) < 4:
                 print("❌ Dòng nhập không hợp lệ, cần định dạng: timestamp    SYMBOL    interval")
                 exit(1)
-            timestamp, symbol, interval = parts
-            update_trade_to_closed(timestamp, symbol.upper(), interval)
+            timestamp = parts[0] + " " + parts[1]
+            symbol = parts[2].upper()
+            interval = parts[3]
+            update_trade_to_closed(timestamp, symbol, interval)
         except Exception as e:
             print(f"❌ Lỗi: {e}")
 
