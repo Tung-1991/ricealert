@@ -178,7 +178,8 @@ def main():
                     level = "CRITICAL" if "CRITICAL" in alert_levels else "ALERT"
                     icon = "🚨" if level == "CRITICAL" else "📣"
                     title = f"{icon} [{symbol}] **{level}** từ khung {', '.join(sendable_intervals)} | ⏱️ {now_str}"
-                    report_text = f"{title}\n\n{report_text}"
+                    order_id_lines = "\n".join([f"🆔 ID: {now_str} {symbol} {iv}" for iv in sendable_intervals])
+                    report_text = f"{title}\n{order_id_lines}\n\n{report_text}"
                 send_discord_alert(report_text)
                 time.sleep(3)
 
@@ -193,4 +194,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
