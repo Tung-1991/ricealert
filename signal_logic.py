@@ -20,6 +20,7 @@ def check_signal(indicators: dict) -> tuple:
     interval = indicators.get("interval")
     rsi_1h = indicators.get("rsi_1h")
     rsi_4h = indicators.get("rsi_4h")
+    fibo_0618 = indicators.get("fibo_0618")
 
     if any(v is None for v in [rsi, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma, macd_cross, adx]):
         indicators["tag"] = "avoid"
@@ -77,6 +78,10 @@ def check_signal(indicators: dict) -> tuple:
     if candle == "shooting_star":
         reasons.append("Shooting Star → đỉnh tiềm năng")
 
+    # ====== Fibo xác nhận ======
+    if fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+        reasons.append("Giá gần Fibo 0.618 → vùng hỗ trợ/kháng cự quan trọng")
+
     # ====== Tổng hợp tín hiệu ======
     signal_type = "HOLD"
     if any("RSI" in r or "MACD" in r or "Phân kỳ" in r for r in reasons if "Doji" in r or "trend" in r):
@@ -106,6 +111,8 @@ def check_signal(indicators: dict) -> tuple:
             tag = "swing_trade"
         elif volume > 1.5 * vol_ma:
             tag = "scalp"
+        elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+            tag = "fibo_retest"
         else:
             tag = "hold"
     elif signal_type == "HOLD":
@@ -114,4 +121,3 @@ def check_signal(indicators: dict) -> tuple:
 
     indicators["tag"] = tag
     return signal_type, " + ".join(reasons)
-
