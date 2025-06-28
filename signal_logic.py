@@ -22,102 +22,116 @@ def check_signal(indicators: dict) -> tuple:
     rsi_4h = indicators.get("rsi_4h")
     fibo_0618 = indicators.get("fibo_0618")
 
-    if any(v is None for v in [rsi, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma, macd_cross, adx]):
+    required_fields = [rsi, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma,
+                       macd_cross, adx, rsi_1h, rsi_4h, trend, cmf]
+    if any(v is None for v in required_fields):
         indicators["tag"] = "avoid"
         return "HOLD", "Thiếu dữ liệu"
 
     reasons = []
-
-    # ====== Rule CRITICAL ======
-    if rsi < 30 and macd_cross == "bullish" and doji == "dragonfly" and adx > 20:
-        reasons.append("RSI < 30 + MACD crossover lên + Dragonfly Doji + Trend mạnh")
-    if rsi > 70 and macd_cross == "bearish" and doji == "gravestone" and adx > 20:
-        reasons.append("RSI > 70 + MACD crossover xuống + Gravestone Doji + Trend mạnh")
-    if rsi_1h and rsi_4h and rsi_1h < 30 and rsi_4h < 30:
-        reasons.append("RSI 1h và 4h cùng < 30 → xu hướng đảo chiều mạnh (BUY)")
-    if rsi_1h and rsi_4h and rsi_1h > 70 and rsi_4h > 70:
-        reasons.append("RSI 1h và 4h cùng > 70 → xu hướng đảo chiều mạnh (SELL)")
-
-    # ====== Rule ALERT ======
-    if rsi > 70 and price >= bb_upper and adx > 20:
-        reasons.append("RSI quá cao + giá chạm BB trên + trend mạnh")
-    if rsi < 30 and price <= bb_lower and adx > 20:
-        reasons.append("RSI quá thấp + giá chạm BB dưới + trend mạnh")
-    if doji in ["long_legged", "common"] and abs(volume - vol_ma) > 1.5 * vol_ma:
-        reasons.append("Doji + Volume spike bất thường")
-    if rsi_div == "bullish":
-        reasons.append("Phân kỳ RSI dương → khả năng đảo chiều tăng")
-    if rsi_div == "bearish":
-        reasons.append("Phân kỳ RSI âm → khả năng đảo chiều giảm")
-    if volume > 2 * vol_ma:
-        reasons.append("Khối lượng tăng đột biến → breakout tiềm năng")
-    if adx < 15:
-        reasons.append("Trend yếu (ADX < 15) → thị trường sideway, dễ nhiễu")
-    if rsi > 70 and macd_cross == "bearish" and price >= bb_upper:
-        reasons.append("RSI cao + MACD bearish + giá chạm BB trên → đảo chiều giảm")
-    if rsi < 30 and macd_cross == "bullish" and price <= bb_lower:
-        reasons.append("RSI thấp + MACD bullish + giá chạm BB dưới → đảo chiều tăng")
-
-    # ====== Trend + CMF confirm ======
-    if trend == "downtrend" and rsi < 40:
-        reasons.append("Xu hướng giảm → hạn chế vào lệnh BUY")
-    if trend == "uptrend" and rsi > 60:
-        reasons.append("Xu hướng tăng → xác nhận BUY mạnh")
-    if cmf and cmf > 0.05:
-        reasons.append("CMF > 0.05 → dòng tiền vào mạnh")
-    if cmf and cmf < -0.05:
-        reasons.append("CMF < -0.05 → dòng tiền rút mạnh")
-
-    # ====== Candlestick xác nhận ======
-    if candle == "bullish_engulfing":
-        reasons.append("Bullish Engulfing → đảo chiều tăng")
-    if candle == "bearish_engulfing":
-        reasons.append("Bearish Engulfing → đảo chiều giảm")
-    if candle == "hammer":
-        reasons.append("Hammer → đáy tiềm năng")
-    if candle == "shooting_star":
-        reasons.append("Shooting Star → đỉnh tiềm năng")
-
-    # ====== Fibo xác nhận ======
-    if fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
-        reasons.append("Giá gần Fibo 0.618 → vùng hỗ trợ/kháng cự quan trọng")
-
-    # ====== Tổng hợp tín hiệu ======
     signal_type = "HOLD"
-    if any("RSI" in r or "MACD" in r or "Phân kỳ" in r for r in reasons if "Doji" in r or "trend" in r):
+
+    # ========== CRITICAL ========== (nới nhẹ điều kiện)
+    if rsi_1h < 32 and rsi_4h < 32:
+        reasons.append("RSI 1h và 4h cùng < 32 → BUY đảo chiều mạnh")
         signal_type = "CRITICAL"
-    elif reasons:
+    elif rsi_1h > 68 and rsi_4h > 68:
+        reasons.append("RSI 1h và 4h cùng > 68 → SELL đảo chiều mạnh")
+        signal_type = "CRITICAL"
+    elif (
+        rsi < 32 and macd_cross == "bullish"
+        and doji in ["dragonfly", "long_legged"] and adx > 20
+        and price < bb_lower and volume > vol_ma
+    ):
+        reasons.append("RSI < 32 + MACD bullish + Doji + BB dưới + volume tốt")
+        signal_type = "CRITICAL"
+    elif (
+        rsi > 68 and macd_cross == "bearish"
+        and doji in ["gravestone", "long_legged"] and adx > 20
+        and price > bb_upper and volume > vol_ma
+    ):
+        reasons.append("RSI > 68 + MACD bearish + Doji + BB trên + volume cao")
+        signal_type = "CRITICAL"
+
+    # ========== WARNING ========== (nới volume, RSI, ADX)
+    elif (
+        rsi_div in ["bullish", "bearish"]
+        and abs(volume - vol_ma) > vol_ma
+        and trend
+        and (rsi < 45 or rsi > 55)
+    ):
+        reasons.append(f"Phân kỳ RSI {rsi_div} + volume bất thường + trend rõ ràng")
+        signal_type = "WARNING"
+    elif (
+        volume > 1.5 * vol_ma and macd_cross in ["bullish", "bearish"]
+        and (rsi > 55 or rsi < 45)
+    ):
+        reasons.append("Breakout volume + MACD cross + RSI mạnh")
+        signal_type = "WARNING"
+
+    # ========== ALERT ========== (nới RSI, BB, ADX)
+    elif rsi > 68 and price >= bb_upper * 0.995 and adx > 18:
+        reasons.append("RSI cao + BB gần trên + ADX > 18")
         signal_type = "ALERT"
-    else:
+    elif rsi < 32 and price <= bb_lower * 1.005 and adx > 18:
+        reasons.append("RSI thấp + BB gần dưới + ADX > 18")
+        signal_type = "ALERT"
+    elif rsi > 68 and macd_cross == "bearish" and price >= bb_upper * 0.995:
+        reasons.append("RSI cao + MACD bearish + BB gần trên")
+        signal_type = "ALERT"
+    elif rsi < 32 and macd_cross == "bullish" and price <= bb_lower * 1.005:
+        reasons.append("RSI thấp + MACD bullish + BB gần dưới")
+        signal_type = "ALERT"
+
+    # ========== WATCHLIST ==========
+    elif doji in ["long_legged", "common"] and abs(volume - vol_ma) > 1.2 * vol_ma:
+        reasons.append("Doji + Volume khác biệt")
+        signal_type = "WATCHLIST"
+    elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+        reasons.append("Giá gần Fibo 0.618")
+        signal_type = "WATCHLIST"
+    elif adx < 15:
+        reasons.append("ADX < 15 → sideway")
+        signal_type = "WATCHLIST"
+    elif trend == "uptrend" and rsi > 60:
+        reasons.append("Trend tăng + RSI cao")
+        signal_type = "WATCHLIST"
+    elif trend == "downtrend" and rsi < 40:
+        reasons.append("Trend giảm + RSI thấp")
+        signal_type = "WATCHLIST"
+    elif cmf > 0.05:
+        reasons.append("CMF > 0.05 → dòng tiền vào")
+        signal_type = "WATCHLIST"
+    elif cmf < -0.05:
+        reasons.append("CMF < -0.05 → dòng tiền rút")
+        signal_type = "WATCHLIST"
+    elif abs(price - ema) / ema < 0.005:
+        reasons.append("Giá gần EMA20 → theo dõi")
+        signal_type = "WATCHLIST"
+
+    # ========== Lọc tín hiệu yếu theo khung 1h ==========
+    if signal_type != "HOLD" and interval == "1h" and volume < 0.6 * vol_ma:
         indicators["tag"] = "avoid"
-        return "HOLD", "Không tín hiệu rõ ràng"
+        return "HOLD", "Volume thấp hơn 60% MA20 → bỏ cảnh báo"
 
-    # ====== Lọc ALERT 1h nếu volume thấp ======
-    if signal_type == "ALERT" and interval == "1h":
-        if volume < 0.6 * vol_ma:
-            indicators["tag"] = "avoid"
-            return "HOLD", "Volume thấp hơn 60% MA20 → bỏ ALERT"
-
-    # ====== Gán tag 7 cấp độ ======
-    tag = "hold"  # Mặc định trung lập
-    if signal_type in ["ALERT", "CRITICAL"]:
-        if trend == "downtrend" and rsi > 70 and rsi_div == "bearish":
-            tag = "short_strong"
-        elif trend == "downtrend" and rsi > 60:
-            tag = "short_soft"
-        elif trend == "uptrend" and rsi > 60 and cmf and cmf > 0.05:
-            tag = "buy_strong"
-        elif adx > 25 and (rsi_1h and rsi_4h) and (rsi_1h > 50 and rsi_4h > 50):
-            tag = "swing_trade"
-        elif volume > 1.5 * vol_ma:
-            tag = "scalp"
-        elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
-            tag = "fibo_retest"
-        else:
-            tag = "hold"
-    elif signal_type == "HOLD":
-        if adx < 15 or cmf < -0.05:
-            tag = "avoid"
+    # ========== Gán tag ==========
+    tag = "hold"
+    if trend == "downtrend" and rsi > 70 and rsi_div == "bearish":
+        tag = "short_strong"
+    elif trend == "downtrend" and rsi > 60:
+        tag = "short_soft"
+    elif trend == "uptrend" and rsi > 60 and cmf > 0.05:
+        tag = "buy_strong"
+    elif adx > 25 and rsi_1h > 50 and rsi_4h > 50:
+        tag = "swing_trade"
+    elif volume > 1.5 * vol_ma:
+        tag = "scalp"
+    elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+        tag = "fibo_retest"
+    elif adx < 15 or cmf < -0.05:
+        tag = "avoid"
+    elif trend == "uptrend" and volume > 2 * vol_ma and rsi > 70 and macd_cross == "bullish":
+        tag = "fomo_breakout"
 
     indicators["tag"] = tag
     return signal_type, " + ".join(reasons)

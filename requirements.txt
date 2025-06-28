@@ -7,3 +7,7 @@ websocket-client
 gspread
 oauth2client
 gspread-formatting
+requests
+beautifulsoup4
+lxml
+feedparser

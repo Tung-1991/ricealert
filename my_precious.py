@@ -6,6 +6,8 @@ from datetime import datetime
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 from dotenv import load_dotenv
+import time
+
 
 load_dotenv()
 
@@ -15,15 +17,50 @@ LOG_DIR = os.path.join(ADVISOR_DIR, "log")
 os.makedirs(ADVISOR_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
+NEWS_DIR = "/root/ricealert/ricenews/lognew"
+
 def send_discord_alert(message, webhook_name="DISCORD_PRECIOUS"):
     url = os.getenv(webhook_name)
     if not url:
         print(f"[ERROR] Webhook {webhook_name} not found in .env")
         return
-    try:
-        requests.post(url, json={"content": message}, timeout=10)
-    except Exception as e:
-        print(f"[ERROR] Discord send failed: {e}")
+    chunks = [message[i:i+1900] for i in range(0, len(message), 1900)]
+    for i, chunk in enumerate(chunks):
+        try:
+            requests.post(url, json={"content": chunk}, timeout=10)
+            if i < len(chunks) - 1:
+                time.sleep(3)
+        except Exception as e:
+            print(f"[ERROR] Discord send failed: {e}")
+
+
+def load_news_for_symbol(symbol):
+    today_file = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
+    if not os.path.exists(today_file):
+        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
+
+    with open(today_file, "r", encoding="utf-8") as f:
+        news_data = json.load(f)
+
+    symbol_tag = symbol.lower()
+    coin_news = [n for n in news_data if n.get("category_tag") == symbol_tag]
+    macro_news = [n for n in news_data if n.get("category_tag") == "macro"]
+
+    if coin_news:
+        lines = [f"📰 Tin tức liên quan {symbol.upper()}:"]
+        for n in coin_news[:2]:
+            prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
+            lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
+        return "\n".join(lines)
+    elif macro_news:
+        lines = ["🌐 Có một số tin tức vĩ mô có thể ảnh hưởng chung đến thị trường:"]
+        for n in macro_news[:2]:
+            prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
+            lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
+        return "\n".join(lines)
+    else:
+        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
+
 
 def parse_trade_plan(plan_str):
     try:
@@ -184,6 +221,8 @@ def main():
         score = calc_score(indicators)
         ind_text = generate_indicator_text(indicators)
         advice_text = generate_advice(pnl, indicators)
+        news_summary = load_news_for_symbol(symbol)
+
 
         # 👇 Thêm phân tích đa timeframe (1h + 1d)
         extra_tf = {}
@@ -230,6 +269,9 @@ def main():
             "last_sent": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
+        coin_amount = round(amount / real_entry, 2)
+        current_value = round(amount + pnl_usd, 2)
+
         if should_send:
             # Phân loại alert
             if pnl > 2 or score >= 7:
@@ -242,13 +284,18 @@ def main():
             msg = f"""{alert_tag} Đánh giá lệnh: {symbol} ({interval})
 📌 ID: {trade_id} {symbol} {interval}
 📆 In time: {in_time} | Đã giữ: {held} giờ | RealEntry: {real_entry}
-💰 PnL: {pnl_usd} USD ({pnl}%) | 💼 Hiện tại: {amount + pnl_usd:.2f} | Vốn: {amount}
+💰 PnL: {pnl_usd} USD ({pnl}%) | 📦 {coin_amount} | 💵 {current_value}/{amount}
+
 
 📊 Phân tích kỹ thuật ({interval})
 {ind_text}
 
 🧠 Nhận định & Gợi ý
-{advice_text}"""
+{advice_text}
+
+🗞️ Tin tức liên quan:
+{news_summary}
+"""
 
             if extra_tf:
                 tf_lines = []
@@ -261,13 +308,60 @@ def main():
         advisor_map[trade_id] = new_entry
 
         if is_overview_time():
-            overview_lines.append(f"🔹 {symbol:<8} ({interval:>2}) | PnL: {pnl:>6}% | Score: {score} | Giữ: {held}h")
+            coin_amount = round(amount / real_entry, 2)
+            current_value = round(amount + pnl_usd, 2)
+            in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
+            in_hour = in_dt.strftime("%H:%M")
+            in_date = in_dt.strftime("%Y-%m-%d")
+
+            if score >= 8:
+                score_icon = "🟦"
+            elif score >= 6:
+                score_icon = "🟩"
+            elif score >= 3:
+                score_icon = "🟨"
+            else:
+                score_icon = "🟥"
+
+            line0 = f"📌 ID: {trade_id} {symbol} {interval}"
+            line1 = f"🔹 {symbol} {interval} | 🎯 {real_entry} | 💰 {pnl}% | 📦 {coin_amount} | 💵 {current_value}/{amount} | 🧠 {score} {score_icon}"
+            line2 = f"🕒 In: {in_hour} | Giữ: {held}h | Vào: {in_date}"
+            line3 = f"🎯 Entry: {real_entry} | 🎯 TP: {plan['tp']} | 🛡 SL: {plan['sl']}"
+            overview_lines.append("\n".join([line0, line1, line2, line3]))
 
     if is_overview_time() and overview_lines:
-        send_discord_alert("📋 **Tổng quan danh mục đang mở**\n" + "\n".join(overview_lines))
+        total_start = sum([t["amount"] for t in advisor_map.values() if t.get("status") == "open"])
+        total_now = sum([round(t["amount"] + t["pnl_usd"], 2) for t in advisor_map.values() if t.get("status") == "open"])
+        total_count = len(overview_lines)
+
+        # --- Thêm trending từ news
+        trending_line = ""
+        try:
+            today_file = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
+            with open(today_file, "r", encoding="utf-8") as f:
+                news_items = json.load(f)
+            from collections import Counter
+            import string
+            STOPWORDS = {"the", "of", "in", "to", "on", "and", "for", "with", "from", "this", "that", "will", "by", "as", "a", "an", "is"}
+            words = []
+            for item in news_items:
+                title = item.get("title", "").lower().translate(str.maketrans("", "", string.punctuation)).split()
+                words += [w for w in title if w not in STOPWORDS and len(w) > 2]
+            top3 = [w for w, _ in Counter(words).most_common(3)]
+            if top3:
+                trending_line = "🔥 Từ khóa nóng: " + ", ".join(top3)
+        except:
+            pass
+
+        header = f"📋 **Đang có {total_count} lệnh đang mở | Tổng: {total_now}/{total_start} USD**"
+        if trending_line:
+            header = trending_line + "\n" + header
+
+        send_discord_alert(header + "\n" + "\n".join(overview_lines))
+
+
 
     save_daily_log(advisor_file, list(advisor_map.values()))
 
 if __name__ == "__main__":
     main()
-

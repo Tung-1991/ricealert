@@ -7,3 +7,5 @@ log/
 ricealert-ec406ac4f2f7.json
 trade/tradelog/
 advisor_log/
+ricenews/lognew/
+ricenews/cooldown_tracker.json

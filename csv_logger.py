@@ -47,12 +47,8 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp):
     print(f"✅ Ghi CSV: {log_entry['symbol']}-{log_entry['interval']} @ {log_entry['price']} | Time VN: {log_entry['timestamp']}")
     return df_combined.tail(1)
 
-def write_named_log(content: str, filename: str):
-    from datetime import datetime
-    today = datetime.now(VN_TZ).strftime("%Y-%m-%d")
-    log_dir = os.path.join("log", today)
-    os.makedirs(log_dir, exist_ok=True)
-    file_path = os.path.join(log_dir, filename)
+def write_named_log(content: str, file_path: str):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
