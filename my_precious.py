@@ -266,7 +266,8 @@ def main():
             "score": score,
             "indicators_summary": ind_text,
             "strategy": advice_text,
-            "last_sent": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "last_sent": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "open"
         }
 
         coin_amount = round(amount / real_entry, 2)

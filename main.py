@@ -106,8 +106,8 @@ def format_symbol_report(symbol, indicator_dict):
 🔺 Trend: {trend}
 💸 CMF: {cmf}
 🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''}"""
-
-        if signal in ["ALERT", "CRITICAL"]:
+        
+        if trade_plan:
             block += f"""
 🎯 **Trade Plan**
 - Entry: {trade_plan.get('entry')}
@@ -208,6 +208,9 @@ def main():
             log_lines.append(report_text)
 
             if should_report or sendable_intervals:
+                if should_report:
+                    portfolio_lines = render_portfolio()
+                    report_text = "\n".join(portfolio_lines) + "\n\n" + report_text
                 if sendable_intervals:
                     highest = "CRITICAL" if "CRITICAL" in alert_levels else \
                               "WARNING" if "WARNING" in alert_levels else \

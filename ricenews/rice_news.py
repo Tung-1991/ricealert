@@ -193,7 +193,7 @@ def send_daily_summary():
     except:
         return
 
-    summary = {"CRITICAL": [], "WARNING": [], "ALERT": []}
+    summary = {"CRITICAL": [], "WARNING": [], "ALERT": [], "WATCHLIST": []}
     for item in logs:
         if item.get("level") in summary:
             summary[item["level"].upper()].append(item)
@@ -205,7 +205,7 @@ def send_daily_summary():
     msg = f"\n📊 **Daily News Summary - {datetime.now(VN_TZ).strftime('%d/%m')}**\n"
     for lvl, count in count_summary.items():
         if count:
-            emoji = "🔴" if lvl == "CRITICAL" else "⚠️" if lvl == "WARNING" else "📣"
+            emoji = {"CRITICAL": "🔴", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}.get(lvl, "ℹ️")
             msg += f"- {emoji} {lvl}: {count} tin\n"
     msg += f"\n💡 Suggestion: {suggestion}\n📈 Trend: **{trend}**\n\n📰 Chi tiết:\n"
     for lvl, items in summary.items():
