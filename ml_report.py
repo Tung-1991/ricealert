@@ -128,10 +128,10 @@ def analyze_symbol(symbol, interval, cooldown_data):
             "interval": interval,
             "score": round(prob * 100, 2),
             "pct": round(pct, 2),
-            "price": round(price, 4),
-            "entry": round(entry, 4),
-            "tp": round(tp, 4),
-            "sl": round(sl, 4),
+            "price": round(price, 8),
+            "entry": round(entry, 8),
+            "tp": round(tp, 8),
+            "sl": round(sl, 8),
             "level": level,
             "level_icon": level_icon,
             "timestamp": now.isoformat(),
@@ -165,8 +165,8 @@ def generate_report():
                     f"➡️ {result['symbol']} [{result['interval']}] {result['level_icon']}\n"
                     f"🧠 Score: {result['score']}%\n"
                     f"📊 Dự đoán: {result['pct']}%\n"
-                    f"💰 Giá: {result['price']} | Entry: {result['entry']}\n"
-                    f"🎯 TP: {result['tp']} | 🛡️ SL: {result['sl']}\n"
+                    f"💰 Giá: {result['price']:.8f} | Entry: {result['entry']:.8f}\n"
+                    f"🎯 TP: {result['tp']:.8f} | 🛡️ SL: {result['sl']:.8f}\n"
                     f"📝 {result['summary']}\n"
                 )
                 report_lines.append(line)

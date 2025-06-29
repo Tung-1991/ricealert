@@ -92,7 +92,7 @@ def format_symbol_report(symbol, indicator_dict):
         signal, reason = check_signal(ind)
 
         block = f"""📊 **{symbol} ({interval})**
-🔹 Price: {ind['price']}
+🔹 Price: {ind['price']:.8f}
 📈 EMA20: {ind['ema_20']}
 💪 RSI14: {ind['rsi_14']} ({rsi_div})
 📉 MACD Line: {ind['macd_line']}
@@ -106,13 +106,18 @@ def format_symbol_report(symbol, indicator_dict):
 🔺 Trend: {trend}
 💸 CMF: {cmf}
 🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''}"""
-        
+
         if trade_plan:
+            entry = trade_plan.get("entry", 0)
+            tp = trade_plan.get("tp", 0)
+            sl = trade_plan.get("sl", 0)
+
             block += f"""
 🎯 **Trade Plan**
-- Entry: {trade_plan.get('entry')}
-- TP:     {trade_plan.get('tp')}
-- SL:     {trade_plan.get('sl')}"""
+- Entry: {entry:.8f}
+- TP:     {tp:.8f}
+- SL:     {sl:.8f}"""
+
         blocks.append(block)
 
     return "\n\n".join(blocks)

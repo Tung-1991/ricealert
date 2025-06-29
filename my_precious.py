@@ -160,18 +160,24 @@ def calc_score(ind):
     if ind.get("tag") in ["buy_strong", "short_strong", "swing_trade"]: score += 2
     return min(score, 10)
 
+def format_price(price):
+    if not isinstance(price, (int, float)):
+        return price
+    return f"{price:.8f}" if price < 0.1 else f"{price:.4f}"
+
 def generate_indicator_text(ind):
     return "\n".join([
-        f"🔹 Giá hiện tại: {ind['price']} | Entry: {ind['trade_plan']['entry']} TP: {ind['trade_plan']['tp']} SL: {ind['trade_plan']['sl']}",
+        f"🔹 Giá hiện tại: {format_price(ind['price'])} | Entry: {format_price(ind['trade_plan']['entry'])} TP: {format_price(ind['trade_plan']['tp'])} SL: {format_price(ind['trade_plan']['sl'])}",
         f"📈 EMA20: {round_num(ind['ema_20'])}  💪 RSI14: {round_num(ind['rsi_14'])} → {'quá mua' if ind['rsi_14'] > 70 else 'quá bán' if ind['rsi_14'] < 30 else 'trung tính'}",
         f"📉 MACD: {round_num(ind['macd_line'],3)} vs Signal: {round_num(ind['macd_signal'],3)} → {ind['macd_cross']}",
         f"📊 ADX: {round_num(ind['adx'],1)} → {'rõ' if ind['adx'] > 20 else 'yếu'}",
         f"🔊 Volume: {int(ind['volume']):,} / MA20: {int(ind['vol_ma20']):,}",
         f"💸 CMF: {round_num(ind['cmf'],3)}",
         f"🌀 Fibo 0.618: {round_num(ind['fib_0_618'],4)}",
-        f"🕯️ Nến: {ind.get('doji_type') or 'None'}",
-        f"🔺 Trend: {ind['trend']}"
+        f"🔧 Nến: {ind.get('doji_type') or 'None'}",
+        f"⬆️ Trend: {ind['trend']}"
     ])
+
 
 def describe_market(ind):
     rsi = ind["rsi_14"]

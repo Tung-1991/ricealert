@@ -78,8 +78,8 @@ def send_discord_log(trade):
         f"🆕 [{status}] Lệnh mới\n"
         f"📌 ID: {trade['id']}\t{trade['symbol']}\t{trade['interval']}\n"
         f"📆 In time: {in_time}\n"
-        f"📊 Plan: Entry {trade['entry']} → TP {trade['tp']} → SL {trade['sl']}\n"
-        f"💰 Entry: {trade['real_entry']} | Vốn: {trade['amount']} USD\n"
+        f"📊 Plan: Entry {trade['entry']:.8f} → TP {trade['tp']:.8f} → SL {trade['sl']:.8f}\n"
+        f"💰 Entry: {trade['real_entry']:.8f} | Vốn: {trade['amount']} USD\n"
         f"🧮 Khối lượng: {coin_qty} {trade['symbol'].replace('USDT','')}\n"
         f"📥 CSV: {csv_line}"
     )

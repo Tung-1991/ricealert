@@ -12,7 +12,7 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp):
     entry = trade_plan.get("entry", 0)
     tp = trade_plan.get("tp", 0)
     sl = trade_plan.get("sl", 0)
-    trade_plan_str = f"{entry}/{tp}/{sl}"
+    trade_plan_str = f"{entry:.8f}/{tp:.8f}/{sl:.8f}"
 
     # Gộp entry/exit/pnl lại → tách riêng status
     entry_exit_pnl = "0/0/0"

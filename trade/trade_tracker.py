@@ -60,10 +60,10 @@ def send_discord_result(trade, status_override=None):
         f"{icon} Lệnh đã đóng\n"
         f"📌 ID: {trade['id']}\t{trade['symbol']}\t{trade['interval']}\n"
         f"📆 Out time: {out_time} | ⏱️ Đã giữ: {hold_time}\n"
-        f"💰 Entry: {entry} → Exit: {exit_price}\n"
+        f"💰 Entry: {entry:.8f} → Exit: {exit_price:.8f}\n"
         f"🧮 Khối lượng: {coin_qty} {trade['symbol'].replace('USDT','')} | Vốn: {amount} USD\n"
         f"{'📈' if pnl >= 0 else '📉'} PnL: {pnl:+}% → {pnl_usd:+} USD | Tiền: {final_amount} USD\n"
-        f"📋 Result: {entry}/{exit_price}/{pnl:+}"
+        f"📋 Result: {entry:.8f}/{exit_price:.8f}/{pnl:+}"
     )
 
     requests.post(WEBHOOK_URL, json={"content": content})
