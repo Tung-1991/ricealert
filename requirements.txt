@@ -11,3 +11,7 @@ requests
 beautifulsoup4
 lxml
 feedparser
+lightgbm
+scikit-learn
+requests
+joblib
