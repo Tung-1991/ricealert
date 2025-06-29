@@ -86,6 +86,7 @@ def build_dataset(symbol, interval):
 
 def train_and_save(symbol, interval, X, y_clf, y_reg):
     features = X.drop(columns=["timestamp"]).columns.tolist()
+    features = [f for f in features if f not in ["entry", "tp", "sl"]]
     clf = lgb.LGBMClassifier(n_jobs=-1, class_weight='balanced', verbose=-1)
     clf.fit(X[features], y_clf)
     reg = lgb.LGBMRegressor(n_jobs=-1, verbose=-1)
