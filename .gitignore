@@ -9,3 +9,5 @@ trade/tradelog/
 advisor_log/
 ricenews/lognew/
 ricenews/cooldown_tracker.json
+ai_logs/
+cooldown_tracker_ml.json

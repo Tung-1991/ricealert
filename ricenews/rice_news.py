@@ -153,7 +153,8 @@ def save_news(news, signal=False):
     except:
         logs = []
 
-    exists = any(item.get('id') == news['id'] for item in logs)
+
+    exists = any(news['id'] == i.get('id') or news['title'] == i.get('title') for i in logs)
     if not exists:
         news['agent_tracking'] = 'open'
         logs.insert(0, news)
