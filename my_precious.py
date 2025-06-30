@@ -1,4 +1,3 @@
-(venv) root@ricealert:~/ricealert$cat my_precious.py
 # -*- coding: utf-8 -*-
 import os
 import json
