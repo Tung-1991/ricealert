@@ -139,7 +139,7 @@ def main():
     #should_report = True
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    log_date_dir = os.path.join("log", now.strftime("%Y-%m-%d"))
+    log_date_dir = os.path.join(BASE_DIR, "log", now.strftime("%Y-%m-%d"))
     os.makedirs(log_date_dir, exist_ok=True)
 
     cached_data = {"1h": {}, "4h": {}, "1d": {}}
