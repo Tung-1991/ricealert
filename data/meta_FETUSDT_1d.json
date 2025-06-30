@@ -1,0 +1,20 @@
+{
+  "features": [
+    "price",
+    "ema_20",
+    "ema_50",
+    "rsi_14",
+    "bb_upper",
+    "bb_lower",
+    "macd_line",
+    "macd_signal",
+    "adx",
+    "volume",
+    "vol_ma20",
+    "cmf",
+    "fib_0_618"
+  ],
+  "threshold": 0.6,
+  "scale_pos_weight": 1.6388888888888888,
+  "trained_at": "2025-06-30T13:47:07.184337+00:00"
+}
