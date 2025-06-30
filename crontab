@@ -1,25 +1,15 @@
 # Xóa folder trong log quá 30 ngày
 0 3 * * * find /root/ricealert/log -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
-
-# Xóa file log hoặc .bak quá 30 ngày
 1 3 * * * find /root/ricealert/log -type f \( -name "*.log" -o -name "*.bak" \) -mtime +30 -delete
-
-# Dọn advisor log cũ
 1 3 * * * find /root/ricealert/advisor_log -type f -mtime +30 -delete
 2 3 * * * find /root/ricealert/advisor_log/log -type f -mtime +30 -delete
-
-# Dọn tin tức cũ
 3 3 * * * find /root/ricealert/ricenews/lognew -type f -mtime +30 -delete
 
-# Google sheet đồng bộ
+
+#core
 2,32 * * * * /root/ricealert/venv/bin/python /root/ricealert/google_sync.py >> /root/ricealert/log/google_sync.log 2>&1
-
-# Trade tracker mỗi 15 phút
 */16 * * * * /root/ricealert/venv/bin/python /root/ricealert/trade/trade_tracker.py >> /root/ricealert/log/trade_tracker.log 2>&1
-
-# Cảnh báo lệnh mỗi 15 phút
 */15 * * * * /root/ricealert/venv/bin/python /root/ricealert/my_precious.py >> /root/ricealert/log/my_precious.log 2>&1
-
-# Tin tức & ML report mỗi 30 phút
-*/30 * * * * /root/ricealert/venv/bin/python /root/ricealert/ricenews/rice_news.py >> /root/ricealert/log/news.log 2>&1
+*/32 * * * * /root/ricealert/venv/bin/python /root/ricealert/ricenews/rice_news.py >> /root/ricealert/log/news.log 2>&1
 */31 * * * * /root/ricealert/venv/bin/python /root/ricealert/ml_report.py >> /root/ricealert/log/ml_report.log 2>&1
+*/30 * * * * /root/ricealert/venv/bin/python /root/ricealert/main.py

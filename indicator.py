@@ -71,9 +71,9 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
 
     rsi_divergence = None
     if len(recent_prices) == lookback and len(recent_rsis) == lookback:
-        if recent_prices[-1] > recent_prices[0] and recent_rsis[-1] < recent_rsis[0]:
+        if recent_prices.iloc[-1] > recent_prices.iloc[0] and recent_rsis.iloc[-1] < recent_rsis.iloc[0]:
             rsi_divergence = "bearish"
-        elif recent_prices[-1] < recent_prices[0] and recent_rsis[-1] > recent_rsis[0]:
+        elif recent_prices.iloc[-1] < recent_prices.iloc[0] and recent_rsis.iloc[-1] > recent_rsis.iloc[0]:
             rsi_divergence = "bullish"
 
     # ---- Bollinger Bands ----

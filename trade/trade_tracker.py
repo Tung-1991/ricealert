@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path="../.env")
 WEBHOOK_URL = os.getenv("DISCORD_TRADE_WEBHOOK")
 TRADELOG_DIR = "/root/ricealert/trade/tradelog"
-
+os.makedirs(TRADELOG_DIR, exist_ok=True)
 def get_price(symbol):
     url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
     try:
@@ -121,6 +121,9 @@ def check_trades():
 
         if updated:
             update_trade_file(filepath, trades)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now}] ✅ Đã quét xong {len(os.listdir(TRADELOG_DIR))} file JSON – Không có gì để báo cáo.")
 
 if __name__ == "__main__":
     check_trades()

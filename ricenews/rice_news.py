@@ -1,4 +1,3 @@
-(venv) root@ricealert:~/ricealert/ricenews$cat rice_news.py
 import os
 import json
 import requests
@@ -104,7 +103,7 @@ def fetch_rss(feed_url, tag):
                 "title": entry.title,
                 "url": entry.link,
                 "source_name": tag,
-                "published_at": entry.get("published", datetime.utcnow().isoformat()),
+                "published_at": entry.get("published", datetime.now(timezone.utc).isoformat()),
                 "tags": [tag.lower()]
             })
     except Exception as e:

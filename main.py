@@ -12,7 +12,9 @@ from signal_logic import check_signal
 from alert_manager import send_discord_alert
 from csv_logger import log_to_csv, write_named_log
 
-COOLDOWN_FILE = "cooldown_tracker.json"
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker.json")
 COOLDOWN_LEVEL_MAP = {
     "1h":    {"WATCHLIST": 300,  "ALERT": 240,  "WARNING": 180,  "CRITICAL": 90},
     "4h":    {"WATCHLIST": 720,  "ALERT": 480,  "WARNING": 360,  "CRITICAL": 240},
@@ -223,11 +225,13 @@ def main():
                     continue
 
 
-            #filtered_indicator_dict = {iv: indicator_dict[iv] for iv in sendable_intervals}
-            if sendable_intervals:
-                filtered_indicator_dict = indicator_dict
-            else:
-                filtered_indicator_dict = {}
+            filtered_indicator_dict = (
+                {iv: indicator_dict[iv] for iv in sendable_intervals}
+                if sendable_intervals        # có tín hiệu cần gửi
+                else indicator_dict          # chỉ log, không gửi
+            )
+
+
             report_text = format_symbol_report(symbol, filtered_indicator_dict)
             print(report_text + "\n" + "-" * 50)
             log_lines.append(report_text)

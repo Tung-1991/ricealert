@@ -323,7 +323,7 @@ def main():
         held = calc_held_hours(in_time)
 
         indicators = calculate_indicators(df, symbol, interval)
-        indicators["df"] = df 
+        indicators["df"] = df
         indicators["trade_plan"] = plan
         indicators["price"] = price_now
 
@@ -369,7 +369,7 @@ def main():
                 with open(ai_path, "r") as f:
                     ml = json.load(f)
                     ml_score = ml.get("score", 0)
-                    ml_level_raw = ml.get("level", "") 
+                    ml_level_raw = ml.get("level", "")
                     ml_level     = ml_level_raw.replace("_", " ")
                     ml_summary = f"{ml.get('level_icon', '')} – {ml.get('summary', '')}"
             except Exception as e:
