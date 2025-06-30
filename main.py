@@ -162,7 +162,10 @@ def main():
             alert_levels = []
 
             for interval in intervals:
-                df = get_price_data(symbol, interval)
+                if interval in cached_data and symbol in cached_data[interval]:
+                    df = cached_data[interval][symbol]
+                else:
+                    df = get_price_data(symbol, interval)
                 ind = calculate_indicators(df, symbol, interval)
                 ind["interval"] = interval
 

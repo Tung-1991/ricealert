@@ -1,3 +1,4 @@
+(venv) root@ricealert:~/ricealert$cat my_precious.py
 # -*- coding: utf-8 -*-
 import os
 import json
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 import time
 from collections import Counter
 import string
+
 
 load_dotenv()
 
@@ -101,6 +103,7 @@ def send_discord_alert(message, webhook_name="DISCORD_PRECIOUS"):
         return
     chunks = smart_chunk(message)
     for i, chunk in enumerate(chunks):
+        chunk = chunk.strip()
         try:
             requests.post(url, json={"content": chunk}, timeout=10)
             if i < len(chunks) - 1:
@@ -150,12 +153,16 @@ def round_num(val, d=2):
 
 def calc_score(ind):
     score = 0
+    if ind.get('trend_alignment_bonus'):        # <-- thêm dòng này
+        score += ind['trend_alignment_bonus']    # +1 khi đủ điều kiện
+
     if ind["rsi_14"] < 30 or ind["rsi_14"] > 70: score += 1
     if ind["macd_cross"] in ["bullish", "bearish"]: score += 1
     if abs(ind["cmf"]) > 0.05: score += 1
     if ind["volume"] > 1.5 * ind["vol_ma20"]: score += 1
     if ind["adx"] > 20: score += 1
-    if abs(ind["price"] - ind["fib_0_618"]) < 0.5: score += 1
+    if abs(ind["price"] - ind["fib_0_618"]) / ind["price"] < 0.01:
+        score += 1
     if ind["doji_type"]: score += 1
     if ind.get("tag") in ["buy_strong", "short_strong", "swing_trade"]: score += 2
     return min(score, 10)
@@ -214,6 +221,16 @@ def generate_advice(pnl, ind):
     if ind["macd_cross"] == "bearish": reco.append("MACD crossover xuống → cảnh báo điều chỉnh")
 
     reco.append("")
+    # === tính ATR & trailing SL (tuỳ chọn) ===
+    try:
+        import ta
+        atr_val = ta.volatility.average_true_range(
+            ind['df']['high'], ind['df']['low'], ind['df']['close'], window=14
+        ).iloc[-2]
+        trail = max(ind['fib_0_618'], ind['price'] - 1.5 * atr_val)
+        reco.append(f"🔄 Trail SL ≈ {round_num(trail)}")
+    except Exception:
+        pass   # nếu thiếu thư viện hoặc lỗi dữ liệu thì bỏ qua
     reco.append("✅ Chiến lược:")
 
     if pnl > 5:
@@ -255,6 +272,13 @@ def is_overview_time():
     now = datetime.now().strftime("%H:%M")
     return now in ["08:00", "20:00"]
     #return True
+
+def rr_ratio(entry, tp, sl):
+    try:
+        return round(abs(tp-entry) / abs(entry-sl), 2)
+    except ZeroDivisionError:
+        return "-"
+
 
 def main():
     cooldown_state = load_cooldown_state()
@@ -300,14 +324,11 @@ def main():
         held = calc_held_hours(in_time)
 
         indicators = calculate_indicators(df, symbol, interval)
+        indicators["df"] = df 
         indicators["trade_plan"] = plan
         indicators["price"] = price_now
 
-        score = calc_score(indicators)
-        ind_text = generate_indicator_text(indicators)
-        advice_text = generate_advice(pnl, indicators)
-        news_summary = load_news_for_symbol(symbol)
-
+        # 1) Lấy thêm chỉ báo đa khung
         extra_tf = {}
         for tf in ["1h", "4h", "1d"]:
             if tf != interval:
@@ -315,13 +336,29 @@ def main():
                     df_tf = get_price_data(symbol, tf)
                     ind_tf = calculate_indicators(df_tf, symbol, tf)
                     extra_tf[tf] = {
-                        "rsi": round_num(ind_tf["rsi_14"]),
-                        "macd": ind_tf["macd_cross"],
+                        "rsi":   round_num(ind_tf["rsi_14"]),
+                        "macd":  ind_tf["macd_cross"],
                         "trend": ind_tf["trend"],
                         "score": calc_score(ind_tf)
                     }
-                except:
-                    pass
+                except Exception:
+                    pass  # khung nào lỗi thì bỏ qua
+
+        # 2) Bonus 1 điểm nếu ≥2 khung cùng trend
+        same_dir = sum(
+            1 for tf_data in extra_tf.values()
+            if tf_data["trend"] == indicators["trend"]
+        )
+        indicators["trend_alignment_bonus"] = 1 if same_dir >= 2 else 0
+
+        # 3) Tính lại score sau khi đã có bonus
+        score = calc_score(indicators)
+
+        # 4) Tạo text / gợi ý / news sau khi đã có score mới
+        ind_text     = generate_indicator_text(indicators)
+        advice_text  = generate_advice(pnl, indicators)
+        news_summary = load_news_for_symbol(symbol)
+
 
         ml_score = 0
         ml_level = ""
@@ -333,35 +370,13 @@ def main():
                 with open(ai_path, "r") as f:
                     ml = json.load(f)
                     ml_score = ml.get("score", 0)
-                    ml_level = ml.get("level", "")
+                    ml_level_raw = ml.get("level", "") 
+                    ml_level     = ml_level_raw.replace("_", " ")
                     ml_summary = f"{ml.get('level_icon', '')} – {ml.get('summary', '')}"
             except Exception as e:
                 print(f"[ERROR] Không đọc được AI JSON: {ai_path} → {e}")
         else:
             print(f"[DEBUG] Không tìm thấy AI JSON: {symbol}_{interval}")
-
-        prev = advisor_map.get(trade_id)
-        should_send = False
-        send_reason = ""
-
-        if not prev:
-            should_send = True
-            send_reason = "Lệnh mới"
-        elif abs(prev.get("score", 0) - score) >= 2:
-            should_send = True
-            send_reason = f"Score đổi: {prev.get('score')} → {score}"
-        elif prev.get("strategy") != advice_text:
-            should_send = True
-            send_reason = "Chiến lược đổi"
-        elif abs(prev.get("ml_score", 0) - ml_score) >= 5:
-            should_send = True
-            send_reason = f"AI score đổi: {prev.get('ml_score', 0)} → {ml_score}"
-        elif prev.get("ml_level", "") != ml_level:
-            should_send = True
-            send_reason = f"AI level đổi: {prev.get('ml_level')} → {ml_level}"
-
-        # --- PATCH: check cooldown theo ML level nếu đã gửi trước đó ---
-
 
         prev = advisor_map.get(trade_id)
         should_send = False
@@ -428,7 +443,10 @@ def main():
 
 
             news_factor = -1 if "CRITICAL" in news_summary else 1 if "tin tức liên quan" in news_summary.lower() else 0
-            final_rating = round(0.5 * (score / 10) + 0.4 * (ml_score / 100) + 0.1 * news_factor, 3)
+            tech  = score / 10
+            ai    = ml_score / 100
+            nf    = (news_factor + 1) / 2          # -1/0/+1  → 0/0.5/1
+            final_rating = round(0.4*tech + 0.5*ai + 0.1*nf, 3)
 
             alert_tag = "🚨 [Panic Exit]" if ml_level == "PANIC SELL" or final_rating < 0.3 else \
                          "🚫 [Avoid Trading]" if ml_level == "AVOID" else \
@@ -444,8 +462,12 @@ def main():
 """
 
             # PATCH: cảnh báo mâu thuẫn AI vs Indicator
-            if ml_score >= 70 and score <= 3:
-                merged_summary += "\n❗ Cảnh báo: AI kỳ vọng cao nhưng kỹ thuật yếu – nên xác nhận thêm."
+            # Cảnh báo mâu thuẫn AI vs Indicator
+            if tech <= 0.3 and ai >= 0.7:
+                merged_summary += "\n⚠️ AI bullish nhưng kỹ thuật yếu – kiểm tra volume & news!"
+            elif tech >= 0.7 and ai <= 0.3:
+                merged_summary += "\n⚠️ Kỹ thuật mạnh nhưng AI bearish – cẩn thận nhiễu thông tin."
+
 
             msg = f"""{alert_tag} Đánh giá lệnh: {symbol} ({interval})
 📌 ID: {trade_id} {symbol} {interval}
@@ -474,10 +496,12 @@ def main():
 
         advisor_map[trade_id] = new_entry
         news_factor = -1 if "CRITICAL" in news_summary else 1 if "tin tức liên quan" in news_summary.lower() else 0
-        final_rating = round(0.5 * (score / 10) + 0.4 * (ml_score / 100) + 0.1 * news_factor, 3)
+        tech  = score / 10
+        ai    = ml_score / 100
+        nf    = (news_factor + 1) / 2          # -1/0/+1  → 0/0.5/1
+        final_rating = round(0.4*tech + 0.5*ai + 0.1*nf, 3)
 
-  
-  
+
         if is_overview_time():
             in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
             in_hour = in_dt.strftime("%H:%M")
@@ -488,6 +512,8 @@ def main():
             line1 = f"🔹 {symbol} {interval} | 🎯 {real_entry} | 💰 {pnl}% | 📦 {coin_amount} | 💵 {current_value}/{amount} | 🧠 {score} {score_icon}"
             line2 = f"🕒 In: {in_hour} | Giữ: {held}h | Vào: {in_date}"
             line3 = f"🎯 Entry: {real_entry} | 🎯 TP: {plan['tp']} | 🛡 SL: {plan['sl']}"
+            rr = rr_ratio(real_entry, plan['tp'], plan['sl'])
+            line3 += f" | ℹ️ R/R: {rr}"
             line4 = f"🟡 Giá hiện tại: {price_now}"
             line5 = f"🧠 Score kỹ thuật: {score}/10"
             if ml_score:
@@ -496,8 +522,14 @@ def main():
             overview_lines.append("\n".join([line0, line1, line2, line3, line4, line5]))
 
     if is_overview_time() and overview_lines:
-        total_start = sum([t["amount"] for t in advisor_map.values() if t.get("status") == "open"])
-        total_now = sum([round(t["amount"] + t["pnl_usd"], 2) for t in advisor_map.values() if t.get("status") == "open"])
+        # Tính trước, rồi mới làm tròn
+        total_start = sum(t["amount"] for t in advisor_map.values()
+                          if t.get("status") == "open")
+        total_now   = sum(round(t["amount"] + t["pnl_usd"], 2)
+                          for t in advisor_map.values()
+                          if t.get("status") == "open")
+        total_start = round(total_start, 2)
+        total_now   = round(total_now, 2)
         total_count = len(overview_lines)
 
         trending_line = ""
@@ -512,9 +544,13 @@ def main():
             for item in news_items:
                 title = item.get("title", "").lower().translate(str.maketrans("", "", string.punctuation)).split()
                 words += [w for w in title if w not in STOPWORDS and len(w) > 2]
-            top3 = [w for w, _ in Counter(words).most_common(3)]
+            top3 = [
+                w.upper() if w.isalpha() and len(w) <= 4 else w.capitalize()
+                for w, _ in Counter(words).most_common(3)
+            ]
             if top3:
                 trending_line = "🔥 Từ khóa nóng: " + ", ".join(top3)
+
         except:
             pass
 

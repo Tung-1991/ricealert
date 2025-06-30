@@ -1,3 +1,4 @@
+(venv) root@ricealert:~/ricealert/ricenews$cat rice_news.py
 import os
 import json
 import requests
@@ -95,18 +96,21 @@ def fetch_rss(feed_url, tag):
     try:
         feed = feedparser.parse(feed_url)
         for entry in feed.entries[:5]:
-            uid = hashlib.md5(entry.link.encode()).hexdigest()[:12]
+            dupe_key = hashlib.md5(
+                (entry.link.lower().strip() + entry.title.lower()).encode()
+            ).hexdigest()[:12]
             news.append({
-                "id": f"{tag}_{uid}",
+                "id": f"{tag}_{dupe_key}",
                 "title": entry.title,
                 "url": entry.link,
                 "source_name": tag,
-                "published_at": entry.published,
+                "published_at": entry.get("published", datetime.utcnow().isoformat()),
                 "tags": [tag.lower()]
             })
     except Exception as e:
         print(f"[ERROR] RSS {tag}: {e}")
     return news
+
 
 def classify_news_level(title):
     title = title.lower()

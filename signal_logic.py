@@ -20,7 +20,7 @@ def check_signal(indicators: dict) -> tuple:
     interval = indicators.get("interval")
     rsi_1h = indicators.get("rsi_1h")
     rsi_4h = indicators.get("rsi_4h")
-    fibo_0618 = indicators.get("fibo_0618")
+    fib_0_618 = indicators.get("fib_0_618")
 
     required_fields = [rsi, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma,
                        macd_cross, adx, rsi_1h, rsi_4h, trend, cmf]
@@ -87,7 +87,7 @@ def check_signal(indicators: dict) -> tuple:
     elif doji in ["long_legged", "common"] and abs(volume - vol_ma) > 1.2 * vol_ma:
         reasons.append("Doji + Volume khác biệt")
         signal_type = "WATCHLIST"
-    elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+    elif fib_0_618 and abs(price - fib_0_618) / fib_0_618 < 0.01:
         reasons.append("Giá gần Fibo 0.618")
         signal_type = "WATCHLIST"
     elif adx < 15:
@@ -126,7 +126,7 @@ def check_signal(indicators: dict) -> tuple:
         tag = "swing_trade"
     elif volume > 1.5 * vol_ma:
         tag = "scalp"
-    elif fibo_0618 and abs(price - fibo_0618) / fibo_0618 < 0.01:
+    elif fib_0_618 and abs(price - fib_0_618) / fib_0_618 < 0.01:
         tag = "fibo_retest"
     elif adx < 15 or cmf < -0.05:
         tag = "avoid"
