@@ -254,6 +254,7 @@ def log_to_txt(msg):
 def is_overview_time():
     now = datetime.now().strftime("%H:%M")
     return now in ["08:00", "20:00"]
+    #return True
 
 def main():
     cooldown_state = load_cooldown_state()
@@ -382,7 +383,11 @@ def main():
             should_send = True
             send_reason = f"AI level đổi: {prev.get('ml_level')} → {ml_level}"
 
-        if cooldown_state.get(f"{symbol}_{interval}") and not is_cooldown_passed(cooldown_state[f"{symbol}_{interval}"].get("last_sent", ""), ml_level, now):
+        symbol_key = f"{symbol}_{interval}"
+        level_key = ml_level.replace(" ", "_").upper()
+        last_sent_str = cooldown_state.get(symbol_key, {}).get(level_key)
+
+        if last_sent_str and not is_cooldown_passed(last_sent_str, ml_level, now):
             log_to_txt(f"[COOLDOWN] Skip {symbol} ({interval}) vì cooldown {ml_level}")
             should_send = False
 
@@ -417,10 +422,10 @@ def main():
 
         if should_send:
             # Update cooldown state
-            cooldown_state[f"{symbol}_{interval}"] = {
-                "last_sent": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "ml_level": ml_level
-            }
+            if symbol_key not in cooldown_state:
+                cooldown_state[symbol_key] = {}
+            cooldown_state[symbol_key][level_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
             news_factor = -1 if "CRITICAL" in news_summary else 1 if "tin tức liên quan" in news_summary.lower() else 0
             final_rating = round(0.5 * (score / 10) + 0.4 * (ml_score / 100) + 0.1 * news_factor, 3)
@@ -468,7 +473,11 @@ def main():
             send_discord_alert(msg)
 
         advisor_map[trade_id] = new_entry
+        news_factor = -1 if "CRITICAL" in news_summary else 1 if "tin tức liên quan" in news_summary.lower() else 0
+        final_rating = round(0.5 * (score / 10) + 0.4 * (ml_score / 100) + 0.1 * news_factor, 3)
 
+  
+  
         if is_overview_time():
             in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
             in_hour = in_dt.strftime("%H:%M")

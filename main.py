@@ -122,26 +122,38 @@ def format_symbol_report(symbol, indicator_dict):
 
     return "\n\n".join(blocks)
 
+def send_portfolio_report():
+    lines = render_portfolio()
+    send_discord_alert("📊 **BÁO CÁO TỔNG TÀI SẢN**\n" + "\n".join(lines))
+    time.sleep(3)
+
+
 def main():
     print("🔁 Bắt đầu vòng check...\n")
     log_lines = []
     symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
     intervals = [i.strip() for i in os.getenv("INTERVALS", "1h,4h").split(",")]
     should_report = is_report_time()
+    #should_report = True
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     log_date_dir = os.path.join("log", now.strftime("%Y-%m-%d"))
     os.makedirs(log_date_dir, exist_ok=True)
 
-    cached_data = {"1h": {}, "4h": {}}
+    cached_data = {"1h": {}, "4h": {}, "1d": {}}
     if "4h" in intervals or "1d" in intervals:
         for symbol in symbols:
             cached_data["1h"][symbol] = get_price_data(symbol, "1h")
     if "1d" in intervals:
         for symbol in symbols:
             cached_data["4h"][symbol] = get_price_data(symbol, "4h")
+            cached_data["1d"][symbol] = get_price_data(symbol, "1d")
+
 
     last_alert_time = load_cooldown()
+
+    if should_report:
+        send_portfolio_report()
 
     for symbol in symbols:
         try:
@@ -208,24 +220,25 @@ def main():
                     continue
 
 
-            report_text = format_symbol_report(symbol, indicator_dict)
+            #filtered_indicator_dict = {iv: indicator_dict[iv] for iv in sendable_intervals}
+            if sendable_intervals:
+                filtered_indicator_dict = indicator_dict
+            else:
+                filtered_indicator_dict = {}
+            report_text = format_symbol_report(symbol, filtered_indicator_dict)
             print(report_text + "\n" + "-" * 50)
             log_lines.append(report_text)
 
-            if should_report or sendable_intervals:
-                if should_report:
-                    portfolio_lines = render_portfolio()
-                    report_text = "\n".join(portfolio_lines) + "\n\n" + report_text
-                if sendable_intervals:
-                    highest = "CRITICAL" if "CRITICAL" in alert_levels else \
-                              "WARNING" if "WARNING" in alert_levels else \
-                              "ALERT" if "ALERT" in alert_levels else "WATCHLIST"
-                    icon = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}.get(highest, "📌")
-                    title = f"{icon} [{symbol}] **{highest}** từ khung {', '.join(sendable_intervals)} | ⏱️ {now_str}"
-                    order_id_lines = "\n".join([f"🆔 ID: {now_str}\t{symbol}\t{iv}" for iv in sendable_intervals])
-                    report_text = f"{title}\n{order_id_lines}\n\n{report_text}"
-                    print(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
-                    log_lines.append(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
+            if sendable_intervals:
+                highest = "CRITICAL" if "CRITICAL" in alert_levels else \
+                          "WARNING" if "WARNING" in alert_levels else \
+                          "ALERT" if "ALERT" in alert_levels else "WATCHLIST"
+                icon = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}.get(highest, "📌")
+                title = f"{icon} [{symbol}] **{highest}** từ khung {', '.join(sendable_intervals)} | ⏱️ {now_str}"
+                order_id_lines = "\n".join([f"🆔 ID: {now_str}\t{symbol}\t{iv}" for iv in sendable_intervals])
+                report_text = f"{title}\n{order_id_lines}\n\n{report_text}"
+                print(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
+                log_lines.append(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
                 send_discord_alert(report_text)
                 time.sleep(3)
 

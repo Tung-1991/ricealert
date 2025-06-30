@@ -8,6 +8,11 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from indicator import get_price_data, calculate_indicators
 
+
+def is_overview_time():
+    now = datetime.now().strftime("%H:%M")
+    return now in ["08:00", "20:00"]
+
 # ===== LOAD ENV =====
 load_dotenv()
 SYMBOLS = os.getenv("SYMBOLS", "LINKUSDT").split(",")
@@ -153,7 +158,9 @@ def analyze_symbol(symbol, interval, cooldown_data):
 
 # ===== MAIN ENTRY =====
 def generate_report():
+    overview_lines = []
     cooldown_data = load_cooldown()
+
     for sym in SYMBOLS:
         report_lines = [f"\n📊 **AI ML Dự báo cho {sym}**"]
         updated = False
@@ -161,6 +168,16 @@ def generate_report():
             result = analyze_symbol(sym, iv, cooldown_data)
             if result:
                 updated = True
+
+                # Overview 1 dòng
+                overview_line = (
+                    f"➡️ {result['symbol']} [{result['interval']}] {result['level_icon']} | "
+                    f"🧠 {result['score']}% | 📈 {result['pct']:+.2f}% | 💰 {result['price']:.8f} | "
+                    f"🎯 {result['entry']:.8f} / {result['tp']:.8f} / {result['sl']:.8f}"
+                )
+                overview_lines.append(overview_line)
+
+                # Chi tiết từng cặp
                 line = (
                     f"➡️ {result['symbol']} [{result['interval']}] {result['level_icon']}\n"
                     f"🧠 Score: {result['score']}%\n"
@@ -182,7 +199,14 @@ def generate_report():
                 for chunk in chunks:
                     send_discord_alert(chunk)
                     time.sleep(3)
+
+    if is_overview_time() and overview_lines:
+        header = f"🔥 **Tổng hợp AI ML lúc {datetime.now().strftime('%H:%M')}**"
+        full_msg = header + "\n" + "\n".join(overview_lines)
+        send_discord_alert(full_msg)
+
     save_cooldown(cooldown_data)
+
 
 if __name__ == "__main__":
     generate_report()

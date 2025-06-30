@@ -15,11 +15,11 @@
 2,32 * * * * /root/ricealert/venv/bin/python /root/ricealert/google_sync.py >> /root/ricealert/log/google_sync.log 2>&1
 
 # Trade tracker mỗi 15 phút
-*/15 * * * * /root/ricealert/venv/bin/python /root/ricealert/trade/trade_tracker.py >> /root/ricealert/log/trade_tracker.log 2>&1
+*/16 * * * * /root/ricealert/venv/bin/python /root/ricealert/trade/trade_tracker.py >> /root/ricealert/log/trade_tracker.log 2>&1
 
 # Cảnh báo lệnh mỗi 15 phút
 */15 * * * * /root/ricealert/venv/bin/python /root/ricealert/my_precious.py >> /root/ricealert/log/my_precious.log 2>&1
 
 # Tin tức & ML report mỗi 30 phút
 */30 * * * * /root/ricealert/venv/bin/python /root/ricealert/ricenews/rice_news.py >> /root/ricealert/log/news.log 2>&1
-*/30 * * * * /root/ricealert/venv/bin/python /root/ricealert/ricenews/ml_report.py >> /root/ricealert/log/ml_report.log 2>&1
+*/31 * * * * /root/ricealert/venv/bin/python /root/ricealert/ml_report.py >> /root/ricealert/log/ml_report.log 2>&1

@@ -94,9 +94,9 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
     tp = max(bb_upper, entry * 1.05)
 
     trade_plan = {
-        "entry": round(entry, 4),
-        "tp": round(tp, 4),
-        "sl": round(sl, 4)
+        "entry": round(entry, 8),
+        "tp": round(tp, 8),
+        "sl": round(sl, 8)
     }
 
     # Doji Detection
