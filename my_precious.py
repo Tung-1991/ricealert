@@ -1,143 +1,190 @@
 # -*- coding: utf-8 -*-
+"""my_precious.py – position advisor
+Clean version after news‑block patch. 2025‑07‑01
+"""
 import os
 import json
-import requests
+import time
+import string
 from datetime import datetime
+from collections import Counter
+from typing import List, Dict, Any
+
+import requests
+from dotenv import load_dotenv
+
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
-from dotenv import load_dotenv
-import time
-from collections import Counter
-import string
-
 
 load_dotenv()
 
+# ---------------------------------------------------------------------------
+# CONFIG & PATHS -------------------------------------------------------------
+# ---------------------------------------------------------------------------
 COOLDOWN_STATE_PATH = "/root/ricealert/advisor_log/cooldown_state.json"
 
-LEVEL_COOLDOWN_MINUTES = {
-    "PANIC_SELL": 3 * 60,     # 3 giờ
-    "SELL": 4 * 60,           # 4 giờ
-    "AVOID": 5 * 60,          # 5 giờ
-    "HOLD": 6 * 60,           # 6 giờ
-    "WEAK_BUY": 5 * 60,       # 5 giờ
-    "BUY": 4 * 60,            # 4 giờ
-    "STRONG_BUY": 3 * 60      # 3 giờ
+LEVEL_COOLDOWN_MINUTES: Dict[str, int] = {
+    "PANIC_SELL": 180,
+    "SELL":       240,
+    "AVOID":      300,
+    "HOLD":       360,
+    "WEAK_BUY":   300,
+    "BUY":        240,
+    "STRONG_BUY": 180,
 }
 
-def load_cooldown_state():
-    if os.path.exists(COOLDOWN_STATE_PATH):
-        with open(COOLDOWN_STATE_PATH, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_cooldown_state(state):
-    with open(COOLDOWN_STATE_PATH, "w") as f:
-        json.dump(state, f, indent=2)
-
-def is_cooldown_passed(last_sent_str, level, now):
-    try:
-        cooldown = LEVEL_COOLDOWN_MINUTES.get(level.replace(" ", "_").upper(), 3)
-        print(f"[DEBUG] Level AI: {level} → cooldown {cooldown} phút")
-        last_time = datetime.strptime(last_sent_str, "%Y-%m-%d %H:%M:%S")
-        delta = (now - last_time).total_seconds() / 60
-        return delta >= cooldown
-    except:
-        return True
-
 TRADELOG_DIR = "/root/ricealert/trade/tradelog"
-ADVISOR_DIR = "/root/ricealert/advisor_log"
-LOG_DIR = os.path.join(ADVISOR_DIR, "log")
-os.makedirs(ADVISOR_DIR, exist_ok=True)
+ADVISOR_DIR  = "/root/ricealert/advisor_log"
+LOG_DIR      = os.path.join(ADVISOR_DIR, "log")
+NEWS_DIR     = "/root/ricealert/ricenews/lognew"
+AI_DIR       = "/root/ricealert/ai_logs"
+
 os.makedirs(LOG_DIR, exist_ok=True)
 
-NEWS_DIR = "/root/ricealert/ricenews/lognew"
+# ---------------------------------------------------------------------------
+# BASIC UTILITIES ------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+def load_json(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
 
 
-def format_ml_summary_verbose(ml):
-    level = ml.get("level", "").upper()
-    pct = ml.get("pct", 0)
-    score = ml.get("score", 0)
-    price = ml.get("price")
-    entry = ml.get("entry")
-    tp = ml.get("tp")
-    sl = ml.get("sl")
+def write_json(path: str, data) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-    msg = f"🤖 AI ML ({level})"
-    msg += f"\n📊 Dự đoán: {pct:+.2f}% {'(tăng)' if pct > 0 else '(giảm)'} 🧠 Xác suất: {score:.2f}%"
-    msg += f"\n💰 Giá hiện tại: {price} Entry: {entry}"
-    msg += f"\n🎯 TP: {tp} 🛡️ SL: {sl}"
 
-    if level == "PANIC SELL":
-        msg += "\n📉 Lý do: Mô hình cảnh báo rủi ro cao – nên ưu tiên cắt lệnh"
-    elif level == "AVOID":
-        msg += "\n⚠️ Lý do: Không có edge rõ ràng – hạn chế giao dịch"
-    elif level in ["BUY", "BUY_STRONG", "HOLD"]:
-        msg += "\n✅ Lý do: AI kỳ vọng tăng giá – có thể giữ hoặc mở vị thế"
-    elif level == "SHORT_STRONG":
-        msg += "\n📉 Lý do: Xu hướng giảm rõ rệt – cân nhắc đảo chiều"
-    else:
-        msg += "\n🤖 Lý do: Không xác định rõ"
+def load_cooldown_state() -> Dict[str, Dict[str, str]]:
+    return load_json(COOLDOWN_STATE_PATH, {})
 
-    return msg
 
-def smart_chunk(text, limit=1900):
-    parts = []
-    lines = text.split("\n")
-    buf = ""
-    for line in lines:
-        if len(buf) + len(line) + 1 < limit:
-            buf += "\n" + line
+def save_cooldown_state(state: dict) -> None:
+    write_json(COOLDOWN_STATE_PATH, state)
+
+
+def is_cooldown_passed(last_sent: str, level: str, now: datetime) -> bool:
+    try:
+        minutes = LEVEL_COOLDOWN_MINUTES.get(level.replace(" ", "_").upper(), 180)
+        delta   = (now - datetime.strptime(last_sent, "%Y-%m-%d %H:%M:%S")).total_seconds() / 60
+        return delta >= minutes
+    except Exception:
+        return True
+
+
+def smart_chunk(text: str, limit: int = 1900) -> List[str]:
+    """Split long text into Discord‑safe chunks."""
+    parts, buf = [], ""
+    for ln in text.split("\n"):
+        if len(buf) + len(ln) + 1 < limit:
+            buf += "\n" + ln
         else:
             parts.append(buf.strip())
-            buf = line
+            buf = ln
     if buf:
         parts.append(buf.strip())
     return parts
 
-def send_discord_alert(message, webhook_name="DISCORD_PRECIOUS"):
+
+def send_discord_alert(msg: str, webhook_name: str = "DISCORD_PRECIOUS") -> None:
     url = os.getenv(webhook_name)
     if not url:
-        print(f"[ERROR] Webhook {webhook_name} not found in .env")
+        print(f"[ERROR] Webhook {webhook_name} not set in .env")
         return
-    chunks = smart_chunk(message)
-    for i, chunk in enumerate(chunks):
-        chunk = chunk.strip()
+    for i, chunk in enumerate(smart_chunk(msg)):
         try:
             requests.post(url, json={"content": chunk}, timeout=10)
-            if i < len(chunks) - 1:
+            if i < len(msg) - 1:
                 time.sleep(3)
-        except Exception as e:
-            print(f"[ERROR] Discord send failed: {e}")
+        except Exception as exc:
+            print(f"[ERROR] Discord send failed: {exc}")
 
+# ---------------------------------------------------------------------------
+# VERBOSE ML SUMMARY ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 
+def format_ml_summary_verbose(ml: Dict[str, Any]) -> str:
+    """Return a detailed human‑friendly summary of an AI‑ML prediction dict."""
+    level = ml.get("level", "").upper()
+    pct   = ml.get("pct", 0)
+    score = ml.get("score", 0)
+    price = ml.get("price", 0)
+    entry = ml.get("entry", 0)
+    tp    = ml.get("tp", 0)
+    sl    = ml.get("sl", 0)
 
-def load_news_for_symbol(symbol):
-    today_file = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
-    if not os.path.exists(today_file):
-        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
+    lines = [
+        f"🤖 AI ML ({level})",
+        f"📊 Dự đoán: {pct:+.2f}% {'(tăng)' if pct > 0 else '(giảm)'} 🧠 Xác suất: {score:.2f}%",
+        f"💰 Giá hiện tại: {price} Entry: {entry}",
+        f"🎯 TP: {tp} 🛡️ SL: {sl}",
+    ]
 
-    with open(today_file, "r", encoding="utf-8") as f:
-        news_data = json.load(f)
+    reasons = {
+        "PANIC SELL": "📉 Mô hình cảnh báo rủi ro cao – nên ưu tiên cắt lệnh",
+        "AVOID":      "⚠️ Không có edge rõ ràng – hạn chế giao dịch",
+    }
+    if level in {"BUY", "STRONG_BUY", "WEAK_BUY", "HOLD"}:
+        reasons[level] = "✅ AI kỳ vọng tăng giá – có thể giữ hoặc mở vị thế"
+    if level == "SHORT_STRONG":
+        reasons[level] = "📉 Xu hướng giảm rõ rệt – cân nhắc đảo chiều"
 
-    symbol_tag = symbol.lower()
-    coin_news = [n for n in news_data if n.get("category_tag") == symbol_tag]
-    macro_news = [n for n in news_data if n.get("category_tag") == "macro"]
+    lines.append(reasons.get(level, "🤖 Lý do: Không xác định rõ"))
+    return "\n".join(lines)
 
+# ---------------------------------------------------------------------------
+# NEWS -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+def load_news_for_symbol(symbol: str) -> str:
+    """Return formatted news lines for a coin symbol or macro context."""
+    today_path = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
+    if not os.path.exists(today_path):
+        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."  # noqa: E501
+
+    news_data = load_json(today_path, [])
+
+    tag = symbol.lower().replace("usdt", "").strip()
+
+    coin_news = [n for n in news_data if n.get("category_tag") == tag]
+
+    macro_news = [
+        n for n in news_data
+        if n.get("category_tag") in {"macro", "general"}
+        and n.get("level") in {"CRITICAL", "ALERT", "WATCHLIST"}
+    ]
+
+    # --- coin‑specific news ---
     if coin_news:
         lines = [f"📰 Tin tức liên quan {symbol.upper()}:"]
         for n in coin_news[:2]:
             prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
             lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
         return "\n".join(lines)
-    elif macro_news:
-        lines = ["🌐 Có một số tin tức vĩ mô có thể ảnh hưởng chung đến thị trường:"]
+
+    # --- macro fallback ---
+    if macro_news:
+        macro_news.sort(
+            key=lambda n: (
+                0 if n["level"] == "CRITICAL" else 1 if n["level"] == "ALERT" else 2,
+                n.get("published_at", ""),
+            )
+        )
+        lines = ["🌐 Tin vĩ mô đáng chú ý:"]
         for n in macro_news[:2]:
             prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
             lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
         return "\n".join(lines)
-    else:
-        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
+
+    return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
+
+# ---------------------------------------------------------------------------
+#  (rest of file: indicator calc, advice gen, main loop) – UNCHANGED
+# ---------------------------------------------------------------------------
+
 
 
 def parse_trade_plan(plan_str):

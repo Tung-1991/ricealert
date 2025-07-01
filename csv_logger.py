@@ -8,8 +8,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "output", "signal_log.csv")
 
 def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp):
-    os.makedirs("output", exist_ok=True)
-
+    os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
     entry = trade_plan.get("entry", 0)
     tp = trade_plan.get("tp", 0)
     sl = trade_plan.get("sl", 0)

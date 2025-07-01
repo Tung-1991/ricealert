@@ -1,4 +1,16 @@
 # -*- coding: utf-8 -*-
+"""RiceAlert – main runner
+
+* 08:00 & 20:00 (report time):
+  - Always send Discord alerts for **all intervals** and a full portfolio report.
+  - **Do not** write to CSV (avoid bloating daily logs).
+* Every 30 minutes via crontab (non‑report time):
+  - Evaluate only intervals listed in ENV `INTERVALS` (default "1h,4h").
+  - Send Discord + write CSV **only** for signals ⩾ WATCHLIST that are out of cooldown.
+
+This file is fully self‑contained and safe to run with `python -m py_compile`.
+"""
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -12,85 +24,108 @@ from signal_logic import check_signal
 from alert_manager import send_discord_alert
 from csv_logger import log_to_csv, write_named_log
 
+# ---------------------------------------------------------------------------
+# Constants & config ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker.json")
 COOLDOWN_LEVEL_MAP = {
-    "1h":    {"WATCHLIST": 300,  "ALERT": 240,  "WARNING": 180,  "CRITICAL": 90},
+    "1h":    {"WATCHLIST": 300,  "ALERT": 240,  "WARNING": 180,  "CRITICAL":  90},
     "4h":    {"WATCHLIST": 720,  "ALERT": 480,  "WARNING": 360,  "CRITICAL": 240},
-    "1d":    {"WATCHLIST": 1800, "ALERT": 1560, "WARNING": 1500, "CRITICAL": 1380}
+    "1d":    {"WATCHLIST": 1800, "ALERT": 1560, "WARNING": 1500, "CRITICAL": 1380},
 }
 
+# Levels worth notifying outside the 08h/20h daily reports
+SEND_LEVELS = ["WATCHLIST", "ALERT", "WARNING", "CRITICAL"]
 
-def load_cooldown():
+# ---------------------------------------------------------------------------
+# Helper functions -----------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+def load_cooldown() -> dict[str, datetime]:
+    """Return last‑alert timestamps (max 2 days back)."""
     if os.path.exists(COOLDOWN_FILE):
         try:
-            with open(COOLDOWN_FILE, "r") as f:
+            with open(COOLDOWN_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 now = datetime.now()
                 return {
-                    k: datetime.fromisoformat(v)
-                    for k, v in data.items()
-                    if now - datetime.fromisoformat(v) < timedelta(days=2)
+                    key: datetime.fromisoformat(val)
+                    for key, val in data.items()
+                    if now - datetime.fromisoformat(val) < timedelta(days=2)
                 }
-        except Exception as e:
-            print(f"⚠️ Không thể load cooldown file: {e}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠️ Không thể load cooldown file: {exc}")
     return {}
 
-def save_cooldown(cooldown_dict):
-    with open(COOLDOWN_FILE, "w") as f:
-        data = {k: v.isoformat() for k, v in cooldown_dict.items()}
-        json.dump(data, f)
 
-def is_report_time():
+def save_cooldown(cooldown: dict[str, datetime]) -> None:
+    with open(COOLDOWN_FILE, "w", encoding="utf-8") as f:
+        json.dump({k: v.isoformat() for k, v in cooldown.items()}, f)
+
+
+def is_report_time() -> bool:
     now = datetime.now()
-    current_time = now.strftime("%H:%M")
     report_times = os.getenv("REPORT_TIMES", "08:00,20:00").split(",")
-    return current_time in report_times
+    return now.strftime("%H:%M") in report_times
 
-def render_portfolio():
+
+# ----------------------------- Portfolio rendering -------------------------
+
+def render_portfolio() -> list[str]:
     balances = get_account_balances()
-    spot = [b for b in balances if b["source"] == "Spot"]
-    flexible = [b for b in balances if b["source"] == "Earn Flexible"]
-    locked = [b for b in balances if b["source"] == "Earn Locked"]
-    total = [b for b in balances if b["source"] == "All"]
+    spot      = [b for b in balances if b["source"] == "Spot"]
+    flexible  = [b for b in balances if b["source"] == "Earn Flexible"]
+    locked    = [b for b in balances if b["source"] == "Earn Locked"]
+    total     = [b for b in balances if b["source"] == "All"]
 
-    def render_section(title, data):
-        section_lines = []
-        if data:
-            section_lines.append(f"\n{title}")
-            for b in data:
-                section_lines.append(f"🪙 {b['asset']}: {b['amount']} ≈ ${b['value']}")
-            section_total = sum(b["value"] for b in data)
-            section_lines.append(f"🔢 Tổng ({title.strip()}): ${round(section_total, 2)}")
-        return section_lines
+    def section(title: str, rows: list[dict]) -> list[str]:
+        lines: list[str] = []
+        if rows:
+            lines.append(f"\n{title}")
+            for r in rows:
+                lines.append(f"🪙 {r['asset']}: {r['amount']} ≈ ${r['value']}")
+            subtotal = sum(r["value"] for r in rows)
+            lines.append(f"🔢 Tổng ({title.strip()}): ${round(subtotal, 2)}")
+        return lines
 
     print("\n💰 Portfolio hiện tại:")
-    portfolio_lines = []
-    portfolio_lines += render_section("📦 Spot:", spot)
-    portfolio_lines += render_section("🪴 Earn Flexible:", flexible)
-    portfolio_lines += render_section("🔒 Earn Locked:", locked)
+    lines: list[str] = []
+    lines += section("📦 Spot:", spot)
+    lines += section("🪴 Earn Flexible:", flexible)
+    lines += section("🔒 Earn Locked:", locked)
 
-    for line in portfolio_lines:
-        print(line)
+    for l in lines:
+        print(l)
 
     if total:
         total_line = f"\n💵 Tổng tài sản: ${total[0]['value']}"
         print(total_line)
-        portfolio_lines.append(total_line.replace("💵", "\n💵"))
+        lines.append(total_line.replace("💵", "\n💵"))
 
-    return portfolio_lines
+    return lines
 
-def format_symbol_report(symbol, indicator_dict):
-    blocks = []
-    for interval, ind in indicator_dict.items():
+
+def send_portfolio_report() -> None:
+    send_discord_alert(
+        "📊 **BÁO CÁO TỔNG TÀI SẢN**\n" + "\n".join(render_portfolio())
+    )
+    time.sleep(3)
+
+
+# ----------------------------- Symbol report -------------------------------
+
+def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
+    parts: list[str] = []
+    for interval, ind in ind_map.items():
         macd_cross = ind.get("macd_cross", "N/A")
-        adx = ind.get("adx", "N/A")
-        rsi_div = ind.get("rsi_divergence", "None")
+        adx        = ind.get("adx", "N/A")
+        rsi_div    = ind.get("rsi_divergence", "None")
         trade_plan = ind.get("trade_plan", {})
-        doji_note = f"{ind['doji_type'].capitalize()} Doji" if ind.get("doji_type") else "No"
-        trend = ind.get("trend", "unknown")
-        cmf = ind.get("cmf", "N/A")
+        doji_note  = f"{ind['doji_type'].capitalize()} Doji" if ind.get("doji_type") else "No"
+        trend      = ind.get("trend", "unknown")
+        cmf        = ind.get("cmf", "N/A")
         signal, reason = check_signal(ind)
 
         block = f"""📊 **{symbol} ({interval})**
@@ -111,154 +146,170 @@ def format_symbol_report(symbol, indicator_dict):
 
         if trade_plan:
             entry = trade_plan.get("entry", 0)
-            tp = trade_plan.get("tp", 0)
-            sl = trade_plan.get("sl", 0)
-
+            tp    = trade_plan.get("tp", 0)
+            sl    = trade_plan.get("sl", 0)
             block += f"""
 🎯 **Trade Plan**
 - Entry: {entry:.8f}
 - TP:     {tp:.8f}
 - SL:     {sl:.8f}"""
 
-        blocks.append(block)
-
-    return "\n\n".join(blocks)
-
-def send_portfolio_report():
-    lines = render_portfolio()
-    send_discord_alert("📊 **BÁO CÁO TỔNG TÀI SẢN**\n" + "\n".join(lines))
-    time.sleep(3)
+        parts.append(block)
+    return "\n\n".join(parts)
 
 
-def main():
+# ---------------------------------------------------------------------------
+# Main loop ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+def main() -> None:
     print("🔁 Bắt đầu vòng check...\n")
-    log_lines = []
-    symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
+
+    # Basic setup -----------------------------------------------------------
+    symbols   = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
     intervals = [i.strip() for i in os.getenv("INTERVALS", "1h,4h").split(",")]
-    should_report = is_report_time()
-    #should_report = True
-    now = datetime.now()
-    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    should_report = is_report_time()          # 08:00 & 20:00
+    force_daily   = should_report             # alias for clarity
+
+    now          = datetime.now()
+    now_str      = now.strftime("%Y-%m-%d %H:%M:%S")
     log_date_dir = os.path.join(BASE_DIR, "log", now.strftime("%Y-%m-%d"))
     os.makedirs(log_date_dir, exist_ok=True)
 
-    cached_data = {"1h": {}, "4h": {}, "1d": {}}
+    # Prefetch data to minimise API calls ----------------------------------
+    cached: dict[str, dict[str, object]] = {"1h": {}, "4h": {}, "1d": {}}
     if "4h" in intervals or "1d" in intervals:
-        for symbol in symbols:
-            cached_data["1h"][symbol] = get_price_data(symbol, "1h")
+        for sym in symbols:
+            cached["1h"][sym] = get_price_data(sym, "1h")
     if "1d" in intervals:
-        for symbol in symbols:
-            cached_data["4h"][symbol] = get_price_data(symbol, "4h")
-            cached_data["1d"][symbol] = get_price_data(symbol, "1d")
+        for sym in symbols:
+            cached["4h"][sym] = get_price_data(sym, "4h")
+            cached["1d"][sym] = get_price_data(sym, "1d")
 
-
-    last_alert_time = load_cooldown()
+    cooldowns = load_cooldown()
 
     if should_report:
         send_portfolio_report()
 
+    # ---------------------------------------------------------------------
+    # Per‑symbol processing ------------------------------------------------
+    # ---------------------------------------------------------------------
+    log_lines: list[str] = []
     for symbol in symbols:
         try:
-            indicator_dict = {}
-            sendable_intervals = []
-            alert_levels = []
+            indic_map:      dict[str, dict] = {}
+            send_intervals: list[str]       = []
+            alert_levels:   list[str]       = []
 
             for interval in intervals:
-                if interval in cached_data and symbol in cached_data[interval]:
-                    df = cached_data[interval][symbol]
-                else:
-                    df = get_price_data(symbol, interval)
+                # Get dataframe (use cache if ready)
+                df = (
+                    cached[interval].get(symbol)
+                    if interval in cached and symbol in cached[interval]
+                    else get_price_data(symbol, interval)
+                )
+
                 ind = calculate_indicators(df, symbol, interval)
                 ind["interval"] = interval
 
+                # Cross‑frame RSI ------------------------------------------------
                 if interval == "1h":
-                    ind["rsi_1h"] = ind["rsi_14"]
-                    ind["rsi_4h"] = None
+                    ind["rsi_1h"], ind["rsi_4h"] = ind["rsi_14"], None
                 elif interval == "4h":
-                    ind_1h = calculate_indicators(cached_data["1h"][symbol], symbol, "1h")
-                    ind["rsi_1h"] = ind_1h["rsi_14"]
-                    ind["rsi_4h"] = ind["rsi_14"]
+                    ind1 = calculate_indicators(cached["1h"][symbol], symbol, "1h")
+                    ind["rsi_1h"], ind["rsi_4h"] = ind1["rsi_14"], ind["rsi_14"]
                 elif interval == "1d":
-                    ind_1h = calculate_indicators(cached_data["1h"][symbol], symbol, "1h")
-                    ind_4h = calculate_indicators(cached_data["4h"][symbol], symbol, "4h")
-                    ind["rsi_1h"] = ind_1h["rsi_14"]
-                    ind["rsi_4h"] = ind_4h["rsi_14"]
+                    ind1 = calculate_indicators(cached["1h"][symbol], symbol, "1h")
+                    ind4 = calculate_indicators(cached["4h"][symbol], symbol, "4h")
+                    ind["rsi_1h"], ind["rsi_4h"] = ind1["rsi_14"], ind4["rsi_14"]
 
                 signal, _ = check_signal(ind)
-                indicator_dict[interval] = ind
+                indic_map[interval] = ind
 
-                if signal not in ["WATCHLIST", "ALERT", "WARNING", "CRITICAL"]:
-                    print(f"🔇 {symbol} - {interval} → {signal} → KHÔNG lưu CSV, KHÔNG gửi Discord")
-                    log_lines.append(f"🔇 {symbol} - {interval} → {signal} → KHÔNG lưu CSV, KHÔNG gửi Discord")
+                # Skip signals not in SEND_LEVELS except during daily report
+                if signal not in SEND_LEVELS and not force_daily:
+                    msg = f"🔇 {symbol} - {interval} → {signal} → KHÔNG lưu/GỬI"
+                    print(msg)
+                    log_lines.append(msg)
                     continue
 
-                cooldown_key = f"{symbol}_{interval}_{signal}"
-                cooldown_minutes = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
-                last_time = last_alert_time.get(cooldown_key)
+                # Cooldown handling ----------------------------------------
+                cd_key      = f"{symbol}_{interval}_{signal}"
+                cd_minutes  = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
 
-                if not last_time or now - last_time >= timedelta(minutes=cooldown_minutes):
-                    log_to_csv(
-                        symbol=symbol,
-                        interval=interval,
-                        signal=signal,
-                        tag=ind.get("tag", "hold"),
-                        price=ind.get("price", 0),
-                        trade_plan=ind.get("trade_plan", {}),
-                        timestamp=now_str
-                    )
-
-                    if signal != "WATCHLIST":
-                        print(f"📤 Ghi CSV + chờ gửi Discord: {symbol} - {interval} ({signal})")
-                        log_lines.append(f"📤 Ghi CSV + chờ gửi Discord: {symbol} - {interval} ({signal})")
-                    else:
-                        print(f"👀 {symbol} - {interval} → WATCHLIST → GHI CSV + GỬI DISCORD")
-                        log_lines.append(f"👀 {symbol} - {interval} → WATCHLIST → GHI CSV + GỬI DISCORD")
-
-                    sendable_intervals.append(interval)
+                if force_daily:
+                    # Daily report: always send, never write CSV
+                    send_intervals.append(interval)
                     alert_levels.append(signal)
-                    last_alert_time[cooldown_key] = now
-
                 else:
-                    remaining = cooldown_minutes - int((now - last_time).total_seconds() / 60)
-                    print(f"⏳ {symbol} - {interval} ({signal}) → Cooldown còn {remaining} phút → KHÔNG gửi, KHÔNG lưu")
-                    log_lines.append(f"⏳ {symbol} - {interval} ({signal}) → Cooldown còn {remaining} phút → KHÔNG gửi, KHÔNG lưu")
-                    continue
+                    last_time = cooldowns.get(cd_key)
+                    if not last_time or now - last_time >= timedelta(minutes=cd_minutes):
+                        # Record to CSV
+                        log_to_csv(
+                            symbol=symbol,
+                            interval=interval,
+                            signal=signal,
+                            tag=ind.get("tag", "hold"),
+                            price=ind.get("price", 0),
+                            trade_plan=ind.get("trade_plan", {}),
+                            timestamp=now_str,
+                        )
 
+                        if signal != "WATCHLIST":
+                            print(f"📤 CSV + chờ Discord: {symbol} - {interval} ({signal})")
+                            log_lines.append(f"📤 CSV + chờ Discord: {symbol} - {interval} ({signal})")
+                        else:
+                            print(f"👀 {symbol} - {interval} → WATCHLIST → CSV+Discord")
+                            log_lines.append(f"👀 {symbol} - {interval} → WATCHLIST → CSV+Discord")
 
-            filtered_indicator_dict = (
-                {iv: indicator_dict[iv] for iv in sendable_intervals}
-                if sendable_intervals        # có tín hiệu cần gửi
-                else indicator_dict          # chỉ log, không gửi
+                        send_intervals.append(interval)
+                        alert_levels.append(signal)
+                        cooldowns[cd_key] = now
+                    else:
+                        remain = cd_minutes - int((now - last_time).total_seconds() // 60)
+                        msg = f"⏳ {symbol}-{interval} ({signal}) Cooldown {remain}′ → skip"
+                        print(msg)
+                        log_lines.append(msg)
+                        continue
+
+            # ----------------------------------------------------------------
+            # Prepare & maybe send Discord message ---------------------------
+            filtered = (
+                {iv: indic_map[iv] for iv in send_intervals} if send_intervals else indic_map
             )
+            report = format_symbol_report(symbol, filtered)
+            print(report + "\n" + "-" * 50)
+            log_lines.append(report)
 
-
-            report_text = format_symbol_report(symbol, filtered_indicator_dict)
-            print(report_text + "\n" + "-" * 50)
-            log_lines.append(report_text)
-
-            if sendable_intervals:
-                highest = "CRITICAL" if "CRITICAL" in alert_levels else \
-                          "WARNING" if "WARNING" in alert_levels else \
-                          "ALERT" if "ALERT" in alert_levels else "WATCHLIST"
-                icon = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}.get(highest, "📌")
-                title = f"{icon} [{symbol}] **{highest}** từ khung {', '.join(sendable_intervals)} | ⏱️ {now_str}"
-                order_id_lines = "\n".join([f"🆔 ID: {now_str}\t{symbol}\t{iv}" for iv in sendable_intervals])
-                report_text = f"{title}\n{order_id_lines}\n\n{report_text}"
-                print(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
-                log_lines.append(f"📨 Gửi Discord: {symbol} - {', '.join(sendable_intervals)} ({highest})")
-                send_discord_alert(report_text)
+            if send_intervals:
+                highest = (
+                    "CRITICAL" if "CRITICAL" in alert_levels else
+                    "WARNING"  if "WARNING"  in alert_levels else
+                    "ALERT"    if "ALERT"    in alert_levels else
+                    "WATCHLIST"
+                )
+                icon = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}[highest]
+                title = f"{icon} [{symbol}] **{highest}** từ khung {', '.join(send_intervals)} | ⏱️ {now_str}"
+                ids   = "\n".join([f"🆔 ID: {now_str}\t{symbol}\t{iv}" for iv in send_intervals])
+                send_discord_alert(f"{title}\n{ids}\n\n{report}")
+                print(f"📨 Discord: {symbol} - {', '.join(send_intervals)} ({highest})")
+                log_lines.append(f"📨 Discord: {symbol} - {', '.join(send_intervals)} ({highest})")
                 time.sleep(3)
-
-        except Exception as e:
-            msg = f"❌ Lỗi xử lý {symbol}: {e}"
+        except Exception as exc:  # noqa: BLE001
+            msg = f"❌ Lỗi xử lý {symbol}: {exc}"
             print(msg)
             log_lines.append(msg)
 
+    # ---------------------------------------------------------------------
+    # Persist logs & cooldown ---------------------------------------------
     if log_lines:
-        final_log = "\n\n" + ("\n" + "=" * 60 + "\n\n").join(log_lines)
-        write_named_log(final_log, os.path.join(log_date_dir, f"{now.strftime('%H%M')}.txt"))
+        content = "\n\n" + ("\n" + "=" * 60 + "\n\n").join(log_lines)
+        write_named_log(content, os.path.join(log_date_dir, f"{now.strftime('%H%M')}.txt"))
 
-    save_cooldown(last_alert_time)
+    save_cooldown(cooldowns)
 
+
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
