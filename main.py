@@ -17,6 +17,7 @@ load_dotenv()
 import os
 import time
 import json
+import pandas as pd
 from datetime import datetime, timedelta
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
@@ -179,12 +180,16 @@ def main() -> None:
 
     # Prefetch data to minimise API calls ----------------------------------
     cached: dict[str, dict[str, object]] = {"1h": {}, "4h": {}, "1d": {}}
-    if "4h" in intervals or "1d" in intervals:
-        for sym in symbols:
-            cached["1h"][sym] = get_price_data(sym, "1h")
-    if "1d" in intervals:
+    # luôn fetch 1h
+    for sym in symbols:
+        cached["1h"][sym] = get_price_data(sym, "1h")
+    # fetch 4h nếu cần
+    if "4h" in intervals:
         for sym in symbols:
             cached["4h"][sym] = get_price_data(sym, "4h")
+    # fetch 1d nếu cần
+    if "1d" in intervals:
+        for sym in symbols:
             cached["1d"][sym] = get_price_data(sym, "1d")
 
     cooldowns = load_cooldown()
@@ -209,13 +214,24 @@ def main() -> None:
                     if interval in cached and symbol in cached[interval]
                     else get_price_data(symbol, interval)
                 )
+                df["close_time"] = pd.to_datetime(df["close_time"], unit="ms")
+                df = df[df["close_time"] < now - timedelta(minutes=1)]
+
 
                 ind = calculate_indicators(df, symbol, interval)
                 ind["interval"] = interval
 
                 # Cross‑frame RSI ------------------------------------------------
                 if interval == "1h":
-                    ind["rsi_1h"], ind["rsi_4h"] = ind["rsi_14"], None
+                    # Lấy RSI 4h từ cache (đã prefetch ở đầu file)
+                    rsi4 = None
+                    if "4h" in cached and symbol in cached["4h"]:
+                        rsi4 = calculate_indicators(
+                            cached["4h"][symbol], symbol, "4h"
+                        )["rsi_14"]
+
+                    ind["rsi_1h"] = ind["rsi_14"]
+                    ind["rsi_4h"] = rsi4        # <-- không còn None
                 elif interval == "4h":
                     ind1 = calculate_indicators(cached["1h"][symbol], symbol, "1h")
                     ind["rsi_1h"], ind["rsi_4h"] = ind1["rsi_14"], ind["rsi_14"]

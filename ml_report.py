@@ -59,18 +59,28 @@ LEVEL_ICONS = {
 
 def is_overview_time() -> bool:
     """Return True if current VN time is 08:00 or 20:00."""
-    return datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%H:%M") in {"08:00", "20:00"}
-
+    return datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%H:%M") in {"08:01", "20:01"}
+    #return True
 
 def send_discord_alert(msg: str) -> None:
     if not WEBHOOK_URL:
         print("[ERROR] DISCORD_AI_WEBHOOK not set")
         return
+
+    def _post(chunk: str):
+        r = requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10)
+        r.raise_for_status()          # <- thấy lỗi là biết liền
+        time.sleep(1.5)               # tránh spam rate-limit
+
     try:
-        print("[DISCORD] ⇢\n" + msg)
-        requests.post(WEBHOOK_URL, json={"content": msg}, timeout=10)
-    except Exception as exc:  # noqa: BLE001
+        if len(msg) > 1900:           # 1900 để trừ hao escape
+            for i in range(0, len(msg), 1900):
+                _post(msg[i : i + 1900])
+        else:
+            _post(msg)
+    except Exception as exc:
         print(f"[ERROR] Discord alert failed: {exc}")
+        send_error_alert(f"Discord alert failed: {exc}")
 
 
 def send_error_alert(msg: str) -> None:
@@ -294,6 +304,7 @@ def generate_report() -> None:
     # Gửi tổng hợp vào 08h / 20h
     if force_daily and overview_lines:
         header = f"🔥 **Tổng hợp AI ML {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M')}**"
+        full_msg = header + "\n" + "\n".join(overview_lines)
         send_discord_alert(header + "\n" + "\n".join(overview_lines))
 
     save_cooldown(cooldown)

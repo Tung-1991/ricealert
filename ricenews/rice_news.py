@@ -34,6 +34,7 @@ COOLDOWN_LEVEL = {
     "WATCHLIST": 360,
     "INFO": 480
 }
+SUMMARY_COOLDOWN = 60 * 60
 
 KEYWORDS = {
     "CRITICAL": ["will list", "etf approval", "halving", "fomc", "interest rate hike", "cpi", "war", "approved", "regulatory approval"],
@@ -292,9 +293,20 @@ def main():
     cooldown["per_id"] = cooldown_per_id
     cooldown["last_sent"] = last_sent
     save_cooldown(cooldown)
+    summary_stamp = cooldown.get("daily_summary", 0)
 
-    if datetime.now(VN_TZ).hour in [8, 20]:
+    now_dt = datetime.now(VN_TZ)
+    now_ts = int(now_dt.timestamp())
+
+    print("🕐 Giờ hiện tại:", now_dt.hour, now_dt.minute)
+    print("📊 Điều kiện:", (now_dt.hour, now_dt.minute) in [(8, 3), (20, 3)])
+    print("⏳ Cooldown passed:", now_ts - summary_stamp, ">", SUMMARY_COOLDOWN)
+
+    if (now_dt.hour, now_dt.minute) in [(8, 3), (20, 3)] and now_ts - summary_stamp > SUMMARY_COOLDOWN:
+        print("🚨 Đủ điều kiện gửi daily summary")
         send_daily_summary()
+        cooldown["daily_summary"] = now_ts
+        save_cooldown(cooldown)
 
     print("✅ Done")
 

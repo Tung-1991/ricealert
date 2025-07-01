@@ -9,6 +9,8 @@ import string
 from datetime import datetime
 from collections import Counter
 from typing import List, Dict, Any
+import math, time, requests, html
+
 
 import requests
 from dotenv import load_dotenv
@@ -46,8 +48,8 @@ def level_from_score(sc: int) -> str:
     elif sc < 6:  return "WEAK_BUY"
     elif sc < 8:  return "BUY"
     else:         return "STRONG_BUY"
-    
-    
+
+
 TRADELOG_DIR = "/root/ricealert/trade/tradelog"
 ADVISOR_DIR  = "/root/ricealert/advisor_log"
 LOG_DIR      = os.path.join(ADVISOR_DIR, "log")
@@ -104,20 +106,25 @@ def smart_chunk(text: str, limit: int = 1900) -> List[str]:
     return parts
 
 
-def send_discord_alert(msg: str, webhook_name: str = "DISCORD_PRECIOUS") -> None:
-    url = os.getenv(webhook_name)
-    if not url:
-        print(f"[ERROR] Webhook {webhook_name} not set in .env")
+def send_discord_alert(msg: str) -> None:
+    if not WEBHOOK_URL:
+        print("[ERROR] DISCORD_AI_WEBHOOK not set")
         return
 
-    chunks = smart_chunk(msg)
-    for i, chunk in enumerate(chunks):
-        try:
-            requests.post(url, json={"content": chunk}, timeout=10)
-            if i < len(chunks) - 1:
-                time.sleep(3)
-        except Exception as exc:
-            print(f"[ERROR] Discord send failed: {exc}")
+    def _post(chunk: str):
+        r = requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10)
+        r.raise_for_status()          # <- thấy lỗi là biết liền
+        time.sleep(1.5)               # tránh spam rate-limit
+
+    try:
+        if len(msg) > 1900:           # 1900 để trừ hao escape
+            for i in range(0, len(msg), 1900):
+                _post(msg[i : i + 1900])
+        else:
+            _post(msg)
+    except Exception as exc:
+        print(f"[ERROR] Discord alert failed: {exc}")
+        send_error_alert(f"Discord alert failed: {exc}")
 
 # ---------------------------------------------------------------------------
 # VERBOSE ML SUMMARY ---------------------------------------------------------
@@ -402,7 +409,7 @@ def log_to_txt(msg):
 
 def is_overview_time():
     now = datetime.now().strftime("%H:%M")
-    return now in ["08:00", "20:00"]
+    return now in ["08:02", "20:02"]
     #return True
 
 def rr_ratio(entry, tp, sl):
@@ -554,6 +561,14 @@ def main():
         ind_text    = generate_indicator_text(indicators)
         advice_text = generate_advice(pnl, indicators, ai_bias, news_factor)
 
+
+        tech  = score / 10
+        ai    = ml_score / 100
+        news  = (news_factor + 1) / 2
+        pnl_norm  = max(-10, min(10, pnl))
+        pnl_score = (pnl_norm + 10) / 20
+        final_rating = round(0.45*tech + 0.35*ai + 0.1*pnl_score + 0.1*news, 3)
+
         prev = advisor_map.get(trade_id)
         should_send = False
         send_reason = ""
@@ -603,19 +618,11 @@ def main():
 
         coin_amount = round(amount / real_entry, 2)
         current_value = round(amount + pnl_usd, 2)
-  
-        
-        
+
+
+
         if should_send:
             # ---- chuẩn hóa & final_rating -----------------
-            tech  = score / 10
-            ai    = ml_score / 100
-            news  = (news_factor + 1) / 2
-            pnl_norm  = max(-10, min(10, pnl))
-            pnl_score = (pnl_norm + 10) / 20
-
-            final_rating = round(0.45*tech + 0.35*ai + 0.1*pnl_score + 0.1*news, 3)
-
             # ---- map ra level / icon ----------------------
             if   final_rating < 0.05: alert_tag, level_key = "🆘 [Panic Sell]",  "PANIC_SELL"
             elif final_rating < 0.15: alert_tag, level_key = "🔻 [Sell]",        "SELL"
@@ -629,11 +636,11 @@ def main():
             symbol_key    = f"{symbol}_{interval}"
             last_sent_str = cooldown_state.get(symbol_key, {}).get(level_key)
             cooldown_skip = bool(last_sent_str and not is_cooldown_passed(last_sent_str, level_key, now))
-            
+
             # Luôn cộng dồn thống kê cho báo cáo tổng quan
             level_counter[level_key] += 1
             pnl_bucket[level_key]    += pnl_usd
-            
+
             if not cooldown_skip:
                 # ---- update cooldown ----------------------
                 cooldown_state.setdefault(symbol_key, {})[level_key] = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -672,10 +679,6 @@ def main():
 
 
         advisor_map[trade_id] = new_entry
-        tech  = score / 10
-        ai    = ml_score / 100
-        nf    = (news_factor + 1) / 2          # -1/0/+1  → 0/0.5/1
-        
 
         if is_overview_time():
             in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
