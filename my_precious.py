@@ -19,6 +19,7 @@ from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 
 load_dotenv()
+WEBHOOK_URL = os.getenv("DISCORD_PRECIOUS")
 
 # ---------------------------------------------------------------------------
 # CONFIG & PATHS -------------------------------------------------------------
@@ -290,6 +291,204 @@ def describe_market(ind):
     if rsi < 30 and macd == "bearish" and cmf < -0.05:
         return "Thị trường giảm mạnh, rủi ro cao"
     return "Thị trường không rõ ràng, cần quan sát thêm"
+    
+    
+def analyze_multi_timeframe(extra_tf: dict) -> str:
+    """
+    Phân tích đa khung dựa trên trend + CMF + AI để đưa ra nhận định tổng thể.
+    """
+    from collections import Counter
+
+    trends = Counter()
+    ai_biases = Counter()
+    lines = []
+
+    for tf, tfdata in sorted(extra_tf.items()):
+        trend = tfdata.get("trend", "unknown")
+        cmf = tfdata.get("cmf", 0)
+        rsi = tfdata.get("rsi", "?")
+        ai_score = tfdata.get("ai_score", "?")
+        ai_bias = tfdata.get("ai_bias", "neutral")
+
+        trends[trend] += 1
+        ai_biases[ai_bias] += 1
+
+        icon = "⬆️" if trend == "uptrend" else "⬇️" if trend == "downtrend" else "➡️"
+        lines.append(
+            f"{icon} {tf}: Trend: {trend:<9} | RSI: {rsi:<5} | CMF: {round_num(cmf,3):<6} | AI: {ai_score}% ({ai_bias})"
+        )
+
+    summary = []
+
+    # Tổng hợp xu hướng
+    if trends["uptrend"] >= 2:
+        summary.append("🔼 Đa khung xác nhận xu hướng tăng.")
+    elif trends["downtrend"] >= 2:
+        summary.append("🔽 Đa khung xác nhận xu hướng giảm.")
+    else:
+        summary.append("🌀 Xu hướng các khung không đồng thuận.")
+
+    # Tổng hợp AI bias
+    if ai_biases["bullish"] >= 2:
+        summary.append("🤖 AI nghiêng về tăng giá ở nhiều khung.")
+    elif ai_biases["bearish"] >= 2:
+        summary.append("🤖 AI cảnh báo xu hướng giảm.")
+    else:
+        summary.append("🤖 AI chưa rõ xu hướng chung.")
+
+    return "\n".join(summary + [""] + lines)
+    
+def generate_final_strategy(
+    score: int,
+    ai_score: float,
+    news_factor: int,
+    pnl: float,
+    ind: dict,
+    extra_tf: dict,
+) -> str:
+    reco = []
+    reasons = []
+    alerts = []
+
+    lvl = ind.get("level_key", "")
+    fib = ind.get("fib_0_618")
+    sl = ind["trade_plan"]["sl"]
+    tp = ind["trade_plan"]["tp"]
+    price = ind["price"]
+    trend = ind["trend"]
+    cmf = ind["cmf"]
+    macd = ind["macd_cross"]
+    rsi = ind.get("rsi_14", 0)
+
+    # 🎯 KẾT LUẬN CHÍNH
+    if lvl in {"PANIC_SELL", "SELL"}:
+        reco.append("🔻 **Cân nhắc giảm vị thế hoặc đóng lệnh để bảo toàn vốn.**")
+    elif lvl == "AVOID":
+        reco.append("⛔ **Thị trường không rõ ràng – tránh giao dịch, đứng ngoài.**")
+    elif lvl == "HOLD":
+        reco.append("💎 **Giữ lệnh hiện tại, chưa nên mở thêm.** Theo dõi phản ứng giá vùng hỗ trợ.")
+    elif lvl == "WEAK_BUY":
+        reco.append("🟢 **Có thể mở vị thế nhỏ khi giá điều chỉnh/pullback.**")
+    elif lvl == "BUY":
+        reco.append("🛒 **Mua từng phần tại vùng hỗ trợ, ưu tiên vùng gần Fibo 0.618 hoặc breakout trend.**")
+    elif lvl == "STRONG_BUY":
+        reco.append("🚀 **Xu hướng mạnh, đồng thuận – có thể scale-in quyết đoán.** Ưu tiên khi giá vượt mốc quan trọng.")
+
+    # 📌 LÝ DO
+    if score >= 7:
+        reasons.append(f"– Kỹ thuật ủng hộ: Score {score}/10")
+    elif score <= 3:
+        reasons.append(f"– Kỹ thuật yếu: Score {score}/10")
+
+    if ai_score >= 70:
+        reasons.append(f"– AI dự báo tăng mạnh (xác suất {ai_score}%)")
+    elif ai_score >= 60:
+        reasons.append(f"– AI thiên về tăng (xác suất {ai_score}%)")
+    elif ai_score <= 40:
+        reasons.append(f"– AI thiên về giảm (xác suất {ai_score}%)")
+
+    if news_factor == 1:
+        reasons.append("– Tin tức tích cực hỗ trợ thị trường")
+    elif news_factor == -1:
+        reasons.append("– Tin tức tiêu cực – cần thận trọng")
+
+    if cmf > 0.05:
+        reasons.append("– CMF dương → dòng tiền đang vào thị trường")
+    elif cmf < -0.05:
+        reasons.append("– CMF âm → dòng tiền bị rút ra")
+
+    if macd == "bullish":
+        reasons.append("– MACD xác nhận xu hướng tăng")
+    elif macd == "bearish":
+        reasons.append("– MACD đảo chiều giảm")
+
+    if rsi >= 70:
+        alerts.append("⚠️ RSI cao – có thể đã quá mua, dễ điều chỉnh")
+    elif rsi <= 30:
+        alerts.append("⚠️ RSI thấp – thị trường có thể bị bán quá mức")
+
+    # 📊 ĐA KHUNG THỜI GIAN
+    if extra_tf:
+        tf_up = sum(1 for tf in extra_tf.values() if tf["trend"] == "uptrend")
+        tf_down = sum(1 for tf in extra_tf.values() if tf["trend"] == "downtrend")
+        if tf_up >= 2:
+            reasons.append("– Đa khung thời gian xác nhận xu hướng tăng")
+        elif tf_down >= 2:
+            reasons.append("– Đa khung cảnh báo xu hướng giảm")
+
+    # 🔍 PHÂN TÍCH GIÁ & FIBO
+    if trend == "uptrend" and price > fib * 1.01:
+        reasons.append("– Giá đã vượt vùng Fibo 0.618 → khả năng breakout.")
+    elif trend == "uptrend" and abs(price - fib) / fib < 0.01:
+        reasons.append("– Giá đang retest Fibo 0.618 – vùng đáng theo dõi để vào lệnh.")
+
+    # 📌 GỢI Ý HÀNH ĐỘNG THEO PHONG CÁCH TRADER
+    if lvl in {"STRONG_BUY", "BUY"} and score >= 7 and ai_score >= 60:
+        reco.append("📌 Gợi ý theo phong cách:")
+        reco.append("– Scalper: Có thể entry sớm ở pullback nhỏ.")
+        reco.append("– Swing trader: Chờ breakout xác nhận, vào lệnh theo trend.")
+        reco.append("– Holder: Xem xét mở vị thế tích lũy nếu xác định đây là vùng hỗ trợ mạnh.")
+
+    # 💰 HÀNH ĐỘNG THEO PNL
+    if pnl > 5:
+        reco.append(f"👉 Đang lời {pnl}% – cân nhắc *chốt 50%*, kéo SL lên vùng {round_num(fib)} hoặc hòa vốn.")
+    elif pnl <= -3:
+        reco.append(f"❌ Lỗ sâu ({pnl}%) – cân nhắc giảm vị thế, tránh bình quân giá.")
+    elif -3 < pnl < 0:
+        reco.append(f"⏳ Đang lỗ nhẹ ({pnl}%) – giữ SL chặt ở {round_num(sl)} để tránh rủi ro sâu hơn.")
+    elif 0 <= pnl < 2:
+        reco.append(f"🔍 PnL thấp ({pnl}%) – tiếp tục theo dõi, cân nhắc dời TP/SL nếu cần.")
+
+    # 🛡️ SL DYNAMIC
+    dynamic_sl = min(round_num(price * 0.98), round_num(sl))
+    reco.append(f"🎯 Gợi ý SL động: {dynamic_sl} – đặt dưới vùng hỗ trợ gần nhất.")
+
+    # 🧠 ĐÁNH GIÁ TỔNG THỂ
+    def overall_sentiment(score, ai_score, news_factor, extra_tf):
+        pos = 0
+        if score >= 7: pos += 1
+        if score <= 3: pos -= 1
+        if ai_score >= 70: pos += 1
+        elif ai_score <= 40: pos -= 1
+        if news_factor == 1: pos += 1
+        elif news_factor == -1: pos -= 1
+        if sum(1 for tf in extra_tf.values() if tf["trend"] == "uptrend") >= 2: pos += 1
+        if sum(1 for tf in extra_tf.values() if tf["trend"] == "downtrend") >= 2: pos -= 1
+
+        # Đánh giá từ -3 đến +3
+        if pos <= -3:
+            return "💀 Tổng thể cực kỳ **tiêu cực** – nên tránh xa hoặc đóng lệnh."
+        elif pos == -2:
+            return "📉 Tổng thể thiên về **giảm** – cần thận trọng."
+        elif pos == -1:
+            return "🔻 Dấu hiệu hơi tiêu cực – ưu tiên phòng thủ."
+        elif pos == 0:
+            return "🔄 Tín hiệu **hỗn hợp** – chưa rõ xu hướng, cần quan sát thêm."
+        elif pos == 1:
+            return "🔸 Xu hướng hơi tích cực – có thể chuẩn bị cơ hội."
+        elif pos == 2:
+            return "📈 Tổng thể thiên về **tăng** – có thể mở vị thế thăm dò."
+        else:  # pos >= 3
+            return "🚀 Xu hướng **cực kỳ tích cực** – đồng thuận nhiều yếu tố, nên tận dụng cơ hội."
+
+
+    # 🧠 FORMAT
+    reco = [r for r in reco if r.strip()]
+    out = []
+    out.append("🧠 **Chiến lược cuối cùng:**")
+    out.extend([f"• {line}" for line in reco])
+    if reasons:
+        out.append("📌 Lý do:")
+        out.extend(reasons)
+    if alerts:
+        out.append("⚠️ Lưu ý:")
+        out.extend(alerts)
+    out.append("📉 Đánh giá tổng hợp:")
+    out.append(overall_sentiment(score, ai_score, news_factor, extra_tf))
+    return "\n".join(out)
+
+
+
 
 # ---------------------------------------------------------------------------
 # SMART ADVICE, 7-LEVEL AWARE ----------------------------------------------
@@ -298,7 +497,8 @@ def generate_advice(
         pnl: float,
         ind: Dict[str, Any],
         ai_bias: str | None = None,
-        news_factor: int = 0
+        news_factor: int = 0,
+        extra_tf: dict = None
 ) -> str:
     """
     Trả về gợi ý chiến lược bằng tiếng Việt, đã biết 7 cấp độ level_key.
@@ -382,6 +582,11 @@ def generate_advice(
     elif pnl <= -3:
         reco.append("❌ Lỗ sâu – giảm vị thế ngay, *đừng* bình quân giá!")
 
+    if extra_tf:
+        reco.append("")  # dòng trống
+        reco.append("📊 Nhận định đa khung:")
+        reco.append(analyze_multi_timeframe(extra_tf))
+
     return "\n".join(reco)
 
 
@@ -431,28 +636,27 @@ def build_and_send_alert(*, alert_tag, symbol, interval, trade_id,
 📆 In time: {in_time} | Đã giữ: {held} h | RealEntry: {real_entry}
 💰 PnL: {pnl_usd} USD ({pnl}%) | 📦 {coin_amount} | 💵 {current_value}/{amount}
 
-{merged_summary}
-
 📊 Phân tích kỹ thuật chi tiết:
 {ind_text}
 
-🧠 Gợi ý chiến lược:
-{advice_text}
+{merged_summary}
 
 🗞️ Tin tức:
-{news_summary}
-"""
+{news_summary}"""
+
     if extra_tf:
         tf_lines = []
         for tf, tfdata in sorted(extra_tf.items(), key=lambda kv: -kv[1]["score"]):
             lvl = level_from_score(tfdata["score"])
             tf_lines.append(
-                f"{ICON[lvl]} {tf:>2}: RSI {tfdata['rsi']:>5} | "
-                f"Trend {tfdata['trend']:<9} | Level {lvl.replace('_',' ')}"
+                f"{ICON[lvl]} {tf}: Trend: {tfdata['trend']:<9} | RSI: {tfdata['rsi']}  | CMF: {round(tfdata['cmf'], 3)}  | AI: {tfdata.get('ai_score','-')}% ({tfdata.get('ai_bias','-')})"
             )
-        msg += "\n📊 Đa khung:\n" + "\n".join(tf_lines)
+        msg += "\n\n📊 Đa khung:\n" + "\n".join(tf_lines)
+
+    msg = msg.rstrip() + "\n\n" + advice_text.strip()
 
     send_discord_alert(msg)
+
 # ========= HẾT HELPER =================================
 
 
@@ -515,14 +719,30 @@ def main():
                 try:
                     df_tf = get_price_data(symbol, tf)
                     ind_tf = calculate_indicators(df_tf, symbol, tf)
+
+                    ai_path = os.path.join(AI_DIR, f"{symbol}_{tf}.json")
+                    ml_tf = {}
+                    if os.path.exists(ai_path):
+                        try:
+                            with open(ai_path, "r") as f:
+                                ml_tf = json.load(f)
+                        except:
+                            pass
+
                     extra_tf[tf] = {
                         "rsi":   round_num(ind_tf["rsi_14"]),
                         "macd":  ind_tf["macd_cross"],
                         "trend": ind_tf["trend"],
-                        "score": calc_score(ind_tf)
+                        "score": calc_score(ind_tf),
+                        "volume": ind_tf["volume"],
+                        "vol_ma": ind_tf["vol_ma20"],
+                        "cmf": ind_tf["cmf"],
+                        "ai_score": ml_tf.get("score", None),
+                        "ai_level": ml_tf.get("level", None),
+                        "ai_bias": "bullish" if ml_tf.get("score", 0) >= 60 else "bearish" if ml_tf.get("score", 0) <= 40 else "neutral"
                     }
-                except Exception:
-                    pass  # khung nào lỗi thì bỏ qua
+                except Exception as e:
+                    log_to_txt(f"[ERROR] Lỗi xử lý đa khung {tf} của {symbol}: {e}")
 
         # 2) Bonus 1 điểm nếu ≥2 khung cùng trend
         same_dir = sum(
@@ -559,7 +779,8 @@ def main():
         news_factor = -1 if "critical" in news_summary.lower() else 1 if "tin tức" in news_summary.lower() else 0
 
         ind_text    = generate_indicator_text(indicators)
-        advice_text = generate_advice(pnl, indicators, ai_bias, news_factor)
+        advice_text = generate_final_strategy(score, ml_score, news_factor, pnl, indicators, extra_tf)
+
 
 
         tech  = score / 10
@@ -653,7 +874,8 @@ def main():
 
             # ---- refresh advice ---------------------------
             indicators["level_key"] = level_key
-            advice_text = generate_advice(pnl, indicators, ai_bias, news_factor)
+            advice_text = generate_final_strategy(score, ml_score, news_factor, pnl, indicators, extra_tf)
+
 
             # ---- gộp summary ngắn -------------------------
             merged_summary = f"""📌 Tổng hợp đánh giá: {symbol} ({interval}) | PnL: {pnl}% | Final: {round(final_rating*100,2)}%
