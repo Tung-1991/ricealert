@@ -111,27 +111,40 @@ def fetch_rss(feed_url, tag):
     return news
 
 
-def classify_news_level(title):
-    title = title.lower()
+def classify_news_level(title: str) -> str:
+    title_l = title.lower()
     for level, keys in KEYWORDS.items():
-        if any(key in title for key in keys):
-            return level
+        for key in keys:
+            # match đúng từ (word-boundary) thay vì substring
+            if re.search(rf"\b{re.escape(key)}\b", title_l):
+                return level
     return "INFO"
 
 def generate_suggestion_and_trend(title, source=None):
     title_l = title.lower()
+
     if re.search(r"\b(will|to)?\s*list\b", title_l) or "etf" in title_l:
         return "Tin tức về niêm yết mới hoặc sản phẩm ETF – đây thường là chất xúc tác khiến giá biến động mạnh.", "UPTREND"
-    if "mainnet" in title_l or "launch" in title_l or "upgrade" in title_l:
+
+    if any(w in title_l for w in ["mainnet", "launch", "upgrade"]):
         return "Dự án đang triển khai cập nhật hoặc ra mắt sản phẩm mới – có thể tạo kỳ vọng tăng trưởng ngắn hạn.", "UPTREND"
-    if "hack" in title_l or "exploit" in title_l or "lawsuit" in title_l:
+
+    if any(w in title_l for w in ["hack", "exploit", "lawsuit"]):
         return "Thông tin tiêu cực: sự cố bảo mật hoặc kiện tụng – có khả năng gây áp lực bán trên thị trường.", "DOWNTREND"
+
+    # ➡️ thêm đoạn này
+    if any(w in title_l for w in ["fatf", "sec", "regulation", "stablecoin crime", "stablecoin regulation", "warning"]):
+        return "Tin liên quan đến giám sát/pháp lý (FATF, SEC…) – thường gây áp lực giảm ngắn hạn do rủi ro tuân thủ.", "DOWNTREND"
+
     if "airdrop" in title_l:
         return "Thông báo về airdrop – thường kích thích cộng đồng tham gia nhưng ít ảnh hưởng trực tiếp đến giá.", "WATCH"
-    if "governance" in title_l or "voting" in title_l:
+
+    if any(w in title_l for w in ["governance", "voting"]):
         return "Tin tức liên quan đến quản trị, biểu quyết – phản ánh thay đổi chiến lược nội bộ của dự án.", "WATCH"
+
     if source == "Cointelegraph" and "vitalik" in title_l:
         return "Vitalik đưa ra nhận định mới – có thể ảnh hưởng đến cộng đồng Ethereum.", "SIDEWAY"
+
     return "Không có nội dung mang tính định hướng rõ ràng – tin tức thiên về tổng hợp hoặc trung lập.", "SIDEWAY"
 
 # Các phần còn lại của file nên bao gồm thêm logic sử dụng detect_category_tag và extract_trending_keywords trong các bước xử lý và gửi dữ liệu.

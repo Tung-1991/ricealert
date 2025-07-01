@@ -25,15 +25,26 @@ COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker_ml.json")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # ---------- CONSTANTS ----------
-LEVEL_COOLDOWN = {
-    "PANIC_SELL": 3,
-    "SELL": 4,
-    "AVOID": 5,
-    "HOLD": 6,
-    "WEAK_BUY": 5,
-    "BUY": 4,
-    "STRONG_BUY": 3,
+COOLDOWN_LEVEL_MAP = {
+    "1h":  {"PANIC_SELL": 3, "SELL": 4, "AVOID": 5, "HOLD": 6, "WEAK_BUY": 5, "BUY": 4, "STRONG_BUY": 3},
+    "4h":  {"PANIC_SELL": 6, "SELL": 8, "AVOID":10, "HOLD":12, "WEAK_BUY":10, "BUY": 8, "STRONG_BUY": 6},
+    "1d":  {"PANIC_SELL": 9, "SELL":12, "AVOID":15, "HOLD":18, "WEAK_BUY":15, "BUY":12, "STRONG_BUY": 9},
 }
+
+RISK_REWARD_MAP = {
+    "STRONG_BUY": 1 / 2,
+    "BUY":        1 / 2.5,
+    "WEAK_BUY":   1 / 3,
+    "HOLD":       1 / 4,
+    "AVOID":      1 / 5,
+    "SELL":       1 / 2.5,
+    "PANIC_SELL": 1 / 2,
+}
+
+def get_cooldown_hours(level: str, interval: str) -> int:
+    return COOLDOWN_LEVEL_MAP.get(interval, {}).get(level, 6)
+
+
 LEVEL_ICONS = {
     "STRONG_BUY": "🔥 STRONG BUY",
     "BUY": "✅ BUY",
@@ -63,7 +74,7 @@ def send_discord_alert(msg: str) -> None:
 
 
 def send_error_alert(msg: str) -> None:
-    ts = datetime.utcnow().isoformat()
+    ts = datetime.now(timezone.utc).isoformat()
     with open(ERROR_LOG, "a") as f:
         f.write(f"{ts} | {msg}\n")
     if ERROR_WEBHOOK:
@@ -106,20 +117,48 @@ def load_model_and_meta(symbol: str, interval: str):
 
 # ---------- LEVEL ----------
 
-def classify_suggestion(score: float, pct: float) -> str:
-    if score >= 85 and pct > 4:
+# ---------- DYNAMIC LEVEL ----------
+THRESHOLDS = {
+    "1h": {
+        "STRONG_BUY": (85, 6),
+        "BUY": (75, 3),
+        "WEAK_BUY": (60, 1),
+        "SELL": (40, -2),
+        "PANIC_SELL": (30, -4),
+    },
+    "4h": {
+        "STRONG_BUY": (85, 8),
+        "BUY": (75, 5),
+        "WEAK_BUY": (60, 2),
+        "SELL": (40, -3),
+        "PANIC_SELL": (30, -6),
+    },
+    "1d": {
+        "STRONG_BUY": (85, 10),
+        "BUY": (75, 7),
+        "WEAK_BUY": (60, 3),
+        "SELL": (40, -4),
+        "PANIC_SELL": (30, -8),
+    },
+}
+DEFAULT_THRESHOLDS = THRESHOLDS["4h"]
+
+def classify_suggestion(interval: str, score: float, pct: float) -> str:
+    """Classify suggestion dynamically per interval."""
+    t = THRESHOLDS.get(interval, DEFAULT_THRESHOLDS)
+    if score >= t["STRONG_BUY"][0] and pct >= t["STRONG_BUY"][1]:
         return "STRONG_BUY"
-    if score >= 75 and pct > 2:
+    if score >= t["BUY"][0] and pct >= t["BUY"][1]:
         return "BUY"
-    if score >= 60 and pct > 0.5:
+    if score >= t["WEAK_BUY"][0] and pct >= t["WEAK_BUY"][1]:
         return "WEAK_BUY"
-    if score < 30 and pct < -4:
+    if score <= t["PANIC_SELL"][0] and pct <= t["PANIC_SELL"][1]:
         return "PANIC_SELL"
-    if score < 40 and pct < -1:
+    if score <= t["SELL"][0] and pct <= t["SELL"][1]:
         return "SELL"
-    if score < 50 and -1 < pct < 0.5:
-        return "AVOID"
-    return "HOLD"
+    if abs(pct) < 0.5:
+        return "HOLD"
+    return "AVOID"
 
 # ---------- ANALYZE ----------
 
@@ -129,32 +168,51 @@ def analyze_symbol(symbol: str, interval: str, cooldown: dict, *, force: bool = 
     if not clf or not reg or not meta:
         return None
     try:
-        df = get_price_data(symbol, interval, limit=100)
+        # ---- Fetch data & features ----
+        df   = get_price_data(symbol, interval, limit=100)
         indi = calculate_indicators(df, symbol, interval)
 
-        X = pd.DataFrame([
-            {f: indi.get(f, 0.0) for f in meta["features"]}
-        ]).fillna(0.0)
+        X = pd.DataFrame([{f: indi.get(f, 0.0) for f in meta["features"]}]).fillna(0.0)
 
         prob = float(clf.predict_proba(X)[0][1])
         pct  = float(reg.predict(X)[0]) * 100
 
-        prob_cut = meta.get("threshold", 0.6)
-        level = classify_suggestion(prob * 100, pct)
-        if prob < prob_cut and level.startswith(("BUY", "STRONG_BUY", "WEAK_BUY")):
-            level = "HOLD"
-
+        # ==== ALWAYS-DEFINE section ====
         price = indi.get("price", 0)
         plan  = indi.get("trade_plan", {})
         entry = plan.get("entry", price)
-        tp    = plan.get("tp", price * (1 + pct / 100))
-        sl    = plan.get("sl", price * 0.97)
 
+        # provisional level until classified
+        level = "HOLD"
+
+        direction  = 1 if pct >= 0 else -1
+        tp_pct     = abs(pct)
+        risk_ratio = RISK_REWARD_MAP.get(level, 1 / 3)
+        sl_pct     = tp_pct * risk_ratio
+
+        tp  = plan.get("tp", price * (1 + direction * tp_pct / 100))
+        sl  = plan.get("sl", price * (1 - direction * sl_pct / 100))
         now = datetime.now(timezone.utc)
+        # =================================
+
+        # ---- Classify suggestion ----
+        prob_cut = meta.get("threshold", 0.6)
+        level = classify_suggestion(interval, prob * 100, pct)
+
+        # downgrade bullish signals with low confidence
+        if prob < prob_cut and level.startswith(("BUY", "STRONG_BUY", "WEAK_BUY")):
+            level = "HOLD"
+
+        # ---- Re‑calculate TP/SL based on final level ----
+        risk_ratio = RISK_REWARD_MAP.get(level, 1 / 3)
+        sl_pct     = tp_pct * risk_ratio
+        tp  = plan.get("tp", price * (1 + direction * tp_pct / 100))
+        sl  = plan.get("sl", price * (1 - direction * sl_pct / 100))
+
         key = f"{symbol}_{interval}_{level}"
         if not force:
             last = cooldown.get(key)
-            if last and now - datetime.fromisoformat(last) < timedelta(hours=LEVEL_COOLDOWN.get(level, 6)):
+            if last and now - datetime.fromisoformat(last) < timedelta(hours=get_cooldown_hours(level, interval)):
                 print(f"[COOLDOWN] Skip {key}")
                 return None
 
@@ -171,13 +229,13 @@ def analyze_symbol(symbol: str, interval: str, cooldown: dict, *, force: bool = 
             "level_icon": LEVEL_ICONS.get(level, level),
             "timestamp": now.isoformat(),
             "summary": (
-                f"ML dự đoán: {pct:+.2f}% ({'tăng' if pct > 0 else 'giảm'}), χsuất: {prob*100:.2f}% khung {interval}.\n"
+                f"ML dự đoán: {pct:+.2f}% ({'tăng' if pct > 0 else 'giảm'}), χsuất: {prob*100:.2f}% khung {interval}. "
                 f"Giá {price:.4f}, Entry {entry:.4f}, TP {tp:.4f}, SL {sl:.4f}."
             ),
         }
 
-        with open(os.path.join(LOG_DIR, f"{symbol}_{interval}.json"), "w") as f:
-            json.dump(result, f, indent=2)
+        with open(os.path.join(LOG_DIR, f"{symbol}_{interval}.json"), "w") as f_out:
+            json.dump(result, f_out, indent=2)
 
         if not force:
             cooldown[key] = now.isoformat()
@@ -187,6 +245,7 @@ def analyze_symbol(symbol: str, interval: str, cooldown: dict, *, force: bool = 
     except Exception as exc:  # noqa: BLE001
         send_error_alert(f"Analyze {symbol} {interval}: {exc}")
         return None
+
 
 # ---------- MAIN ----------
 
