@@ -224,19 +224,64 @@ def round_num(val, d=2):
 
 def calc_score(ind):
     score = 0
-    if ind.get('trend_alignment_bonus'):        # <-- thêm dòng này
-        score += ind['trend_alignment_bonus']    # +1 khi đủ điều kiện
 
-    if ind["rsi_14"] < 30 or ind["rsi_14"] > 70: score += 1
-    if ind["macd_cross"] in ["bullish", "bearish"]: score += 1
-    if abs(ind["cmf"]) > 0.05: score += 1
-    if ind["volume"] > 1.5 * ind["vol_ma20"]: score += 1
-    if ind["adx"] > 20: score += 1
-    if abs(ind["price"] - ind["fib_0_618"]) / ind["price"] < 0.01:
+    # --- Bonus từ đa khung đồng thuận
+    if ind.get("trend_alignment_bonus"): score += 1
+
+    # --- RSI ngưỡng cực đoan
+    rsi = ind.get("rsi_14", 50)
+    if rsi < 30 or rsi > 70:
         score += 1
-    if ind["doji_type"]: score += 1
-    if ind.get("tag") in ["buy_strong", "short_strong", "swing_trade"]: score += 2
-    return min(score, 10)
+
+    # --- MACD tín hiệu rõ
+    if ind.get("macd_cross") in ["bullish", "bearish"]:
+        score += 1
+
+    # --- CMF mạnh
+    cmf = ind.get("cmf", 0)
+    if abs(cmf) > 0.05:
+        score += 1
+
+    # --- Volume đột biến
+    if ind.get("volume", 0) > 1.5 * ind.get("vol_ma20", 1):
+        score += 1
+
+    # --- ADX có lực
+    if ind.get("adx", 0) > 20:
+        score += 1
+
+    # --- Fibo 0.618 gần giá → tiềm năng phản ứng
+    price = ind.get("price", 0)
+    fib = ind.get("fib_0_618", 0)
+    if price and fib and abs(price - fib) / price < 0.015:
+        score += 1
+
+    # --- Có doji rõ
+    if ind.get("doji_type"):
+        score += 1
+
+    # --- RSI divergence
+    if ind.get("rsi_divergence") in ["bullish", "bearish"]:
+        score += 1
+
+    # --- Tag kỹ thuật mạnh
+    tag = ind.get("tag", "")
+    if tag in ["buy_high", "buy_low", "sell_high", "sell_low"]:
+        score += 2
+    elif tag == "canbuy":
+        score += 1
+    elif tag == "avoid":
+        score -= 1  # phạt nhẹ nếu tín hiệu tránh
+
+    # --- Signal level mạnh → cộng thêm
+    signal = ind.get("signal_level", "")
+    if signal == "CRITICAL":
+        score += 1
+    elif signal == "WARNING":
+        score += 0.5
+
+    return int(min(max(score, 0), 10))
+
 
 def format_price(price):
     if not isinstance(price, (int, float)):
@@ -248,8 +293,7 @@ def generate_indicator_text(ind: dict) -> str:
     Trả về block phân tích kỹ thuật.
     Nếu ind có 'level_key' (PANIC_SELL … STRONG_BUY) thì gắn icon tương ứng.
     """
-    icon = ICON.get(ind.get("level_key", ""), "")   # "" nếu chưa có level_key
-
+    icon = ICON.get(ind.get("level_key", ""), "")
     lines = [
         f"{icon} Giá hiện tại: {format_price(ind['price'])}  |  "
         f"Entry {format_price(ind['trade_plan']['entry'])}  |  "
@@ -270,7 +314,56 @@ def generate_indicator_text(ind: dict) -> str:
         f"🔧 Nến: {ind.get('doji_type') or 'None'}",
         f"⬆️ Trend: {ind['trend']}",
     ]
+
+    # 🔹 Tín hiệu kỹ thuật từ signal_logic
+    signal = ind.get("signal_level")
+    reason = ind.get("signal_reason")
+    tag    = ind.get("tag", "unknown")
+    if signal:
+        key = (signal.upper(), tag.lower())
+        desc_map = {
+            # HOLD
+            ("HOLD", "avoid"):   "Không đủ tín hiệu kỹ thuật rõ ràng để hành động",
+            ("HOLD", "neutral"): "Thị trường sideway, nên quan sát thêm",
+
+            # WATCHLIST
+            ("WATCHLIST", "canbuy"):     "Tín hiệu sớm – nên theo dõi để vào sau pullback",
+            ("WATCHLIST", "buy_low"):    "Giá gần vùng hỗ trợ – có thể hình thành đảo chiều",
+            ("WATCHLIST", "buy_high"):   "Xu hướng tăng đang hình thành, cần chờ xác nhận",
+            ("WATCHLIST", "sell_high"):  "Kháng cự bắt đầu có phản ứng – theo dõi lực bán",
+            ("WATCHLIST", "sell_low"):   "Đang kiểm tra vùng đáy – chờ tín hiệu phá đáy hoặc hồi",
+            ("WATCHLIST", "avoid"):      "Thị trường chưa rõ trend – nên quan sát thêm",
+
+            # ALERT
+            ("ALERT", "buy_low"):    "Hồi phục nhẹ từ hỗ trợ – cần chờ xác nhận",
+            ("ALERT", "buy_high"):   "Breakout ban đầu – cần cảnh giác bulltrap",
+            ("ALERT", "canbuy"):     "Có thể mở lệnh sớm nhưng cần SL chặt",
+            ("ALERT", "sell_high"):  "Giá tiệm cận kháng cự, rủi ro đảo chiều tăng cao",
+            ("ALERT", "sell_low"):   "Phe bán đang chiếm ưu thế – cần theo dõi",
+            ("ALERT", "avoid"):      "Tín hiệu chưa rõ ràng – dễ bị whipsaw",
+
+            # WARNING
+            ("WARNING", "buy_low"):    "Hỗ trợ quan trọng bị thủng – rủi ro tăng mạnh",
+            ("WARNING", "buy_high"):   "Breakout thất bại – nên tránh fomo",
+            ("WARNING", "canbuy"):     "Vẫn có thể vào nhưng rủi ro đã tăng",
+            ("WARNING", "sell_high"):  "Kháng cự mạnh – nên chốt lời từng phần",
+            ("WARNING", "sell_low"):   "Áp lực bán tăng nhanh – cẩn trọng nếu giữ lệnh",
+            ("WARNING", "avoid"):      "Thị trường đang bất ổn – không nên mở lệnh",
+
+            # CRITICAL
+            ("CRITICAL", "buy_low"):   "Vùng hỗ trợ mạnh + breakout – tín hiệu đảo chiều rõ",
+            ("CRITICAL", "buy_high"):  "Phe mua áp đảo, breakout rõ ràng",
+            ("CRITICAL", "canbuy"):    "Xác suất bật mạnh từ hỗ trợ – có thể entry quyết đoán",
+            ("CRITICAL", "sell_high"): "Phe bán chiếm ưu thế mạnh – khả năng đảo chiều cao",
+            ("CRITICAL", "sell_low"):  "Thị trường breakdown – khả năng giảm sâu",
+            ("CRITICAL", "avoid"):     "Thị trường rất nguy hiểm – nên đứng ngoài",
+        }
+        desc = desc_map.get(key, reason or "Không rõ tín hiệu kỹ thuật")
+        lines.append(f"🔹 Tín hiệu kỹ thuật: {signal} ({tag}) – {desc}")
+
     return "\n".join(lines)
+
+
 
 
 def describe_market(ind):
@@ -338,6 +431,7 @@ def analyze_multi_timeframe(extra_tf: dict) -> str:
 
     return "\n".join(summary + [""] + lines)
     
+    
 def generate_final_strategy(
     score: int,
     ai_score: float,
@@ -351,7 +445,7 @@ def generate_final_strategy(
     alerts = []
 
     lvl = ind.get("level_key", "")
-    fib = ind.get("fib_0_618")
+    fib = ind["trade_plan"]["sl"]
     sl = ind["trade_plan"]["sl"]
     tp = ind["trade_plan"]["tp"]
     price = ind["price"]
@@ -359,6 +453,9 @@ def generate_final_strategy(
     cmf = ind["cmf"]
     macd = ind["macd_cross"]
     rsi = ind.get("rsi_14", 0)
+    tag = ind.get("tag", "")
+    signal_level = ind.get("signal_level", "")
+    signal_reason = ind.get("signal_reason", "")
 
     # 🎯 KẾT LUẬN CHÍNH
     if lvl in {"PANIC_SELL", "SELL"}:
@@ -375,23 +472,34 @@ def generate_final_strategy(
         reco.append("🚀 **Xu hướng mạnh, đồng thuận – có thể scale-in quyết đoán.** Ưu tiên khi giá vượt mốc quan trọng.")
 
     # 📌 LÝ DO
+    reasons.append(f"– Level: {lvl} | Tag: {tag}")
+
     if score >= 7:
         reasons.append(f"– Kỹ thuật ủng hộ: Score {score}/10")
     elif score <= 3:
         reasons.append(f"– Kỹ thuật yếu: Score {score}/10")
 
+    # Tín hiệu kỹ thuật từ signal_logic
+    if signal_level and signal_reason:
+        reasons.append(f"– Tín hiệu kỹ thuật: {signal_level} ({tag}) – {signal_reason}")
+
+    # AI phân tích
     if ai_score >= 70:
         reasons.append(f"– AI dự báo tăng mạnh (xác suất {ai_score}%)")
     elif ai_score >= 60:
         reasons.append(f"– AI thiên về tăng (xác suất {ai_score}%)")
     elif ai_score <= 40:
         reasons.append(f"– AI thiên về giảm (xác suất {ai_score}%)")
+    else:
+        reasons.append(f"– AI trung lập (xác suất {ai_score}%)")
 
+    # Tin tức
     if news_factor == 1:
         reasons.append("– Tin tức tích cực hỗ trợ thị trường")
     elif news_factor == -1:
         reasons.append("– Tin tức tiêu cực – cần thận trọng")
 
+    # Chỉ báo kỹ thuật
     if cmf > 0.05:
         reasons.append("– CMF dương → dòng tiền đang vào thị trường")
     elif cmf < -0.05:
@@ -407,7 +515,7 @@ def generate_final_strategy(
     elif rsi <= 30:
         alerts.append("⚠️ RSI thấp – thị trường có thể bị bán quá mức")
 
-    # 📊 ĐA KHUNG THỜI GIAN
+    # Đa khung
     if extra_tf:
         tf_up = sum(1 for tf in extra_tf.values() if tf["trend"] == "uptrend")
         tf_down = sum(1 for tf in extra_tf.values() if tf["trend"] == "downtrend")
@@ -416,20 +524,20 @@ def generate_final_strategy(
         elif tf_down >= 2:
             reasons.append("– Đa khung cảnh báo xu hướng giảm")
 
-    # 🔍 PHÂN TÍCH GIÁ & FIBO
+    # Fibo
     if trend == "uptrend" and price > fib * 1.01:
         reasons.append("– Giá đã vượt vùng Fibo 0.618 → khả năng breakout.")
     elif trend == "uptrend" and abs(price - fib) / fib < 0.01:
         reasons.append("– Giá đang retest Fibo 0.618 – vùng đáng theo dõi để vào lệnh.")
 
-    # 📌 GỢI Ý HÀNH ĐỘNG THEO PHONG CÁCH TRADER
+    # Gợi ý theo phong cách
     if lvl in {"STRONG_BUY", "BUY"} and score >= 7 and ai_score >= 60:
         reco.append("📌 Gợi ý theo phong cách:")
         reco.append("– Scalper: Có thể entry sớm ở pullback nhỏ.")
         reco.append("– Swing trader: Chờ breakout xác nhận, vào lệnh theo trend.")
         reco.append("– Holder: Xem xét mở vị thế tích lũy nếu xác định đây là vùng hỗ trợ mạnh.")
 
-    # 💰 HÀNH ĐỘNG THEO PNL
+    # Theo PnL
     if pnl > 5:
         reco.append(f"👉 Đang lời {pnl}% – cân nhắc *chốt 50%*, kéo SL lên vùng {round_num(fib)} hoặc hòa vốn.")
     elif pnl <= -3:
@@ -439,12 +547,12 @@ def generate_final_strategy(
     elif 0 <= pnl < 2:
         reco.append(f"🔍 PnL thấp ({pnl}%) – tiếp tục theo dõi, cân nhắc dời TP/SL nếu cần.")
 
-    # 🛡️ SL DYNAMIC
+    # SL động
     dynamic_sl = min(round_num(price * 0.98), round_num(sl))
     reco.append(f"🎯 Gợi ý SL động: {dynamic_sl} – đặt dưới vùng hỗ trợ gần nhất.")
 
-    # 🧠 ĐÁNH GIÁ TỔNG THỂ
-    def overall_sentiment(score, ai_score, news_factor, extra_tf):
+    # Tổng kết
+    def overall_sentiment(score, ai_score, news_factor, extra_tf, tag, signal_level):
         pos = 0
         if score >= 7: pos += 1
         if score <= 3: pos -= 1
@@ -452,10 +560,13 @@ def generate_final_strategy(
         elif ai_score <= 40: pos -= 1
         if news_factor == 1: pos += 1
         elif news_factor == -1: pos -= 1
-        if sum(1 for tf in extra_tf.values() if tf["trend"] == "uptrend") >= 2: pos += 1
-        if sum(1 for tf in extra_tf.values() if tf["trend"] == "downtrend") >= 2: pos -= 1
+        if sum(1 for tf in (extra_tf or {}).values() if tf["trend"] == "uptrend") >= 2: pos += 1
+        if sum(1 for tf in (extra_tf or {}).values() if tf["trend"] == "downtrend") >= 2: pos -= 1
+        if tag in {"buy_low", "canbuy"}: pos += 1
+        if tag in {"avoid", "sell_high"}: pos -= 1
+        if signal_level == "CRITICAL": pos += 1
+        elif signal_level == "WARNING": pos += 0.5
 
-        # Đánh giá từ -3 đến +3
         if pos <= -3:
             return "💀 Tổng thể cực kỳ **tiêu cực** – nên tránh xa hoặc đóng lệnh."
         elif pos == -2:
@@ -468,24 +579,24 @@ def generate_final_strategy(
             return "🔸 Xu hướng hơi tích cực – có thể chuẩn bị cơ hội."
         elif pos == 2:
             return "📈 Tổng thể thiên về **tăng** – có thể mở vị thế thăm dò."
-        else:  # pos >= 3
+        else:
             return "🚀 Xu hướng **cực kỳ tích cực** – đồng thuận nhiều yếu tố, nên tận dụng cơ hội."
 
+    summary = overall_sentiment(score, ai_score, news_factor, extra_tf or {}, tag, signal_level)
 
-    # 🧠 FORMAT
-    reco = [r for r in reco if r.strip()]
     out = []
     out.append("🧠 **Chiến lược cuối cùng:**")
-    out.extend([f"• {line}" for line in reco])
+    out.extend([f"• {line}" for line in reco if line.strip()])
     if reasons:
         out.append("📌 Lý do:")
         out.extend(reasons)
     if alerts:
         out.append("⚠️ Lưu ý:")
         out.extend(alerts)
-    out.append("📉 Đánh giá tổng hợp:")
-    out.append(overall_sentiment(score, ai_score, news_factor, extra_tf))
+    out.append(f"📉 Đánh giá tổng hợp: {summary}")
     return "\n".join(out)
+
+
 
 
 
@@ -505,12 +616,15 @@ def generate_advice(
     Với PANIC_SELL / SELL / AVOID → trả về ngắn gọn, dứt khoát.
     Với HOLD … STRONG_BUY → phân tích chi tiết + đề xuất SL/TP.
     """
-    lvl   = ind.get("level_key", "").upper()          # PANIC_SELL…STRONG_BUY
+    lvl   = ind.get("level_key", "").upper()
     price = ind["price"]
     tp    = ind["trade_plan"]["tp"]
     sl    = ind["trade_plan"]["sl"]
     fib   = ind["fib_0_618"]
     cmf   = ind["cmf"]
+    tag   = ind.get("tag")
+    signal = ind.get("signal_level")
+    reason = ind.get("signal_reason")
 
     # ===== 1. Các cấp độ “cực đoan” – trả lời ngay, không cần phân tích dài ====
     if lvl == "PANIC_SELL":
@@ -527,7 +641,11 @@ def generate_advice(
         return "⛔ **Avoid** → Tín hiệu nhiễu, đứng ngoài quan sát thêm."
 
     # ===== 2. Phần còn lại: HOLD - WEAK_BUY - BUY - STRONG_BUY ===============
-    reco: List[str] = [describe_market(ind)]          # khung cảnh chung
+    reco: List[str] = [describe_market(ind)]
+
+    # 🔎 Tín hiệu từ logic mới (signal_logic)
+    if signal and tag and signal != "HOLD":
+        reco.append(f"🔎 Tín hiệu từ chỉ báo: {signal} (Tag: {tag}) → {reason}")
 
     # ---- Money-flow & MACD ---------------------------------------------------
     if cmf >  0.05: reco.append("CMF dương → dòng tiền đang *vào*")
@@ -539,16 +657,18 @@ def generate_advice(
     elif macd_cross == "bearish":
         reco.append("MACD giao cắt *xuống* → chú ý điều chỉnh")
 
-    # ---- AI / News cue  ------------------------------------------------------
+    # ---- AI / News cue -------------------------------------------------------
     if ai_bias == "bullish":
         reco.append("🤖 AI *lạc quan* – có thể scale-in khi *pullback nhẹ*")
     elif ai_bias == "bearish":
         reco.append("🤖 AI *bi quan* – giảm vị thế / SL chặt")
 
-    if news_factor ==  1:  reco.append("📰 Tin tức *tích cực* – giá dễ bật nhanh")
-    if news_factor == -1:  reco.append("📰 Tin **xấu / CRITICAL** – nên SL sát")
+    if news_factor ==  1:
+        reco.append("📰 Tin tức *tích cực* – giá dễ bật nhanh")
+    elif news_factor == -1:
+        reco.append("📰 Tin **xấu / CRITICAL** – nên SL sát")
 
-    reco.append("")                                         # ngắt dòng đẹp
+    reco.append("")  # ngắt dòng
 
     # ---- Trailing-SL (ATR) ---------------------------------------------------
     try:
@@ -556,7 +676,8 @@ def generate_advice(
         atr = ta.volatility.average_true_range(
                 ind['df']['high'], ind['df']['low'], ind['df']['close'],
                 window=14).iloc[-2]
-        trail = max(fib, price - 1.5*atr)
+        mult = 1.8 if tag in {"buy_low", "buy_high", "canbuy"} else 1.5
+        trail = max(fib, price - mult*atr)
         reco.append(f"🔄 Trail SL ≈ {round_num(trail,4)}")
     except Exception:
         pass
@@ -570,6 +691,8 @@ def generate_advice(
         reco.append(f"🟢 Có thể *mua thăm dò* (<25%) nếu giá > {round_num(sl)}.")
     elif lvl == "BUY":
         reco.append(f"🛒 *Mua từng phần* khi retest {round_num(fib)} – TP {tp}.")
+        if tag in {"buy_low", "buy_high"}:
+            reco.append("📌 Tín hiệu xác nhận từ kỹ thuật – có thể vào lệnh quyết đoán.")
     elif lvl == "STRONG_BUY":
         reco.append("🚀 *Mua mạnh/Scale-in* – xu hướng đồng thuận đa khung.")
         reco.append(f"Đặt TP1 {tp}, TP2 {round_num(tp*1.06)} – SL động trên Fib.")
@@ -588,6 +711,7 @@ def generate_advice(
         reco.append(analyze_multi_timeframe(extra_tf))
 
     return "\n".join(reco)
+
 
 
 def calc_held_hours(start_str):
@@ -706,7 +830,6 @@ def main():
         pnl = round((price_now - real_entry) / real_entry * 100, 2)
         pnl_usd = round(amount * pnl / 100, 2)
         held = calc_held_hours(in_time)
-
         indicators = calculate_indicators(df, symbol, interval)
         indicators["df"] = df
         indicators["trade_plan"] = plan
@@ -743,6 +866,17 @@ def main():
                     }
                 except Exception as e:
                     log_to_txt(f"[ERROR] Lỗi xử lý đa khung {tf} của {symbol}: {e}")
+
+        # ✅ Sau khi đã có extra_tf, mới inject RSI vào indicators
+        indicators["rsi_1h"] = extra_tf.get("1h", {}).get("rsi")
+        indicators["rsi_4h"] = extra_tf.get("4h", {}).get("rsi")
+        indicators["rsi_1d"] = extra_tf.get("1d", {}).get("rsi")
+
+        # ✅ Gọi check_signal() sau khi indicators đầy đủ
+        signal_level, signal_reason = check_signal(indicators)
+        indicators["signal_level"] = signal_level
+        indicators["signal_reason"] = signal_reason
+        indicators["tag"] = indicators.get("tag", "avoid")
 
         # 2) Bonus 1 điểm nếu ≥2 khung cùng trend
         same_dir = sum(
@@ -789,6 +923,10 @@ def main():
         pnl_norm  = max(-10, min(10, pnl))
         pnl_score = (pnl_norm + 10) / 20
         final_rating = round(0.45*tech + 0.35*ai + 0.1*pnl_score + 0.1*news, 3)
+        signal_boost = 0.03 if indicators.get("signal_level") == "WARNING" else 0.05 if indicators.get("signal_level") == "CRITICAL" else 0
+        final_rating += signal_boost
+        final_rating = round(min(1.0, final_rating), 3)
+
 
         prev = advisor_map.get(trade_id)
         should_send = False

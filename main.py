@@ -223,22 +223,26 @@ def main() -> None:
 
                 # Cross‑frame RSI ------------------------------------------------
                 if interval == "1h":
-                    # Lấy RSI 4h từ cache (đã prefetch ở đầu file)
-                    rsi4 = None
-                    if "4h" in cached and symbol in cached["4h"]:
-                        rsi4 = calculate_indicators(
-                            cached["4h"][symbol], symbol, "4h"
-                        )["rsi_14"]
-
+                    rsi_4h = calculate_indicators(cached["4h"][symbol], symbol, "4h")["rsi_14"]
+                    rsi_1d = calculate_indicators(cached["1d"][symbol], symbol, "1d")["rsi_14"]
                     ind["rsi_1h"] = ind["rsi_14"]
-                    ind["rsi_4h"] = rsi4        # <-- không còn None
+                    ind["rsi_4h"] = rsi_4h
+                    ind["rsi_1d"] = rsi_1d
+
                 elif interval == "4h":
                     ind1 = calculate_indicators(cached["1h"][symbol], symbol, "1h")
-                    ind["rsi_1h"], ind["rsi_4h"] = ind1["rsi_14"], ind["rsi_14"]
+                    rsi_1d = calculate_indicators(cached["1d"][symbol], symbol, "1d")["rsi_14"]
+                    ind["rsi_1h"] = ind1["rsi_14"]
+                    ind["rsi_4h"] = ind["rsi_14"]
+                    ind["rsi_1d"] = rsi_1d
+
                 elif interval == "1d":
                     ind1 = calculate_indicators(cached["1h"][symbol], symbol, "1h")
                     ind4 = calculate_indicators(cached["4h"][symbol], symbol, "4h")
-                    ind["rsi_1h"], ind["rsi_4h"] = ind1["rsi_14"], ind4["rsi_14"]
+                    ind["rsi_1h"] = ind1["rsi_14"]
+                    ind["rsi_4h"] = ind4["rsi_14"]
+                    ind["rsi_1d"] = ind["rsi_14"]
+
 
                 signal, _ = check_signal(ind)
                 indic_map[interval] = ind
@@ -329,3 +333,4 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
+
