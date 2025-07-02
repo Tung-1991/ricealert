@@ -1,3 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+ml_report.py - AI Trading Signal Assistant
+Version: 4.2 (The Best of Both Worlds)
+Date: 2025-07-03
+Description: This definitive version combines the best of all previous iterations.
+             - Delivers immediate, detailed, consolidated signal alerts per symbol.
+             - Restores the periodic overview summary (08:01, 20:01) with a new,
+               clean, and highly scannable format.
+             - All logic is refined for maximum clarity and performance.
+"""
 import os
 import json
 import time
@@ -8,8 +19,11 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from indicator import get_price_data, calculate_indicators
+from typing import List
 
-# ---------- LOAD ENV ----------
+# ==============================================================================
+# SETUP & CONFIG
+# ==============================================================================
 load_dotenv()
 SYMBOLS        = os.getenv("SYMBOLS", "LINKUSDT").split(",")
 INTERVALS      = os.getenv("INTERVALS", "1h,4h,1d").split(",")
@@ -24,291 +38,199 @@ COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker_ml.json")
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# ---------- CONSTANTS ----------
-COOLDOWN_LEVEL_MAP = {
-    "1h":  {"PANIC_SELL": 3, "SELL": 4, "AVOID": 5, "HOLD": 6, "WEAK_BUY": 5, "BUY": 4, "STRONG_BUY": 3},
-    "4h":  {"PANIC_SELL": 6, "SELL": 8, "AVOID":10, "HOLD":12, "WEAK_BUY":10, "BUY": 8, "STRONG_BUY": 6},
-    "1d":  {"PANIC_SELL": 9, "SELL":12, "AVOID":15, "HOLD":18, "WEAK_BUY":15, "BUY":12, "STRONG_BUY": 9},
-}
-
+COOLDOWN_HOURS = 4
 RISK_REWARD_MAP = {
-    "STRONG_BUY": 1 / 2,
-    "BUY":        1 / 2.5,
-    "WEAK_BUY":   1 / 3,
-    "HOLD":       1 / 4,
-    "AVOID":      1 / 5,
-    "SELL":       1 / 2.5,
-    "PANIC_SELL": 1 / 2,
+    "STRONG_BUY": 1 / 3, "BUY": 1 / 2.5, "WEAK_BUY": 1 / 2,
+    "SELL": 1 / 2.5, "PANIC_SELL": 1 / 3,
+    "HOLD": 1 / 4, "AVOID": 1 / 5,
 }
-
-def get_cooldown_hours(level: str, interval: str) -> int:
-    return COOLDOWN_LEVEL_MAP.get(interval, {}).get(level, 6)
-
-
 LEVEL_ICONS = {
-    "STRONG_BUY": "🔥 STRONG BUY",
-    "BUY": "✅ BUY",
-    "WEAK_BUY": "🟡 WEAK BUY",
-    "HOLD": "🔍 HOLD",
-    "AVOID": "🚧 AVOID",
-    "SELL": "❌ SELL",
-    "PANIC_SELL": "🚨 PANIC SELL",
+    "STRONG_BUY": "🔥", "BUY": "✅", "WEAK_BUY": "🟡",
+    "HOLD": "🔍", "AVOID": "🚧",
+    "SELL": "❌", "PANIC_SELL": "🚨",
 }
 
-# ---------- UTIL ----------
-
-def is_overview_time() -> bool:
-    """Return True if current VN time is 08:00 or 20:00."""
-    return datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%H:%M") in {"08:01", "20:01"}
-    #return True
-
+# ==============================================================================
+# UTILITY & HELPER FUNCTIONS
+# ==============================================================================
 def send_discord_alert(msg: str) -> None:
     if not WEBHOOK_URL:
         print("[ERROR] DISCORD_AI_WEBHOOK not set")
         return
-
-    def _post(chunk: str):
-        r = requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10)
-        r.raise_for_status()          # <- thấy lỗi là biết liền
-        time.sleep(1.5)               # tránh spam rate-limit
-
     try:
-        if len(msg) > 1900:           # 1900 để trừ hao escape
-            for i in range(0, len(msg), 1900):
-                _post(msg[i : i + 1900])
-        else:
-            _post(msg)
+        requests.post(WEBHOOK_URL, json={"content": msg}, timeout=10).raise_for_status()
     except Exception as exc:
         print(f"[ERROR] Discord alert failed: {exc}")
-        send_error_alert(f"Discord alert failed: {exc}")
-
 
 def send_error_alert(msg: str) -> None:
     ts = datetime.now(timezone.utc).isoformat()
-    with open(ERROR_LOG, "a") as f:
-        f.write(f"{ts} | {msg}\n")
+    with open(ERROR_LOG, "a") as f: f.write(f"{ts} | {msg}\n")
     if ERROR_WEBHOOK:
-        try:
-            requests.post(ERROR_WEBHOOK, json={"content": f"⚠️ {msg}"}, timeout=10)
-        except Exception:
-            pass  # tránh vòng lặp lỗi
-
-# ---------- COOLDOWN ----------
+        try: requests.post(ERROR_WEBHOOK, json={"content": f"⚠️ ML_REPORT ERROR: {msg}"}, timeout=10)
+        except Exception: pass
 
 def load_cooldown() -> dict:
-    if not os.path.exists(COOLDOWN_FILE):
-        return {}
-    with open(COOLDOWN_FILE, "r") as f:
-        data = json.load(f)
+    if not os.path.exists(COOLDOWN_FILE): return {}
+    with open(COOLDOWN_FILE, "r") as f: data = json.load(f)
     now = datetime.now(timezone.utc)
-    return {
-        k: v
-        for k, v in data.items()
-        if now - datetime.fromisoformat(v) < timedelta(days=30)
-    }
-
+    return {k: v for k, v in data.items() if now - datetime.fromisoformat(v) < timedelta(days=3)}
 
 def save_cooldown(data: dict) -> None:
-    with open(COOLDOWN_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-# ---------- MODEL ----------
+    with open(COOLDOWN_FILE, "w") as f: json.dump(data, f, indent=2)
 
 def load_model_and_meta(symbol: str, interval: str):
     try:
         clf = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_clf_{interval}.pkl"))
         reg = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_reg_{interval}.pkl"))
-        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json")) as f:
-            meta = json.load(f)
+        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json")) as f: meta = json.load(f)
         return clf, reg, meta
-    except Exception as exc:  # noqa: BLE001
-        send_error_alert(f"Load model/meta {symbol} {interval}: {exc}")
+    except Exception as exc:
+        send_error_alert(f"Failed to load model/meta for {symbol} {interval}: {exc}")
         return None, None, None
+        
+def is_overview_time() -> bool:
+    return datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%H:%M") in {"08:01", "20:01"}
 
-# ---------- LEVEL ----------
+# ==============================================================================
+# NEW CORE LOGIC
+# ==============================================================================
 
-# ---------- DYNAMIC LEVEL ----------
-THRESHOLDS = {
-    "1h": {
-        "STRONG_BUY": (85, 6),
-        "BUY": (75, 3),
-        "WEAK_BUY": (60, 1),
-        "SELL": (40, -2),
-        "PANIC_SELL": (30, -4),
-    },
-    "4h": {
-        "STRONG_BUY": (85, 8),
-        "BUY": (75, 5),
-        "WEAK_BUY": (60, 2),
-        "SELL": (40, -3),
-        "PANIC_SELL": (30, -6),
-    },
-    "1d": {
-        "STRONG_BUY": (85, 10),
-        "BUY": (75, 7),
-        "WEAK_BUY": (60, 3),
-        "SELL": (40, -4),
-        "PANIC_SELL": (30, -8),
-    },
-}
-DEFAULT_THRESHOLDS = THRESHOLDS["4h"]
-
-def classify_suggestion(interval: str, score: float, pct: float) -> str:
-    """Classify suggestion dynamically per interval."""
-    t = THRESHOLDS.get(interval, DEFAULT_THRESHOLDS)
-    if score >= t["STRONG_BUY"][0] and pct >= t["STRONG_BUY"][1]:
-        return "STRONG_BUY"
-    if score >= t["BUY"][0] and pct >= t["BUY"][1]:
-        return "BUY"
-    if score >= t["WEAK_BUY"][0] and pct >= t["WEAK_BUY"][1]:
-        return "WEAK_BUY"
-    if score <= t["PANIC_SELL"][0] and pct <= t["PANIC_SELL"][1]:
-        return "PANIC_SELL"
-    if score <= t["SELL"][0] and pct <= t["SELL"][1]:
-        return "SELL"
-    if abs(pct) < 0.5:
-        return "HOLD"
+def classify_level(score: float, pct: float) -> str:
+    # Score is the probability of class 2 (BUY)
+    if score > 80: return "STRONG_BUY"
+    if score < 20: return "PANIC_SELL"
+    if score > 65: return "BUY"
+    if score < 35: return "SELL"
+    if score > 55: return "WEAK_BUY"
+    if 45 <= score <= 55 and abs(pct) < 0.5: return "HOLD"
     return "AVOID"
 
-# ---------- ANALYZE ----------
-
-def analyze_symbol(symbol: str, interval: str, cooldown: dict, *, force: bool = False):
-    """Return analysis dict or None. When *force* is True, ignore cooldown."""
+def analyze_single_interval(symbol: str, interval: str) -> dict or None:
     clf, reg, meta = load_model_and_meta(symbol, interval)
-    if not clf or not reg or not meta:
-        return None
+    if not clf or not reg or not meta: return None
+
     try:
-        # ---- Fetch data & features ----
-        df   = get_price_data(symbol, interval, limit=100)
-        indi = calculate_indicators(df, symbol, interval)
+        df = get_price_data(symbol, interval, limit=200)
+        features = calculate_indicators(df, symbol, interval).iloc[-1].to_dict()
+        
+        feature_names = meta["features"]
+        X = pd.DataFrame([features])[feature_names].fillna(0.0)
+        
+        probabilities = clf.predict_proba(X)[0]
+        prob_buy = probabilities[2] * 100
+        
+        predicted_norm_change = float(reg.predict(X)[0])
+        atr = features.get('atr', 0.0)
+        price = features.get('close', 0)
+        if price == 0: return None # Avoid division by zero
+        pct = predicted_norm_change * atr * 100 / price
 
-        X = pd.DataFrame([{f: indi.get(f, 0.0) for f in meta["features"]}]).fillna(0.0)
+        score_for_classification = prob_buy
+        level = classify_level(score_for_classification, pct)
+        
+        direction = 1 if pct >= 0 else -1
+        tp_pct = abs(pct) if abs(pct) > 0.1 else 0.5 # Ensure a minimum target
+        risk_ratio = RISK_REWARD_MAP.get(level, 1/3)
+        sl_pct = tp_pct * risk_ratio
+        
+        tp = price * (1 + direction * (tp_pct / 100))
+        sl = price * (1 - direction * (sl_pct / 100))
 
-        prob = float(clf.predict_proba(X)[0][1])
-        pct  = float(reg.predict(X)[0]) * 100
-
-        # ==== ALWAYS-DEFINE section ====
-        price = indi.get("price", 0)
-        plan  = indi.get("trade_plan", {})
-        entry = plan.get("entry", price)
-
-        # provisional level until classified
-        level = "HOLD"
-
-        direction  = 1 if pct >= 0 else -1
-        tp_pct     = abs(pct)
-        risk_ratio = RISK_REWARD_MAP.get(level, 1 / 3)
-        sl_pct     = tp_pct * risk_ratio
-
-        tp  = plan.get("tp", price * (1 + direction * tp_pct / 100))
-        sl  = plan.get("sl", price * (1 - direction * sl_pct / 100))
-        now = datetime.now(timezone.utc)
-        # =================================
-
-        # ---- Classify suggestion ----
-        prob_cut = meta.get("threshold", 0.6)
-        level = classify_suggestion(interval, prob * 100, pct)
-
-        # downgrade bullish signals with low confidence
-        if prob < prob_cut and level.startswith(("BUY", "STRONG_BUY", "WEAK_BUY")):
-            level = "HOLD"
-
-        # ---- Re‑calculate TP/SL based on final level ----
-        risk_ratio = RISK_REWARD_MAP.get(level, 1 / 3)
-        sl_pct     = tp_pct * risk_ratio
-        tp  = plan.get("tp", price * (1 + direction * tp_pct / 100))
-        sl  = plan.get("sl", price * (1 - direction * sl_pct / 100))
-
-        key = f"{symbol}_{interval}_{level}"
-        if not force:
-            last = cooldown.get(key)
-            if last and now - datetime.fromisoformat(last) < timedelta(hours=get_cooldown_hours(level, interval)):
-                print(f"[COOLDOWN] Skip {key}")
-                return None
-
-        result = {
-            "symbol": symbol,
-            "interval": interval,
-            "score": round(prob * 100, 2),
-            "pct": round(pct, 2),
-            "price": round(price, 8),
-            "entry": round(entry, 8),
-            "tp": round(tp, 8),
-            "sl": round(sl, 8),
-            "level": level,
-            "level_icon": LEVEL_ICONS.get(level, level),
-            "timestamp": now.isoformat(),
-            "summary": (
-                f"ML dự đoán: {pct:+.2f}% ({'tăng' if pct > 0 else 'giảm'}), χsuất: {prob*100:.2f}% khung {interval}. "
-                f"Giá {price:.4f}, Entry {entry:.4f}, TP {tp:.4f}, SL {sl:.4f}."
-            ),
+        return {
+            "symbol": symbol, "interval": interval, "score": round(prob_buy, 2),
+            "pct": round(pct, 2), "price": price, "tp": tp, "sl": sl, "level": level,
         }
-
-        with open(os.path.join(LOG_DIR, f"{symbol}_{interval}.json"), "w") as f_out:
-            json.dump(result, f_out, indent=2)
-
-        if not force:
-            cooldown[key] = now.isoformat()
-
-        return result
-
-    except Exception as exc:  # noqa: BLE001
-        send_error_alert(f"Analyze {symbol} {interval}: {exc}")
+    except Exception as exc:
+        send_error_alert(f"Analysis failed for {symbol} {interval}: {exc}")
+        import traceback
+        send_error_alert(traceback.format_exc())
         return None
 
+def generate_report_for_symbol(symbol: str, all_results: List[dict], cooldown: dict) -> None:
+    if not all_results: return
+    
+    strongest_signal = sorted(all_results, key=lambda x: (x['level'] not in ["STRONG_BUY", "PANIC_SELL"], abs(50 - x['score'])))[0]
+    
+    cooldown_key = f"{symbol}"
+    last_sent_str = cooldown.get(cooldown_key)
+    if last_sent_str and datetime.now(timezone.utc) - datetime.fromisoformat(last_sent_str) < timedelta(hours=COOLDOWN_HOURS):
+        print(f"[COOLDOWN] Skip report for {symbol}")
+        return
+        
+    header = f"{LEVEL_ICONS.get(strongest_signal['level'])} **AI Signal: {strongest_signal['level'].replace('_', ' ')} cho {symbol}**"
+    summary_table = ["📊 **Tóm tắt các khung thời gian:**"]
+    for res in sorted(all_results, key=lambda x: INTERVALS.index(x['interval'])):
+        icon = LEVEL_ICONS.get(res['level'], '❓')
+        summary_table.append(f"►  **{res['interval']}:** {icon} {res['level'].replace('_', ' '):<10} | 🧠 Score: {res['score']:.1f}% | 📈 Dự đoán: {res['pct']:+.2f}%")
 
-# ---------- MAIN ----------
+    bullish_signals = sum(1 for r in all_results if r['level'] in ["STRONG_BUY", "BUY", "WEAK_BUY"])
+    bearish_signals = sum(1 for r in all_results if r['level'] in ["PANIC_SELL", "SELL"])
+    
+    strategy_lines = ["🧠 **Chiến lược đề xuất:**"]
+    if bullish_signals >= 2:
+        strategy_lines.append(f"Tín hiệu MUA có sự đồng thuận cao trên {bullish_signals} khung thời gian. Đây là cơ hội tốt để xem xét mở vị thế MUA.")
+    elif bearish_signals >= 2:
+        strategy_lines.append(f"Tín hiệu BÁN có sự đồng thuận cao trên {bearish_signals} khung thời gian. Cần thận trọng và xem xét quản lý rủi ro/đóng vị thế MUA.")
+    else:
+        strategy_lines.append("Các khung thời gian đang có tín hiệu trái chiều hoặc không rõ ràng. Nên đứng ngoài và quan sát thêm.")
+    
+    strategy_lines.append(f"- **Tín hiệu chính:** Dựa trên khung **{strongest_signal['interval']}** ({strongest_signal['level']}).")
+    strategy_lines.append(f"- **Mục tiêu (TP):** ~`{strongest_signal['tp']:.4f}`")
+    strategy_lines.append(f"- **Cắt lỗ (SL):** ~`{strongest_signal['sl']:.4f}`")
 
-def generate_report() -> None:
-    overview_lines: list[str] = []
+    details_block = [f"📋 **Chi tiết Dự báo (Khung {strongest_signal['interval']}):**"]
+    details_block.append(f"- **Giá hiện tại:** {strongest_signal['price']:.4f}")
+    details_block.append(f"- **Xác suất Mua (Score):** {strongest_signal['score']:.2f}%")
+    details_block.append(f"- **Dự đoán thay đổi:** {strongest_signal['pct']:.2f}%")
+
+    full_message = "\n\n".join([header, "\n".join(summary_table), "\n".join(strategy_lines), "\n".join(details_block)])
+
+    send_discord_alert(full_message)
+    cooldown[cooldown_key] = datetime.now(timezone.utc).isoformat()
+    time.sleep(3)
+
+# ==============================================================================
+# MAIN
+# ==============================================================================
+def main():
     cooldown = load_cooldown()
-
-    force_daily = is_overview_time()       # True at 08:00 / 20:00 VN
-
-    for sym in SYMBOLS:
-        lines: list[str] = [f"\n📊 **AI ML Dự báo cho {sym}**"]
-        updated = False
-
+    print(f"Starting analysis at {datetime.now()}...")
+    
+    all_symbols_results = []
+    
+    for symbol in SYMBOLS:
+        print(f"--- Analyzing {symbol} ---")
+        results_for_this_symbol = []
         for iv in INTERVALS:
-            res = analyze_symbol(sym, iv, cooldown, force=force_daily)
-            if not res:
-                continue
-            updated = True
+            result = analyze_single_interval(symbol, iv)
+            if result:
+                results_for_this_symbol.append(result)
+        
+        if results_for_this_symbol:
+            all_symbols_results.extend(results_for_this_symbol)
+            generate_report_for_symbol(symbol, results_for_this_symbol, cooldown)
 
-            overview_lines.append(
-                f"➡️ {res['symbol']} [{res['interval']}] {res['level_icon']} | "
-                f"🧠 {res['score']}% | 📈 {res['pct']:+.2f}% | 💰 {res['price']:.8f} | "
-                f"🎯 {res['entry']:.8f}/{res['tp']:.8f}/{res['sl']:.8f}"
-            )
-
-            lines.append(
-                f"➡️ {res['symbol']} [{res['interval']}] {res['level_icon']}\n"
-                f"🧠 Score: {res['score']}%\n"
-                f"📊 Dự đoán: {res['pct']}%\n"
-                f"💰 Giá: {res['price']:.8f} | Entry: {res['entry']:.8f}\n"
-                f"🎯 TP: {res['tp']:.8f} | 🛡️ SL: {res['sl']:.8f}\n"
-                f"📝 {res['summary']}\n"
-            )
-
-        # Gửi chi tiết chỉ ngoài 08h/20h
-        if updated and not force_daily:
-            full = "\n".join(lines)
-            if len(full) <= 1900:
-                send_discord_alert(full)
-                time.sleep(3)
-            else:
-                for i in range(0, len(lines), 5):
-                    send_discord_alert("\n".join(lines[i : i + 5]))
-                    time.sleep(3)
-
-    # Gửi tổng hợp vào 08h / 20h
-    if force_daily and overview_lines:
+    # RESTORED: Send periodic overview summary
+    if is_overview_time() and all_symbols_results:
+        print("--- Generating Overview Summary ---")
         header = f"🔥 **Tổng hợp AI ML {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M')}**"
-        full_msg = header + "\n" + "\n".join(overview_lines)
-        send_discord_alert(header + "\n" + "\n".join(overview_lines))
+        
+        overview_blocks = []
+        # Group results by symbol for the overview
+        from itertools import groupby
+        sorted_results = sorted(all_symbols_results, key=lambda x: x['symbol'])
+        for symbol, group in groupby(sorted_results, key=lambda x: x['symbol']):
+            block = [f"➡️ **{symbol}**"]
+            for res in sorted(list(group), key=lambda x: INTERVALS.index(x['interval'])):
+                 icon = LEVEL_ICONS.get(res['level'], '❓')
+                 block.append(f"   [{res['interval']}]: {icon} {res['level'].replace('_', ' '):<10} | 🧠 Score: {res['score']:.1f}% | 📈 Dự đoán: {res['pct']:+.2f}%")
+            overview_blocks.append("\n".join(block))
+
+        full_message = header + "\n\n" + "\n\n".join(overview_blocks)
+        send_discord_alert(full_message)
 
     save_cooldown(cooldown)
-
+    print("Analysis complete.")
 
 if __name__ == "__main__":
-    generate_report()
+    main()

@@ -1,1108 +1,400 @@
 # -*- coding: utf-8 -*-
 """my_precious.py – position advisor
-Clean version after news‑block patch. 2025‑07‑01
+Version: 3.9 (Definitive Fix)
+Date: 2025-07-03
+Description: This version definitively fixes all formatting and logic issues.
+             - All NameErrors are resolved.
+             - Market Context is correctly placed within the News block.
+             - Redundant news display is eliminated.
+             - The periodic overview summary feature (08:02, 20:02) is present and correct.
 """
 import os
 import json
 import time
-import string
 from datetime import datetime
 from collections import Counter
 from typing import List, Dict, Any
-import math, time, requests, html
-
-
+import math
 import requests
+import html
+import re
+
 from dotenv import load_dotenv
 
+# These are assumed to be in the same directory or accessible via PYTHONPATH
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_PRECIOUS")
 
-# ---------------------------------------------------------------------------
-# CONFIG & PATHS -------------------------------------------------------------
-# ---------------------------------------------------------------------------
-COOLDOWN_STATE_PATH = "/root/ricealert/advisor_log/cooldown_state.json"
+# ==============================================================================
+# CONFIG & PATHS
+# ==============================================================================
+BASE_DIR = "/root/ricealert"
+COOLDOWN_STATE_PATH = os.path.join(BASE_DIR, "advisor_log/cooldown_state.json")
+MARKET_CONTEXT_PATH = os.path.join(BASE_DIR, "ricenews/lognew/market_context.json")
+TRADELOG_DIR = os.path.join(BASE_DIR, "trade/tradelog")
+ADVISOR_DIR  = os.path.join(BASE_DIR, "advisor_log")
+LOG_DIR      = os.path.join(ADVISOR_DIR, "log")
+NEWS_DIR     = os.path.join(BASE_DIR, "ricenews/lognew")
+AI_DIR       = os.path.join(BASE_DIR, "ai_logs")
+
+os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_COOLDOWN_MINUTES: Dict[str, int] = {
-    "PANIC_SELL": 180,
-    "SELL":       240,
-    "AVOID":      300,
-    "HOLD":       360,
-    "WEAK_BUY":   300,
-    "BUY":        240,
-    "STRONG_BUY": 180,
+    "PANIC_SELL": 180, "SELL": 240, "AVOID": 300,
+    "HOLD": 360, "WEAK_BUY": 300, "BUY": 240, "STRONG_BUY": 180,
 }
-
 
 ICON = {"PANIC_SELL":"🆘","SELL":"🔻","AVOID":"⛔",
         "HOLD":"💎","WEAK_BUY":"🟢","BUY":"🛒","STRONG_BUY":"🚀"}
 
-def level_from_score(sc: int) -> str:
-    """Map score 0-10 bất kỳ → 7-level (PANIC_SELL … STRONG_BUY)."""
-    if   sc < 1:  return "PANIC_SELL"
-    elif sc < 3:  return "SELL"
-    elif sc < 4:  return "AVOID"
-    elif sc < 5:  return "HOLD"
-    elif sc < 6:  return "WEAK_BUY"
-    elif sc < 8:  return "BUY"
-    else:         return "STRONG_BUY"
+# ==============================================================================
+# NEWS & MARKET CONTEXT LOGIC
+# ==============================================================================
+POSITIVE_NEWS_KEYWORDS = ["etf", "niêm yết", "listing", "adoption", "partnership", "approved", "upgrade", "launch", "mainnet", "burn"]
+NEGATIVE_NEWS_KEYWORDS = ["kiện", "hacker", "scam", "bị điều tra", "tether", "sec sues", "sec charges", "hack", "exploit", "lawsuit", "delist", "downtime", "outage"]
+NEWS_KEYWORDS_BY_LEVEL = {
+    "CRITICAL": ["will list", "etf approval", "halving", "fomc", "interest rate", "cpi", "war", "approved", "regulatory approval"],
+    "WARNING": ["delist", "unlock", "hack", "exploit", "sec", "lawsuit", "regulation", "maintenance", "downtime", "outage", "bị điều tra", "kiện"],
+}
 
+def analyze_market_trend(mc: dict) -> str:
+    if not mc: return "NEUTRAL"
+    up_score, down_score = 0, 0
+    if mc.get('btc_dominance', 50) > 55: up_score += 1
+    elif mc.get('btc_dominance', 50) < 48: down_score += 1
+    if mc.get('fear_greed', 50) > 60: up_score += 1
+    elif mc.get('fear_greed', 50) < 40: down_score += 1
+    if up_score > down_score: return "UPTREND"
+    if down_score > up_score: return "DOWNTREND"
+    return "NEUTRAL"
 
-TRADELOG_DIR = "/root/ricealert/trade/tradelog"
-ADVISOR_DIR  = "/root/ricealert/advisor_log"
-LOG_DIR      = os.path.join(ADVISOR_DIR, "log")
-NEWS_DIR     = "/root/ricealert/ricenews/lognew"
-AI_DIR       = "/root/ricealert/ai_logs"
+def get_news_sentiment(title: str) -> str:
+    lowered = title.lower()
+    if any(keyword in lowered for keyword in POSITIVE_NEWS_KEYWORDS): return "positive"
+    if any(keyword in lowered for keyword in NEGATIVE_NEWS_KEYWORDS): return "negative"
+    return "neutral"
 
-os.makedirs(LOG_DIR, exist_ok=True)
+def load_news_and_context_block(symbol: str, market_context: dict) -> (str, int):
+    today_path = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
+    news_data = load_json(today_path, [])
+    tag = symbol.lower().replace("usdt", "").strip()
+    
+    mc_text = ""
+    if market_context:
+        trend = analyze_market_trend(market_context)
+        mc_text = (f"🌐 **Bối cảnh thị trường (Trend: {trend})** | "
+                   f"Fear & Greed: `{market_context.get('fear_greed', 'N/A')}` | BTC.D: `{market_context.get('btc_dominance', 'N/A')}%`")
 
-# ---------------------------------------------------------------------------
-# BASIC UTILITIES ------------------------------------------------------------
-# ---------------------------------------------------------------------------
+    news_block, news_factor = "⚪ Hiện chưa có tin tức đáng chú ý.", 0
+    coin_news = [n for n in news_data if n.get("category_tag") == tag]
+    if coin_news:
+        news_block = "🗞️ **Tin tức liên quan:**\n" + "\n".join(f"- [{n['source_name']}] {n['title']} → {n['suggestion'].split('👉')[0].strip()}" for n in coin_news[:2])
+        news_factor = 1 if get_news_sentiment(coin_news[0]['title']) == 'positive' else -1 if get_news_sentiment(coin_news[0]['title']) == 'negative' else 0
+    else:
+        macro_news = [n for n in news_data if n.get("category_tag") in {"macro", "general"} and n.get("level") in NEWS_KEYWORDS_BY_LEVEL]
+        if macro_news:
+            news_block = "🌐 **Tin vĩ mô đáng chú ý:**\n" + "\n".join(f"- [{n['source_name']}] {n['title']} → {n['suggestion'].split('👉')[0].strip()}" for n in macro_news[:2])
+            news_factor = 1 if get_news_sentiment(macro_news[0]['title']) == 'positive' else -1 if get_news_sentiment(macro_news[0]['title']) == 'negative' else 0
 
+    return f"{mc_text}\n{news_block}" if mc_text else news_block, news_factor
+
+# ==============================================================================
+# UTILITY FUNCTIONS
+# ==============================================================================
 def load_json(path: str, default):
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
+        with open(path, "r", encoding="utf-8") as f: return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError): return default
 
 def write_json(path: str, data) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
+    with open(path, "w", encoding="utf-8") as f: json.dump(data, f, indent=2, ensure_ascii=False)
 
 def load_cooldown_state() -> Dict[str, Dict[str, str]]:
     return load_json(COOLDOWN_STATE_PATH, {})
 
-
 def save_cooldown_state(state: dict) -> None:
     write_json(COOLDOWN_STATE_PATH, state)
-
 
 def is_cooldown_passed(last_sent: str, level: str, now: datetime) -> bool:
     try:
         minutes = LEVEL_COOLDOWN_MINUTES.get(level.replace(" ", "_").upper(), 180)
-        delta   = (now - datetime.strptime(last_sent, "%Y-%m-%d %H:%M:%S")).total_seconds() / 60
+        delta = (now - datetime.strptime(last_sent, "%Y-%m-%d %H:%M:%S")).total_seconds() / 60
         return delta >= minutes
-    except Exception:
-        return True
-
-
-def smart_chunk(text: str, limit: int = 1900) -> List[str]:
-    """Split long text into Discord‑safe chunks."""
-    parts, buf = [], ""
-    for ln in text.split("\n"):
-        if len(buf) + len(ln) + 1 < limit:
-            buf += "\n" + ln
-        else:
-            parts.append(buf.strip())
-            buf = ln
-    if buf:
-        parts.append(buf.strip())
-    return parts
-
+    except Exception: return True
 
 def send_discord_alert(msg: str) -> None:
     if not WEBHOOK_URL:
-        print("[ERROR] DISCORD_AI_WEBHOOK not set")
+        print("[ERROR] DISCORD_PRECIOUS webhook not set.")
         return
-
-    def _post(chunk: str):
-        r = requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10)
-        r.raise_for_status()          # <- thấy lỗi là biết liền
-        time.sleep(1.5)               # tránh spam rate-limit
-
-    try:
-        if len(msg) > 1900:           # 1900 để trừ hao escape
-            for i in range(0, len(msg), 1900):
-                _post(msg[i : i + 1900])
-        else:
-            _post(msg)
-    except Exception as exc:
-        print(f"[ERROR] Discord alert failed: {exc}")
-        send_error_alert(f"Discord alert failed: {exc}")
-
-# ---------------------------------------------------------------------------
-# VERBOSE ML SUMMARY ---------------------------------------------------------
-# ---------------------------------------------------------------------------
-
-def format_ml_summary_verbose(ml: Dict[str, Any]) -> str:
-    """Return a detailed human‑friendly summary of an AI‑ML prediction dict."""
-    level = ml.get("level", "").upper()
-    pct   = ml.get("pct", 0)
-    score = ml.get("score", 0)
-    price = ml.get("price", 0)
-    entry = ml.get("entry", 0)
-    tp    = ml.get("tp", 0)
-    sl    = ml.get("sl", 0)
-
-    lines = [
-        f"🤖 AI ML ({level})",
-        f"📊 Dự đoán: {pct:+.2f}% {'(tăng)' if pct > 0 else '(giảm)'} 🧠 Xác suất: {score:.2f}%",
-        f"💰 Giá hiện tại: {price} Entry: {entry}",
-        f"🎯 TP: {tp} 🛡️ SL: {sl}",
-    ]
-
-    reasons = {
-        "PANIC SELL": "📉 Mô hình cảnh báo rủi ro cao – nên ưu tiên cắt lệnh",
-        "AVOID":      "⚠️ Không có edge rõ ràng – hạn chế giao dịch",
-    }
-    if level in {"BUY", "STRONG_BUY", "WEAK_BUY", "HOLD"}:
-        reasons[level] = "✅ AI kỳ vọng tăng giá – có thể giữ hoặc mở vị thế"
-    if level == "SHORT_STRONG":
-        reasons[level] = "📉 Xu hướng giảm rõ rệt – cân nhắc đảo chiều"
-
-    lines.append(reasons.get(level, "🤖 Lý do: Không xác định rõ"))
-    return "\n".join(lines)
-
-# ---------------------------------------------------------------------------
-# NEWS -----------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-
-def load_news_for_symbol(symbol: str) -> str:
-    """Return formatted news lines for a coin symbol or macro context."""
-    today_path = os.path.join(NEWS_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_news_signal.json")
-    if not os.path.exists(today_path):
-        return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."  # noqa: E501
-
-    news_data = load_json(today_path, [])
-
-    tag = symbol.lower().replace("usdt", "").strip()
-
-    coin_news = [n for n in news_data if n.get("category_tag") == tag]
-
-    macro_news = [
-        n for n in news_data
-        if n.get("category_tag") in {"macro", "general"}
-        and n.get("level") in {"CRITICAL", "ALERT", "WATCHLIST"}
-    ]
-
-    # --- coin‑specific news ---
-    if coin_news:
-        lines = [f"📰 Tin tức liên quan {symbol.upper()}:"]
-        for n in coin_news[:2]:
-            prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
-            lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
-        return "\n".join(lines)
-
-    # --- macro fallback ---
-    if macro_news:
-        macro_news.sort(
-            key=lambda n: (
-                0 if n["level"] == "CRITICAL" else 1 if n["level"] == "ALERT" else 2,
-                n.get("published_at", ""),
-            )
-        )
-        lines = ["🌐 Tin vĩ mô đáng chú ý:"]
-        for n in macro_news[:2]:
-            prefix = "🔴 " if n.get("level") == "CRITICAL" else ""
-            lines.append(f"- {prefix}[{n['source_name']}] {n['title']} → {n.get('suggestion', '')}")
-        return "\n".join(lines)
-
-    return "⚪ Hiện chưa có tin tức cụ thể liên quan đến đồng coin này hoặc thị trường chung."
-
-# ---------------------------------------------------------------------------
-#  (rest of file: indicator calc, advice gen, main loop) – UNCHANGED
-# ---------------------------------------------------------------------------
-
-
-
-def parse_trade_plan(plan_str):
-    try:
-        e, t, s = map(float, plan_str.split("/"))
-        return {"entry": e, "tp": t, "sl": s}
-    except:
-        return {"entry": 0, "tp": 0, "sl": 0}
-
-def round_num(val, d=2):
-    return round(val, d) if isinstance(val, (float, int)) else val
-
-def calc_score(ind):
-    score = 0
-
-    # --- Bonus từ đa khung đồng thuận
-    if ind.get("trend_alignment_bonus"): score += 1
-
-    # --- RSI ngưỡng cực đoan
-    rsi = ind.get("rsi_14", 50)
-    if rsi < 30 or rsi > 70:
-        score += 1
-
-    # --- MACD tín hiệu rõ
-    if ind.get("macd_cross") in ["bullish", "bearish"]:
-        score += 1
-
-    # --- CMF mạnh
-    cmf = ind.get("cmf", 0)
-    if abs(cmf) > 0.05:
-        score += 1
-
-    # --- Volume đột biến
-    if ind.get("volume", 0) > 1.5 * ind.get("vol_ma20", 1):
-        score += 1
-
-    # --- ADX có lực
-    if ind.get("adx", 0) > 20:
-        score += 1
-
-    # --- Fibo 0.618 gần giá → tiềm năng phản ứng
-    price = ind.get("price", 0)
-    fib = ind.get("fib_0_618", 0)
-    if price and fib and abs(price - fib) / price < 0.015:
-        score += 1
-
-    # --- Có doji rõ
-    if ind.get("doji_type"):
-        score += 1
-
-    # --- RSI divergence
-    if ind.get("rsi_divergence") in ["bullish", "bearish"]:
-        score += 1
-
-    # --- Tag kỹ thuật mạnh
-    tag = ind.get("tag", "")
-    if tag in ["buy_high", "buy_low", "sell_high", "sell_low"]:
-        score += 2
-    elif tag == "canbuy":
-        score += 1
-    elif tag == "avoid":
-        score -= 1  # phạt nhẹ nếu tín hiệu tránh
-
-    # --- Signal level mạnh → cộng thêm
-    signal = ind.get("signal_level", "")
-    if signal == "CRITICAL":
-        score += 1
-    elif signal == "WARNING":
-        score += 0.5
-
-    return int(min(max(score, 0), 10))
-
-
-def format_price(price):
-    if not isinstance(price, (int, float)):
-        return price
-    return f"{price:.8f}" if price < 0.1 else f"{price:.4f}"
-
-def generate_indicator_text(ind: dict) -> str:
-    """
-    Trả về block phân tích kỹ thuật.
-    Nếu ind có 'level_key' (PANIC_SELL … STRONG_BUY) thì gắn icon tương ứng.
-    """
-    icon = ICON.get(ind.get("level_key", ""), "")
-    lines = [
-        f"{icon} Giá hiện tại: {format_price(ind['price'])}  |  "
-        f"Entry {format_price(ind['trade_plan']['entry'])}  |  "
-        f"TP {format_price(ind['trade_plan']['tp'])}  |  "
-        f"SL {format_price(ind['trade_plan']['sl'])}",
-
-        f"📈 EMA20: {round_num(ind['ema_20'])}   "
-        f"💪 RSI14: {round_num(ind['rsi_14'])} → "
-        f"{'quá mua' if ind['rsi_14']>70 else 'quá bán' if ind['rsi_14']<30 else 'trung tính'}",
-
-        f"📉 MACD: {round_num(ind['macd_line'],3)} vs "
-        f"Signal: {round_num(ind['macd_signal'],3)} → {ind['macd_cross']}",
-
-        f"📊 ADX: {round_num(ind['adx'],1)} → {'rõ' if ind['adx']>20 else 'yếu'}",
-        f"🔊 Volume: {int(ind['volume']):,} / MA20: {int(ind['vol_ma20']):,}",
-        f"💸 CMF: {round_num(ind['cmf'],3)}",
-        f"🌀 Fibo 0.618: {round_num(ind['fib_0_618'],4)}",
-        f"🔧 Nến: {ind.get('doji_type') or 'None'}",
-        f"⬆️ Trend: {ind['trend']}",
-    ]
-
-    # 🔹 Tín hiệu kỹ thuật từ signal_logic
-    signal = ind.get("signal_level")
-    reason = ind.get("signal_reason")
-    tag    = ind.get("tag", "unknown")
-    if signal:
-        key = (signal.upper(), tag.lower())
-        desc_map = {
-            # HOLD
-            ("HOLD", "avoid"):   "Không đủ tín hiệu kỹ thuật rõ ràng để hành động",
-            ("HOLD", "neutral"): "Thị trường sideway, nên quan sát thêm",
-
-            # WATCHLIST
-            ("WATCHLIST", "canbuy"):     "Tín hiệu sớm – nên theo dõi để vào sau pullback",
-            ("WATCHLIST", "buy_low"):    "Giá gần vùng hỗ trợ – có thể hình thành đảo chiều",
-            ("WATCHLIST", "buy_high"):   "Xu hướng tăng đang hình thành, cần chờ xác nhận",
-            ("WATCHLIST", "sell_high"):  "Kháng cự bắt đầu có phản ứng – theo dõi lực bán",
-            ("WATCHLIST", "sell_low"):   "Đang kiểm tra vùng đáy – chờ tín hiệu phá đáy hoặc hồi",
-            ("WATCHLIST", "avoid"):      "Thị trường chưa rõ trend – nên quan sát thêm",
-
-            # ALERT
-            ("ALERT", "buy_low"):    "Hồi phục nhẹ từ hỗ trợ – cần chờ xác nhận",
-            ("ALERT", "buy_high"):   "Breakout ban đầu – cần cảnh giác bulltrap",
-            ("ALERT", "canbuy"):     "Có thể mở lệnh sớm nhưng cần SL chặt",
-            ("ALERT", "sell_high"):  "Giá tiệm cận kháng cự, rủi ro đảo chiều tăng cao",
-            ("ALERT", "sell_low"):   "Phe bán đang chiếm ưu thế – cần theo dõi",
-            ("ALERT", "avoid"):      "Tín hiệu chưa rõ ràng – dễ bị whipsaw",
-
-            # WARNING
-            ("WARNING", "buy_low"):    "Hỗ trợ quan trọng bị thủng – rủi ro tăng mạnh",
-            ("WARNING", "buy_high"):   "Breakout thất bại – nên tránh fomo",
-            ("WARNING", "canbuy"):     "Vẫn có thể vào nhưng rủi ro đã tăng",
-            ("WARNING", "sell_high"):  "Kháng cự mạnh – nên chốt lời từng phần",
-            ("WARNING", "sell_low"):   "Áp lực bán tăng nhanh – cẩn trọng nếu giữ lệnh",
-            ("WARNING", "avoid"):      "Thị trường đang bất ổn – không nên mở lệnh",
-
-            # CRITICAL
-            ("CRITICAL", "buy_low"):   "Vùng hỗ trợ mạnh + breakout – tín hiệu đảo chiều rõ",
-            ("CRITICAL", "buy_high"):  "Phe mua áp đảo, breakout rõ ràng",
-            ("CRITICAL", "canbuy"):    "Xác suất bật mạnh từ hỗ trợ – có thể entry quyết đoán",
-            ("CRITICAL", "sell_high"): "Phe bán chiếm ưu thế mạnh – khả năng đảo chiều cao",
-            ("CRITICAL", "sell_low"):  "Thị trường breakdown – khả năng giảm sâu",
-            ("CRITICAL", "avoid"):     "Thị trường rất nguy hiểm – nên đứng ngoài",
-        }
-        desc = desc_map.get(key, reason or "Không rõ tín hiệu kỹ thuật")
-        lines.append(f"🔹 Tín hiệu kỹ thuật: {signal} ({tag}) – {desc}")
-
-    return "\n".join(lines)
-
-
-
-
-def describe_market(ind):
-    rsi = ind["rsi_14"]
-    adx = ind["adx"]
-    cmf = ind["cmf"]
-    trend = ind["trend"]
-    macd = ind["macd_cross"]
-
-    if rsi > 65 and cmf > 0.05 and adx > 20 and trend == "uptrend":
-        return "Thị trường đang tăng mạnh, tín hiệu kỹ thuật đồng thuận"
-    if 55 <= rsi <= 65 and cmf >= 0 and trend == "uptrend":
-        return "Thị trường đang tăng nhẹ với hỗ trợ từ dòng tiền"
-    if 45 <= rsi <= 55 and adx < 15:
-        return "Thị trường sideway, chưa rõ xu hướng"
-    if 35 <= rsi < 45 and cmf < 0 and trend == "downtrend":
-        return "Thị trường đang giảm nhẹ, cần thận trọng"
-    if rsi < 30 and macd == "bearish" and cmf < -0.05:
-        return "Thị trường giảm mạnh, rủi ro cao"
-    return "Thị trường không rõ ràng, cần quan sát thêm"
-    
-    
-def analyze_multi_timeframe(extra_tf: dict) -> str:
-    """
-    Phân tích đa khung dựa trên trend + CMF + AI để đưa ra nhận định tổng thể.
-    """
-    from collections import Counter
-
-    trends = Counter()
-    ai_biases = Counter()
-    lines = []
-
-    for tf, tfdata in sorted(extra_tf.items()):
-        trend = tfdata.get("trend", "unknown")
-        cmf = tfdata.get("cmf", 0)
-        rsi = tfdata.get("rsi", "?")
-        ai_score = tfdata.get("ai_score", "?")
-        ai_bias = tfdata.get("ai_bias", "neutral")
-
-        trends[trend] += 1
-        ai_biases[ai_bias] += 1
-
-        icon = "⬆️" if trend == "uptrend" else "⬇️" if trend == "downtrend" else "➡️"
-        lines.append(
-            f"{icon} {tf}: Trend: {trend:<9} | RSI: {rsi:<5} | CMF: {round_num(cmf,3):<6} | AI: {ai_score}% ({ai_bias})"
-        )
-
-    summary = []
-
-    # Tổng hợp xu hướng
-    if trends["uptrend"] >= 2:
-        summary.append("🔼 Đa khung xác nhận xu hướng tăng.")
-    elif trends["downtrend"] >= 2:
-        summary.append("🔽 Đa khung xác nhận xu hướng giảm.")
-    else:
-        summary.append("🌀 Xu hướng các khung không đồng thuận.")
-
-    # Tổng hợp AI bias
-    if ai_biases["bullish"] >= 2:
-        summary.append("🤖 AI nghiêng về tăng giá ở nhiều khung.")
-    elif ai_biases["bearish"] >= 2:
-        summary.append("🤖 AI cảnh báo xu hướng giảm.")
-    else:
-        summary.append("🤖 AI chưa rõ xu hướng chung.")
-
-    return "\n".join(summary + [""] + lines)
-    
-    
-def generate_final_strategy(
-    score: int,
-    ai_score: float,
-    news_factor: int,
-    pnl: float,
-    ind: dict,
-    extra_tf: dict,
-) -> str:
-    reco = []
-    reasons = []
-    alerts = []
-
-    lvl = ind.get("level_key", "")
-    fib = ind["trade_plan"]["sl"]
-    sl = ind["trade_plan"]["sl"]
-    tp = ind["trade_plan"]["tp"]
-    price = ind["price"]
-    trend = ind["trend"]
-    cmf = ind["cmf"]
-    macd = ind["macd_cross"]
-    rsi = ind.get("rsi_14", 0)
-    tag = ind.get("tag", "")
-    signal_level = ind.get("signal_level", "")
-    signal_reason = ind.get("signal_reason", "")
-
-    # 🎯 KẾT LUẬN CHÍNH
-    if lvl in {"PANIC_SELL", "SELL"}:
-        reco.append("🔻 **Cân nhắc giảm vị thế hoặc đóng lệnh để bảo toàn vốn.**")
-    elif lvl == "AVOID":
-        reco.append("⛔ **Thị trường không rõ ràng – tránh giao dịch, đứng ngoài.**")
-    elif lvl == "HOLD":
-        reco.append("💎 **Giữ lệnh hiện tại, chưa nên mở thêm.** Theo dõi phản ứng giá vùng hỗ trợ.")
-    elif lvl == "WEAK_BUY":
-        reco.append("🟢 **Có thể mở vị thế nhỏ khi giá điều chỉnh/pullback.**")
-    elif lvl == "BUY":
-        reco.append("🛒 **Mua từng phần tại vùng hỗ trợ, ưu tiên vùng gần Fibo 0.618 hoặc breakout trend.**")
-    elif lvl == "STRONG_BUY":
-        reco.append("🚀 **Xu hướng mạnh, đồng thuận – có thể scale-in quyết đoán.** Ưu tiên khi giá vượt mốc quan trọng.")
-
-    # 📌 LÝ DO
-    reasons.append(f"– Level: {lvl} | Tag: {tag}")
-
-    if score >= 7:
-        reasons.append(f"– Kỹ thuật ủng hộ: Score {score}/10")
-    elif score <= 3:
-        reasons.append(f"– Kỹ thuật yếu: Score {score}/10")
-
-    # Tín hiệu kỹ thuật từ signal_logic
-    if signal_level and signal_reason:
-        reasons.append(f"– Tín hiệu kỹ thuật: {signal_level} ({tag}) – {signal_reason}")
-
-    # AI phân tích
-    if ai_score >= 70:
-        reasons.append(f"– AI dự báo tăng mạnh (xác suất {ai_score}%)")
-    elif ai_score >= 60:
-        reasons.append(f"– AI thiên về tăng (xác suất {ai_score}%)")
-    elif ai_score <= 40:
-        reasons.append(f"– AI thiên về giảm (xác suất {ai_score}%)")
-    else:
-        reasons.append(f"– AI trung lập (xác suất {ai_score}%)")
-
-    # Tin tức
-    if news_factor == 1:
-        reasons.append("– Tin tức tích cực hỗ trợ thị trường")
-    elif news_factor == -1:
-        reasons.append("– Tin tức tiêu cực – cần thận trọng")
-
-    # Chỉ báo kỹ thuật
-    if cmf > 0.05:
-        reasons.append("– CMF dương → dòng tiền đang vào thị trường")
-    elif cmf < -0.05:
-        reasons.append("– CMF âm → dòng tiền bị rút ra")
-
-    if macd == "bullish":
-        reasons.append("– MACD xác nhận xu hướng tăng")
-    elif macd == "bearish":
-        reasons.append("– MACD đảo chiều giảm")
-
-    if rsi >= 70:
-        alerts.append("⚠️ RSI cao – có thể đã quá mua, dễ điều chỉnh")
-    elif rsi <= 30:
-        alerts.append("⚠️ RSI thấp – thị trường có thể bị bán quá mức")
-
-    # Đa khung
-    if extra_tf:
-        tf_up = sum(1 for tf in extra_tf.values() if tf["trend"] == "uptrend")
-        tf_down = sum(1 for tf in extra_tf.values() if tf["trend"] == "downtrend")
-        if tf_up >= 2:
-            reasons.append("– Đa khung thời gian xác nhận xu hướng tăng")
-        elif tf_down >= 2:
-            reasons.append("– Đa khung cảnh báo xu hướng giảm")
-
-    # Fibo
-    if trend == "uptrend" and price > fib * 1.01:
-        reasons.append("– Giá đã vượt vùng Fibo 0.618 → khả năng breakout.")
-    elif trend == "uptrend" and abs(price - fib) / fib < 0.01:
-        reasons.append("– Giá đang retest Fibo 0.618 – vùng đáng theo dõi để vào lệnh.")
-
-    # Gợi ý theo phong cách
-    if lvl in {"STRONG_BUY", "BUY"} and score >= 7 and ai_score >= 60:
-        reco.append("📌 Gợi ý theo phong cách:")
-        reco.append("– Scalper: Có thể entry sớm ở pullback nhỏ.")
-        reco.append("– Swing trader: Chờ breakout xác nhận, vào lệnh theo trend.")
-        reco.append("– Holder: Xem xét mở vị thế tích lũy nếu xác định đây là vùng hỗ trợ mạnh.")
-
-    # Theo PnL
-    if pnl > 5:
-        reco.append(f"👉 Đang lời {pnl}% – cân nhắc *chốt 50%*, kéo SL lên vùng {round_num(fib)} hoặc hòa vốn.")
-    elif pnl <= -3:
-        reco.append(f"❌ Lỗ sâu ({pnl}%) – cân nhắc giảm vị thế, tránh bình quân giá.")
-    elif -3 < pnl < 0:
-        reco.append(f"⏳ Đang lỗ nhẹ ({pnl}%) – giữ SL chặt ở {round_num(sl)} để tránh rủi ro sâu hơn.")
-    elif 0 <= pnl < 2:
-        reco.append(f"🔍 PnL thấp ({pnl}%) – tiếp tục theo dõi, cân nhắc dời TP/SL nếu cần.")
-
-    # SL động
-    dynamic_sl = min(round_num(price * 0.98), round_num(sl))
-    reco.append(f"🎯 Gợi ý SL động: {dynamic_sl} – đặt dưới vùng hỗ trợ gần nhất.")
-
-    # Tổng kết
-    def overall_sentiment(score, ai_score, news_factor, extra_tf, tag, signal_level):
-        pos = 0
-        if score >= 7: pos += 1
-        if score <= 3: pos -= 1
-        if ai_score >= 70: pos += 1
-        elif ai_score <= 40: pos -= 1
-        if news_factor == 1: pos += 1
-        elif news_factor == -1: pos -= 1
-        if sum(1 for tf in (extra_tf or {}).values() if tf["trend"] == "uptrend") >= 2: pos += 1
-        if sum(1 for tf in (extra_tf or {}).values() if tf["trend"] == "downtrend") >= 2: pos -= 1
-        if tag in {"buy_low", "canbuy"}: pos += 1
-        if tag in {"avoid", "sell_high"}: pos -= 1
-        if signal_level == "CRITICAL": pos += 1
-        elif signal_level == "WARNING": pos += 0.5
-
-        if pos <= -3:
-            return "💀 Tổng thể cực kỳ **tiêu cực** – nên tránh xa hoặc đóng lệnh."
-        elif pos == -2:
-            return "📉 Tổng thể thiên về **giảm** – cần thận trọng."
-        elif pos == -1:
-            return "🔻 Dấu hiệu hơi tiêu cực – ưu tiên phòng thủ."
-        elif pos == 0:
-            return "🔄 Tín hiệu **hỗn hợp** – chưa rõ xu hướng, cần quan sát thêm."
-        elif pos == 1:
-            return "🔸 Xu hướng hơi tích cực – có thể chuẩn bị cơ hội."
-        elif pos == 2:
-            return "📈 Tổng thể thiên về **tăng** – có thể mở vị thế thăm dò."
-        else:
-            return "🚀 Xu hướng **cực kỳ tích cực** – đồng thuận nhiều yếu tố, nên tận dụng cơ hội."
-
-    summary = overall_sentiment(score, ai_score, news_factor, extra_tf or {}, tag, signal_level)
-
-    out = []
-    out.append("🧠 **Chiến lược cuối cùng:**")
-    out.extend([f"• {line}" for line in reco if line.strip()])
-    if reasons:
-        out.append("📌 Lý do:")
-        out.extend(reasons)
-    if alerts:
-        out.append("⚠️ Lưu ý:")
-        out.extend(alerts)
-    out.append(f"📉 Đánh giá tổng hợp: {summary}")
-    return "\n".join(out)
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# SMART ADVICE, 7-LEVEL AWARE ----------------------------------------------
-# ---------------------------------------------------------------------------
-def generate_advice(
-        pnl: float,
-        ind: Dict[str, Any],
-        ai_bias: str | None = None,
-        news_factor: int = 0,
-        extra_tf: dict = None
-) -> str:
-    """
-    Trả về gợi ý chiến lược bằng tiếng Việt, đã biết 7 cấp độ level_key.
-    Với PANIC_SELL / SELL / AVOID → trả về ngắn gọn, dứt khoát.
-    Với HOLD … STRONG_BUY → phân tích chi tiết + đề xuất SL/TP.
-    """
-    lvl   = ind.get("level_key", "").upper()
-    price = ind["price"]
-    tp    = ind["trade_plan"]["tp"]
-    sl    = ind["trade_plan"]["sl"]
-    fib   = ind["fib_0_618"]
-    cmf   = ind["cmf"]
-    tag   = ind.get("tag")
-    signal = ind.get("signal_level")
-    reason = ind.get("signal_reason")
-
-    # ===== 1. Các cấp độ “cực đoan” – trả lời ngay, không cần phân tích dài ====
-    if lvl == "PANIC_SELL":
-        return (
-            "⚠️ **Panic-Sell** → ưu tiên *thoát lệnh ngay*, tránh trượt giá.\n"
-            f"Đặt SL sát {round_num(price*0.995)} hoặc đóng toàn bộ vị thế."
-        )
-    if lvl == "SELL":
-        return (
-            "🔻 **Sell** → xu hướng xấu, ưu tiên chốt lời/thu hẹp vị thế.\n"
-            f"Giữ SL dưới {round_num(sl)} – *không* scale-in."
-        )
-    if lvl == "AVOID":
-        return "⛔ **Avoid** → Tín hiệu nhiễu, đứng ngoài quan sát thêm."
-
-    # ===== 2. Phần còn lại: HOLD - WEAK_BUY - BUY - STRONG_BUY ===============
-    reco: List[str] = [describe_market(ind)]
-
-    # 🔎 Tín hiệu từ logic mới (signal_logic)
-    if signal and tag and signal != "HOLD":
-        reco.append(f"🔎 Tín hiệu từ chỉ báo: {signal} (Tag: {tag}) → {reason}")
-
-    # ---- Money-flow & MACD ---------------------------------------------------
-    if cmf >  0.05: reco.append("CMF dương → dòng tiền đang *vào*")
-    if cmf < -0.05: reco.append("CMF âm → dòng tiền đang *ra*")
-
-    macd_cross = ind["macd_cross"]
-    if macd_cross == "bullish":
-        reco.append("MACD giao cắt *lên* → tín hiệu mua hỗ trợ")
-    elif macd_cross == "bearish":
-        reco.append("MACD giao cắt *xuống* → chú ý điều chỉnh")
-
-    # ---- AI / News cue -------------------------------------------------------
-    if ai_bias == "bullish":
-        reco.append("🤖 AI *lạc quan* – có thể scale-in khi *pullback nhẹ*")
-    elif ai_bias == "bearish":
-        reco.append("🤖 AI *bi quan* – giảm vị thế / SL chặt")
-
-    if news_factor ==  1:
-        reco.append("📰 Tin tức *tích cực* – giá dễ bật nhanh")
-    elif news_factor == -1:
-        reco.append("📰 Tin **xấu / CRITICAL** – nên SL sát")
-
-    reco.append("")  # ngắt dòng
-
-    # ---- Trailing-SL (ATR) ---------------------------------------------------
-    try:
-        import ta
-        atr = ta.volatility.average_true_range(
-                ind['df']['high'], ind['df']['low'], ind['df']['close'],
-                window=14).iloc[-2]
-        mult = 1.8 if tag in {"buy_low", "buy_high", "canbuy"} else 1.5
-        trail = max(fib, price - mult*atr)
-        reco.append(f"🔄 Trail SL ≈ {round_num(trail,4)}")
-    except Exception:
-        pass
-
-    # ---- Chiến lược theo PnL & Level ----------------------------------------
-    reco.append("✅ **Chiến lược:**")
-
-    if lvl == "HOLD":
-        reco.append("💎 Giữ vị thế, theo dõi volume & news – chưa nên mua thêm.")
-    elif lvl == "WEAK_BUY":
-        reco.append(f"🟢 Có thể *mua thăm dò* (<25%) nếu giá > {round_num(sl)}.")
-    elif lvl == "BUY":
-        reco.append(f"🛒 *Mua từng phần* khi retest {round_num(fib)} – TP {tp}.")
-        if tag in {"buy_low", "buy_high"}:
-            reco.append("📌 Tín hiệu xác nhận từ kỹ thuật – có thể vào lệnh quyết đoán.")
-    elif lvl == "STRONG_BUY":
-        reco.append("🚀 *Mua mạnh/Scale-in* – xu hướng đồng thuận đa khung.")
-        reco.append(f"Đặt TP1 {tp}, TP2 {round_num(tp*1.06)} – SL động trên Fib.")
-
-    # ---- Điều chỉnh theo lợi nhuận thực tế ----------------------------------
-    if pnl > 5:
-        reco.append(f"👉 Đang lời {pnl}% – cân nhắc *chốt 50%*, kéo SL lên {round_num(fib)}.")
-    elif -3 < pnl <= 0:
-        reco.append(f"⏳ Lỗ nhẹ {pnl}% – theo dõi sát, thủng {round_num(sl)} thì cắt.")
-    elif pnl <= -3:
-        reco.append("❌ Lỗ sâu – giảm vị thế ngay, *đừng* bình quân giá!")
-
-    if extra_tf:
-        reco.append("")  # dòng trống
-        reco.append("📊 Nhận định đa khung:")
-        reco.append(analyze_multi_timeframe(extra_tf))
-
-    return "\n".join(reco)
-
-
-
-def calc_held_hours(start_str):
+    for i in range(0, len(msg), 1950):
+        chunk = msg[i:i+1950]
+        try:
+            requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10).raise_for_status()
+            time.sleep(1)
+        except Exception as e: print(f"[ERROR] Discord alert failed: {e}")
+
+def calc_held_hours(start_str: str) -> float:
     try:
         t = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
         return round((datetime.now() - t).total_seconds() / 3600, 1)
-    except:
-        return "?"
+    except: return 0.0
 
-def load_daily_log(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return []
-
-def save_daily_log(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-def log_to_txt(msg):
+def log_to_txt(msg: str) -> None:
     log_file = os.path.join(LOG_DIR, f"{datetime.now().strftime('%Y-%m-%d')}.txt")
-    with open(log_file, "a") as f:
-        f.write(msg + "\n")
+    with open(log_file, "a", encoding='utf-8') as f:
+        f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n")
 
-def is_overview_time():
-    now = datetime.now().strftime("%H:%M")
-    return now in ["08:02", "20:02"]
+def round_num(val, d=2) -> any:
+    return round(val, d) if isinstance(val, (float, int)) else val
+
+def is_overview_time() -> bool:
+    return datetime.now().strftime("%H:%M") in ["08:02", "20:02"]
     #return True
+# ==============================================================================
+# CORE ANALYSIS & SCORING
+# ==============================================================================
+def parse_trade_plan(plan_str: str) -> dict:
+    try: e, t, s = map(float, plan_str.split("/")); return {"entry": e, "tp": t, "sl": s}
+    except Exception: return {"entry": 0, "tp": 0, "sl": 0}
 
-def rr_ratio(entry, tp, sl):
-    try:
-        return round(abs(tp-entry) / abs(entry-sl), 2)
-    except ZeroDivisionError:
-        return "-"
+def calc_score(ind: dict, market_trend: str) -> int:
+    score = 5.0
+    if ind.get("trend_alignment_bonus"): score += 1.0
+    rsi = ind.get("rsi_14", 50)
+    if rsi < 30 or rsi > 70: score += 1.0
+    if ind.get("macd_cross") == "bullish": score += 0.5
+    elif ind.get("macd_cross") == "bearish": score -= 0.5
+    cmf = ind.get("cmf", 0)
+    if cmf > 0.05: score += 1.0
+    elif cmf < -0.05: score -= 1.0
+    if ind.get("adx", 0) > 25: score += 1.0
+    if ind.get("rsi_divergence") == "bullish": score += 1.5
+    elif ind.get("rsi_divergence") == "bearish": score -= 1.5
+    tag = ind.get("tag", "")
+    if tag in ["buy_high", "buy_low"]: score += 1.0
+    is_buy_signal = tag in ["buy_high", "buy_low", "canbuy"]
+    is_sell_signal = tag in ["sell_high", "sell_low"]
+    if market_trend == "UPTREND":
+        if is_buy_signal: score += 1.5
+        if is_sell_signal: score -= 1.0
+    elif market_trend == "DOWNTREND":
+        if is_buy_signal: score -= 2.0
+        if is_sell_signal: score += 1.5
+    return int(min(max(score, 0), 10))
 
-# ========= HELPER: gói & gửi tin chi tiết ==============
-def build_and_send_alert(*, alert_tag, symbol, interval, trade_id,
-                         in_time, held, real_entry, coin_amount,
-                         current_value, amount, pnl_usd, pnl,
-                         merged_summary, ind_text, advice_text,
-                         extra_tf, ICON, level_from_score,
-                         news_summary, send_discord_alert):
-    """Dựng chuỗi Discord và bắn webhook – giữ file chính gọn hơn."""
-    msg = f"""{alert_tag} Đánh giá lệnh: {symbol} ({interval})
-📌 ID: {trade_id} {symbol} {interval}
-📆 In time: {in_time} | Đã giữ: {held} h | RealEntry: {real_entry}
-💰 PnL: {pnl_usd} USD ({pnl}%) | 📦 {coin_amount} | 💵 {current_value}/{amount}
+# ==============================================================================
+# OUTPUT GENERATION
+# ==============================================================================
+def format_price(price):
+    if not isinstance(price, (int, float)): return price
+    return f"{price:.8f}" if price < 0.1 else f"{price:.4f}"
 
-📊 Phân tích kỹ thuật chi tiết:
-{ind_text}
+def generate_indicator_text_block(ind: dict) -> str:
+    lines = [
+        f"Giá hiện tại: {format_price(ind['price'])}  |  Entry {format_price(ind['trade_plan']['entry'])}  |  TP {format_price(ind['trade_plan']['tp'])}  |  SL {format_price(ind['trade_plan']['sl'])}",
+        f"📈 EMA20: {round_num(ind['ema_20'])}   💪 RSI14: {round_num(ind['rsi_14'])} → {'quá mua' if ind['rsi_14']>70 else 'quá bán' if ind['rsi_14']<30 else 'trung tính'}",
+        f"📉 MACD: {round_num(ind['macd_line'],3)} vs Signal: {round_num(ind['macd_signal'],3)} → {ind['macd_cross']}",
+        f"📊 ADX: {round_num(ind['adx'],1)} → {'có trend' if ind['adx']>20 else 'yếu'}",
+        f"🔊 Volume: {int(ind['volume']):,} / MA20: {int(ind['vol_ma20']):,}",
+        f"💸 CMF: {round_num(ind['cmf'],3)}",
+        f"🌀 Fibo 0.618: {round_num(ind['fib_0_618'],4)}",
+        f"⬆️ Trend cục bộ: {ind['trend']}",
+    ]
+    if ind.get("signal_level") and ind.get("signal_reason"):
+        lines.append(f"🔹 Tín hiệu kỹ thuật: {ind['signal_level']} ({ind.get('tag', 'N/A')}) – {ind['signal_reason']}")
+    return "\n".join(lines)
 
-{merged_summary}
+def generate_summary_block(symbol, interval, pnl, score, ml_data, news_factor, final_rating_normalized):
+    tech_desc = "Thị trường không rõ ràng, cần quan sát thêm"
+    if score >= 7: tech_desc = "Tín hiệu kỹ thuật ủng hộ"
+    elif score <= 3: tech_desc = "Tín hiệu kỹ thuật yếu, rủi ro cao"
+    ai_desc = "Không có dữ liệu AI"
+    if ml_data:
+        ai_desc = f"🚧 {ml_data.get('level', 'AVOID').replace('_', ' ')} – ML dự đoán: {ml_data.get('pct', 0):.2f}% (xác suất: {ml_data.get('score', 0):.1f}%)"
+    news_desc = "Tích cực" if news_factor > 0 else "Tiêu cực" if news_factor < 0 else "Trung lập"
+    return (f"📌 **Tổng hợp đánh giá:** {symbol} ({interval}) | PnL: {pnl:.2f}% | Final: {final_rating_normalized:.1%}\n"
+            f"🔹 **Kỹ thuật:** Score {score}/10 → {tech_desc}\n"
+            f"🔹 **AI:** {ai_desc}\n"
+            f"🔹 **Tin tức:** {news_desc}")
 
-🗞️ Tin tức:
-{news_summary}"""
+def generate_mta_block(extra_tf: dict) -> str:
+    if not extra_tf: return ""
+    lines = ["📊 **Phân tích Đa Khung thời gian:**"]
+    for tf, tfdata in sorted(extra_tf.items()):
+        icon = "🔼" if tfdata.get("trend") == "uptrend" else "🔽" if tfdata.get("trend") == "downtrend" else "↔️"
+        ai_bias = "tăng" if tfdata.get("ai_bias") == "bullish" else "giảm" if tfdata.get("ai_bias") == "bearish" else "trung lập"
+        lines.append(f"{icon} **{tf}**: Trend {tfdata.get('trend', '?'):<9} | RSI: {tfdata.get('rsi', 0):.1f} | AI: {ai_bias}")
+    return "\n".join(lines)
 
-    if extra_tf:
-        tf_lines = []
-        for tf, tfdata in sorted(extra_tf.items(), key=lambda kv: -kv[1]["score"]):
-            lvl = level_from_score(tfdata["score"])
-            tf_lines.append(
-                f"{ICON[lvl]} {tf}: Trend: {tfdata['trend']:<9} | RSI: {tfdata['rsi']}  | CMF: {round(tfdata['cmf'], 3)}  | AI: {tfdata.get('ai_score','-')}% ({tfdata.get('ai_bias','-')})"
-            )
-        msg += "\n\n📊 Đa khung:\n" + "\n".join(tf_lines)
+def generate_final_strategy_block(pnl: float, score: int, ml_data: dict, news_factor: int, ind: dict, market_context: dict) -> str:
+    reco, reasons = [], []
+    market_trend = analyze_market_trend(market_context)
+    lvl = ind.get("level_key", "")
+    if lvl == "PANIC_SELL": reco.append("🔻 **Ưu tiên hàng đầu là thoát lệnh NGAY LẬP TỨC để bảo toàn vốn.**")
+    elif lvl == "SELL": reco.append("🔻 **Tín hiệu tiêu cực chiếm ưu thế, cân nhắc giảm vị thế hoặc chốt lời/cắt lỗ.**")
+    elif lvl == "AVOID": reco.append("⛔ **Thị trường rủi ro, không rõ ràng – nên đứng ngoài quan sát.**")
+    elif lvl == "HOLD": reco.append("💎 **Giữ lệnh hiện tại.** Chưa nên mở thêm vị thế khi tín hiệu chưa đủ mạnh.")
+    elif lvl == "WEAK_BUY": reco.append("🟢 **Có thể mua thăm dò với khối lượng nhỏ.** Cần quản lý rủi ro chặt chẽ.")
+    elif lvl == "BUY": reco.append("🛒 **Tín hiệu MUA đang được củng cố.** Có thể xem xét vào lệnh tại các vùng hỗ trợ.")
+    elif lvl == "STRONG_BUY": reco.append("🚀 **Tất cả các yếu tố đều ủng hộ xu hướng tăng.** Có thể tự tin gia tăng vị thế.")
+    
+    reasons.append(f"**Cấp độ Lệnh:** {lvl} (dựa trên điểm tổng hợp)")
+    reasons.append(f"**Kỹ thuật:** Điểm {score}/10. {'Tín hiệu tích cực.' if score >= 7 else 'Tín hiệu yếu/tiêu cực.' if score <= 3 else 'Tín hiệu trung lập.'}")
+    reasons.append(f"**Bối cảnh Thị trường:** {market_trend}. {'Đây là yếu tố hỗ trợ mạnh mẽ.' if market_trend == 'UPTREND' else 'Đây là yếu tố rủi ro lớn.' if market_trend == 'DOWNTREND' else 'Thị trường chưa có xu hướng rõ ràng.'}")
+    if ml_data: reasons.append(f"**AI:** Dự báo có xu hướng {'tăng' if ml_data.get('score', 0) >= 60 else 'giảm' if ml_data.get('score', 0) <= 40 else 'trung lập'} (xác suất {ml_data.get('score', 0):.1f}%).")
+    if news_factor != 0: reasons.append(f"**Tin tức:** Có yếu tố tin tức {'tích cực' if news_factor > 0 else 'tiêu cực'} cần lưu ý.")
+    
+    summary_map = { "UPTREND": "bức tranh chung đang rất tích cực.", "DOWNTREND": "rủi ro từ thị trường chung là rất lớn.", "NEUTRAL": "thị trường chung đang đi ngang, cần tín hiệu rõ ràng hơn từ chính coin." }
+    summary_text = f"Kết hợp các yếu tố, {summary_map.get(market_trend, '...')} Tín hiệu {lvl} nên được xem xét trong bối cảnh này."
 
-    msg = msg.rstrip() + "\n\n" + advice_text.strip()
+    out = [f"🧠 **Chiến lược cuối cùng:**"]
+    out.extend([f"• {line}" for line in reco])
+    out.append("📌 **Phân tích chi tiết:**")
+    out.extend([f"– {r}" for r in reasons])
+    out.append(f"📉 **Tổng kết:** {summary_text}")
+    return "\n".join(out)
 
-    send_discord_alert(msg)
-
-# ========= HẾT HELPER =================================
-
-
-
+# ==============================================================================
+# MAIN EXECUTION
+# ==============================================================================
 def main():
+    market_context = load_json(MARKET_CONTEXT_PATH, {})
+    market_trend = analyze_market_trend(market_context)
+    
     cooldown_state = load_cooldown_state()
     now = datetime.now()
     advisor_file = os.path.join(ADVISOR_DIR, f"{now.strftime('%Y-%m-%d')}.json")
     trades = []
-
+    
     for fname in sorted(os.listdir(TRADELOG_DIR)):
         if fname.endswith(".json"):
-            fpath = os.path.join(TRADELOG_DIR, fname)
-            try:
-                with open(fpath, "r") as f:
-                    data = json.load(f)
-                    trades.extend([t for t in data if t.get("status") == "open"])
-            except:
-                print(f"[WARN] Lỗi đọc file: {fname}")
+            trades.extend([t for t in load_json(os.path.join(TRADELOG_DIR, fname), []) if t.get("status") == "open"])
 
     if not trades:
-        print("❌ Không tìm thấy lệnh đang mở nào")
+        print("❌ Không tìm thấy lệnh đang mở nào.")
         return
 
-    advisor_log = load_daily_log(advisor_file)
+    advisor_log = load_json(advisor_file, [])
     advisor_map = {t["id"]: t for t in advisor_log}
-    overview_lines = []
-    level_counter  = Counter()     # đếm số lệnh / cấp
-    pnl_bucket     = Counter()     # cộng PnL USD / cấp
-    watch_list     = []            # AI-Tech conflict
+    
+    overview_data = []
+    level_counter = Counter()
 
     for trade in trades:
-        trade_id = trade["id"]
-        symbol = trade["symbol"]
-        interval = trade["interval"]
-        in_time = trade.get("in_time")
-        amount = trade.get("amount", 1000)
-        plan = parse_trade_plan(trade["trade_plan"])
-        real_entry = trade.get("real_entry") or plan["entry"]
+        try:
+            trade_id, symbol, interval = trade["id"], trade["symbol"], trade["interval"]
+            real_entry = trade.get("real_entry") or parse_trade_plan(trade["trade_plan"])["entry"]
+            if not real_entry: 
+                log_to_txt(f"Skip {symbol} due to zero entry price.")
+                continue
 
-        if not real_entry:
-            log_to_txt(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Bỏ qua lệnh {symbol} vì entry = 0")
-            continue
-
-        df = get_price_data(symbol, interval)
-        price_now = round(df.iloc[-2]["close"], 4)
-        pnl = round((price_now - real_entry) / real_entry * 100, 2)
-        pnl_usd = round(amount * pnl / 100, 2)
-        held = calc_held_hours(in_time)
-        indicators = calculate_indicators(df, symbol, interval)
-        indicators["df"] = df
-        indicators["trade_plan"] = plan
-        indicators["price"] = price_now
-
-        # 1) Lấy thêm chỉ báo đa khung
-        extra_tf = {}
-        for tf in ["1h", "4h", "1d"]:
-            if tf != interval:
+            df = get_price_data(symbol, interval)
+            price_now = round(df.iloc[-2]["close"], 8)
+            pnl = round((price_now - real_entry) / real_entry * 100, 2)
+            
+            indicators = calculate_indicators(df, symbol, interval)
+            indicators.update({"df": df, "trade_plan": parse_trade_plan(trade['trade_plan']), "price": price_now})
+            
+            extra_tf = {}
+            for tf in ["1h", "4h", "1d"]:
+                if tf == interval: continue
                 try:
                     df_tf = get_price_data(symbol, tf)
                     ind_tf = calculate_indicators(df_tf, symbol, tf)
+                    ml_tf_score = 0
+                    ai_path_tf = os.path.join(AI_DIR, f"{symbol}_{tf}.json")
+                    if os.path.exists(ai_path_tf): ml_tf_score = load_json(ai_path_tf, {}).get('score', 0)
+                    extra_tf[tf] = {"rsi": ind_tf["rsi_14"], "trend": ind_tf["trend"], "ai_score": ml_tf_score, "ai_bias": "bullish" if ml_tf_score >= 60 else "bearish" if ml_tf_score <= 40 else "neutral"}
+                except Exception as e: log_to_txt(f"Error processing multi-timeframe {tf} for {symbol}: {e}")
 
-                    ai_path = os.path.join(AI_DIR, f"{symbol}_{tf}.json")
-                    ml_tf = {}
-                    if os.path.exists(ai_path):
-                        try:
-                            with open(ai_path, "r") as f:
-                                ml_tf = json.load(f)
-                        except:
-                            pass
-
-                    extra_tf[tf] = {
-                        "rsi":   round_num(ind_tf["rsi_14"]),
-                        "macd":  ind_tf["macd_cross"],
-                        "trend": ind_tf["trend"],
-                        "score": calc_score(ind_tf),
-                        "volume": ind_tf["volume"],
-                        "vol_ma": ind_tf["vol_ma20"],
-                        "cmf": ind_tf["cmf"],
-                        "ai_score": ml_tf.get("score", None),
-                        "ai_level": ml_tf.get("level", None),
-                        "ai_bias": "bullish" if ml_tf.get("score", 0) >= 60 else "bearish" if ml_tf.get("score", 0) <= 40 else "neutral"
-                    }
-                except Exception as e:
-                    log_to_txt(f"[ERROR] Lỗi xử lý đa khung {tf} của {symbol}: {e}")
-
-        # ✅ Sau khi đã có extra_tf, mới inject RSI vào indicators
-        indicators["rsi_1h"] = extra_tf.get("1h", {}).get("rsi")
-        indicators["rsi_4h"] = extra_tf.get("4h", {}).get("rsi")
-        indicators["rsi_1d"] = extra_tf.get("1d", {}).get("rsi")
-
-        # ✅ Gọi check_signal() sau khi indicators đầy đủ
-        signal_level, signal_reason = check_signal(indicators)
-        indicators["signal_level"] = signal_level
-        indicators["signal_reason"] = signal_reason
-        indicators["tag"] = indicators.get("tag", "avoid")
-
-        # 2) Bonus 1 điểm nếu ≥2 khung cùng trend
-        same_dir = sum(
-            1 for tf_data in extra_tf.values()
-            if tf_data["trend"] == indicators["trend"]
-        )
-        indicators["trend_alignment_bonus"] = 1 if same_dir >= 2 else 0
-
-        # 3) Tính lại score sau khi đã có bonus
-        score = calc_score(indicators)
-
-        # 4) Tạo text / gợi ý / news sau khi đã có score mới
-        news_summary = load_news_for_symbol(symbol)
-
-        ml_score = 0
-        ml_level = ""
-        ml_summary = ""
-
-        ai_path = os.path.join(AI_DIR, f"{symbol}_{interval}.json")
-        if os.path.exists(ai_path):
-            try:
-                with open(ai_path, "r") as f:
-                    ml = json.load(f)
-                    ml_score      = ml.get("score", 0)
-                    ml_level_raw  = ml.get("level", "")
-                    ml_level      = ml_level_raw.replace("_", " ")
-                    ml_summary    = f"{ml.get('level_icon', '')} – {ml.get('summary', '')}"
-            except Exception as e:
-                print(f"[ERROR] Không đọc được AI JSON: {ai_path} → {e}")
-        else:
-            print(f"[DEBUG] Không tìm thấy AI JSON: {symbol}_{interval}")
-
-        ai_bias     = "bullish" if ml_score >= 60 else "bearish" if ml_score <= 40 else "neutral"
-        news_factor = -1 if "critical" in news_summary.lower() else 1 if "tin tức" in news_summary.lower() else 0
-
-        ind_text    = generate_indicator_text(indicators)
-        advice_text = generate_final_strategy(score, ml_score, news_factor, pnl, indicators, extra_tf)
-
-
-
-        tech  = score / 10
-        ai    = ml_score / 100
-        news  = (news_factor + 1) / 2
-        pnl_norm  = max(-10, min(10, pnl))
-        pnl_score = (pnl_norm + 10) / 20
-        final_rating = round(0.45*tech + 0.35*ai + 0.1*pnl_score + 0.1*news, 3)
-        signal_boost = 0.03 if indicators.get("signal_level") == "WARNING" else 0.05 if indicators.get("signal_level") == "CRITICAL" else 0
-        final_rating += signal_boost
-        final_rating = round(min(1.0, final_rating), 3)
-
-
-        prev = advisor_map.get(trade_id)
-        should_send = False
-        send_reason = ""
-
-        if not prev:
-            should_send = True
-            send_reason = "Lệnh mới"
-        elif abs(prev.get("score", 0) - score) >= 2:
-            should_send = True
-            send_reason = f"Score đổi: {prev.get('score')} → {score}"
-        elif prev.get("strategy") != advice_text:
-            should_send = True
-            send_reason = "Chiến lược đổi"
-        elif abs(prev.get("ml_score", 0) - ml_score) >= 5:
-            should_send = True
-            send_reason = f"AI score đổi: {prev.get('ml_score', 0)} → {ml_score}"
-        elif prev.get("ml_level", "") != ml_level:
-            should_send = True
-            send_reason = f"AI level đổi: {prev.get('ml_level')} → {ml_level}"
-
-
-        if not should_send:
-            send_reason = send_reason or "Không rõ lý do"
-            log_to_txt(f"[SKIP] Không gửi lại {symbol} ({interval}) vì không có thay đổi đáng kể. Lý do: {send_reason}")
-
-        log_to_txt(f"[{now.strftime('%H:%M:%S')}] Score: {score} | {'SEND' if should_send else 'SKIP'} | {symbol} {interval} | Lý do: {send_reason}")
-
-
-        new_entry = {
-            "id": trade_id,
-            "symbol": symbol,
-            "interval": interval,
-            "in_time": in_time,
-            "held_hours": held,
-            "pnl_percent": pnl,
-            "pnl_usd": pnl_usd,
-            "amount": amount,
-            "price": price_now,
-            "score": score,
-            "indicators_summary": ind_text,
-            "strategy": advice_text,
-            "last_sent": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "status": "open",
-            "ml_score": ml_score,
-            "ml_level": ml_level,
-        }
-
-        coin_amount = round(amount / real_entry, 2)
-        current_value = round(amount + pnl_usd, 2)
-
-
-
-        if should_send:
-            # ---- chuẩn hóa & final_rating -----------------
-            # ---- map ra level / icon ----------------------
-            if   final_rating < 0.05: alert_tag, level_key = "🆘 [Panic Sell]",  "PANIC_SELL"
-            elif final_rating < 0.15: alert_tag, level_key = "🔻 [Sell]",        "SELL"
-            elif final_rating < 0.30: alert_tag, level_key = "⛔ [Avoid]",       "AVOID"
-            elif final_rating < 0.45: alert_tag, level_key = "💎 [Hold]",        "HOLD"
-            elif final_rating < 0.60: alert_tag, level_key = "🟢 [Weak Buy]",    "WEAK_BUY"
-            elif final_rating < 0.80: alert_tag, level_key = "🛒 [Buy]",         "BUY"
-            else:                         alert_tag, level_key = "🚀 [Strong Buy]","STRONG_BUY"
-
-            # ---- CHECK COOLDOWN ---------------------------
-            symbol_key    = f"{symbol}_{interval}"
-            last_sent_str = cooldown_state.get(symbol_key, {}).get(level_key)
-            cooldown_skip = bool(last_sent_str and not is_cooldown_passed(last_sent_str, level_key, now))
-
-            # Luôn cộng dồn thống kê cho báo cáo tổng quan
+            signal_level, signal_reason = check_signal(indicators)
+            indicators.update({"signal_level": signal_level, "signal_reason": signal_reason, "tag": indicators.get("tag", "avoid")})
+            
+            score = calc_score(indicators, market_trend)
+            news_and_context_text, news_factor = load_news_and_context_block(symbol, market_context)
+            
+            ml_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
+            
+            tech = score / 10.0
+            ai = ml_data.get('score', 50) / 100.0
+            pnl_norm = max(-1.0, min(1.0, pnl / 10.0))
+            market_score_val = 1.0 if market_trend == "UPTREND" else -1.0 if market_trend == "DOWNTREND" else 0.0
+            
+            final_rating = (0.40 * tech + 0.30 * ai + 0.15 * market_score_val + 0.10 * pnl_norm + 0.05 * news_factor)
+            final_rating_normalized = min(1.0, max(0.0, (final_rating + 1) / 2.5))
+            
+            level_key_map = [(0.15, "PANIC_SELL"), (0.30, "SELL"), (0.45, "AVOID"), (0.55, "HOLD"), (0.70, "WEAK_BUY"), (0.85, "BUY"), (1.01, "STRONG_BUY")]
+            level_key = next((lvl for thr, lvl in level_key_map if final_rating_normalized < thr), "AVOID")
+            
+            overview_data.append({**trade, "pnl": pnl, "score": score, "ml_score": ml_data.get('score', 0), "final_rating": final_rating_normalized, "level_key": level_key, "price_now": price_now, "real_entry": real_entry})
             level_counter[level_key] += 1
-            pnl_bucket[level_key]    += pnl_usd
 
-            if not cooldown_skip:
-                # ---- update cooldown ----------------------
-                cooldown_state.setdefault(symbol_key, {})[level_key] = now.strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                log_to_txt(f"[COOLDOWN] Skip alert for {symbol} ({interval}) – {level_key}")
+            prev = advisor_map.get(trade_id, {})
+            should_send = ( not prev or abs(prev.get("final_rating", 0) - final_rating_normalized) > 0.08 or abs(prev.get("pnl_percent", 0) - pnl) > 3.0)
 
-            # Mâu thuẫn AI-Tech?
-            if abs(tech - ai) > 0.4:
-                watch_list.append(f"{symbol}/{interval}")
+            if should_send:
+                alert_tag = f"{ICON[level_key]} [{level_key.replace('_', ' ')}]"
+                indicators["level_key"] = level_key
+                
+                title_block = f"{alert_tag} Đánh giá lệnh: {symbol} ({interval})"
+                info_block = (f"📌 ID: {trade_id} {symbol} {interval}\n"
+                              f"📆 In time: {trade.get('in_time')} | Đã giữ: {calc_held_hours(trade.get('in_time'))} h | RealEntry: {real_entry}\n"
+                              f"💰 PnL: {round(trade.get('amount', 1000) * pnl / 100, 1):.1f} USD ({pnl:.2f}%) | 📦 {round(trade.get('amount', 1000)/real_entry, 2)} | 💵 {round(trade.get('amount', 1000) + trade.get('amount', 1000) * pnl / 100, 1)}/{trade.get('amount', 1000):.1f}")
+                
+                ind_text_block = generate_indicator_text_block(indicators)
+                summary_block = generate_summary_block(symbol, interval, pnl, score, ml_data, news_factor, final_rating_normalized)
+                mta_block = generate_mta_block(extra_tf)
+                final_strategy_block = generate_final_strategy_block(pnl, score, ml_data, news_factor, indicators, market_context)
+                
+                final_msg = "\n\n".join(filter(None, [title_block, info_block, ind_text_block, summary_block, news_and_context_text, mta_block, final_strategy_block]))
+                
+                symbol_key = f"{symbol}_{interval}"
+                last_sent_str = cooldown_state.get(symbol_key, {}).get(level_key)
+                if not last_sent_str or is_cooldown_passed(last_sent_str, level_key, now):
+                    log_to_txt(f"SEND alert for {symbol} ({interval}) - Level: {level_key}")
+                    send_discord_alert(final_msg)
+                    cooldown_state.setdefault(symbol_key, {})[level_key] = now.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    log_to_txt(f"COOLDOWN skip for {symbol} ({interval}) - Level: {level_key}")
 
-            # ---- refresh advice ---------------------------
-            indicators["level_key"] = level_key
-            advice_text = generate_final_strategy(score, ml_score, news_factor, pnl, indicators, extra_tf)
+            advisor_map[trade_id] = {"id": trade_id, "pnl_percent": pnl, "final_rating": final_rating_normalized}
+        
+        except Exception as e:
+            log_to_txt(f"[CRITICAL ERROR] Failed to process trade {trade.get('id', 'N/A')}: {e}")
+            import traceback
+            log_to_txt(traceback.format_exc())
+            
+    if is_overview_time() and overview_data:
+        total_start = sum(t.get("amount", 1000) for t in overview_data)
+        total_pnl_usd = sum(t.get("amount", 1000) * t["pnl"] / 100 for t in overview_data)
+        total_now = total_start + total_pnl_usd
+        
+        lv_counts = ", ".join(f"{ICON[k]}{v}" for k, v in sorted(level_counter.items(), key=lambda item: list(ICON.keys()).index(item[0])))
+        pnl_by_level = {lvl: sum(t.get("amount", 1000) * t["pnl"] / 100 for t in overview_data if t["level_key"] == lvl) for lvl in level_counter}
+        pnl_lines = ", ".join(f"{ICON[k]}{v:.1f}$" for k, v in sorted(pnl_by_level.items(), key=lambda item: list(ICON.keys()).index(item[0])))
+        
+        header  = f"📊 **Tổng quan danh mục {now:%d-%m %H:%M}**\n"
+        header += f"Lệnh: {len(overview_data)} | PnL Tổng: {total_pnl_usd:+.1f}$ ({(total_pnl_usd/total_start*100 if total_start else 0):+.2f}%)\n"
+        header += f"Phân bổ cấp: {lv_counts}\n"
+        header += f"PnL theo cấp: {pnl_lines}"
+        
+        overview_lines = []
+        for t in sorted(overview_data, key=lambda x: x.get('final_rating', 0)):
+            line = (f"📌 **{t['symbol']} ({t['interval']})** | "
+                    f"PnL: {t['pnl']:+.2f}% | "
+                    f"Entry: {t.get('real_entry', 0)} | "
+                    f"Hiện tại: {t['price_now']}\n"
+                    f"🧠 Tech: {t['score']}/10 | AI: {t['ml_score']:.0f}% | **Final: {t['final_rating']:.1%}** {ICON.get(t['level_key'], ' ')}")
+            overview_lines.append(line)
+            
+        send_discord_alert(header + "\n" + "-"*50 + "\n" + "\n\n".join(overview_lines))
 
-
-            # ---- gộp summary ngắn -------------------------
-            merged_summary = f"""📌 Tổng hợp đánh giá: {symbol} ({interval}) | PnL: {pnl}% | Final: {round(final_rating*100,2)}%
-🔹 Kỹ thuật: Score {score}/10 → {'Thị trường không rõ ràng, cần quan sát thêm' if score<=3 else ('Tích cực' if score>=7 else 'Trung tính')}
-🔹 AI: {ml_summary if ml_summary else '– Không có dữ liệu AI'}
-🔹 Tin tức: {news_summary.splitlines()[0] if news_summary else '– Trung lập'}"""
-
-            # ---- gửi tin qua helper -----------------------
-            if not cooldown_skip:
-                build_and_send_alert(
-                    alert_tag=alert_tag, symbol=symbol, interval=interval,
-                    trade_id=trade_id, in_time=in_time, held=held,
-                    real_entry=real_entry, coin_amount=coin_amount,
-                    current_value=current_value, amount=amount,
-                    pnl_usd=pnl_usd, pnl=pnl,
-                    merged_summary=merged_summary,
-                    ind_text=ind_text, advice_text=advice_text,
-                     news_summary=news_summary,
-                    extra_tf=extra_tf, ICON=ICON,
-                    level_from_score=level_from_score,
-                    send_discord_alert=send_discord_alert
-                )
-
-
-        advisor_map[trade_id] = new_entry
-
-        if is_overview_time():
-            in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
-            in_hour = in_dt.strftime("%H:%M")
-            in_date = in_dt.strftime("%Y-%m-%d")
-            score_icon = ICON.get(indicators.get("level_key", ""), "⬜")
-
-            line0 = f"📌 ID: {trade_id} {symbol} {interval}"
-            line1 = f"🔹 {symbol} {interval} | 🎯 {real_entry} | 💰 {pnl}% | 📦 {coin_amount} | 💵 {current_value}/{amount} | 🧠 {score} {score_icon}"
-            line2 = f"🕒 In: {in_hour} | Giữ: {held}h | Vào: {in_date}"
-            line3 = f"🎯 Entry: {real_entry} | 🎯 TP: {plan['tp']} | 🛡 SL: {plan['sl']}"
-            rr = rr_ratio(real_entry, plan['tp'], plan['sl'])
-            line3 += f" | ℹ️ R/R: {rr}"
-            line4 = f"🟡 Giá hiện tại: {price_now}"
-            line5 = f"🧠 Score kỹ thuật: {score}/10"
-            if ml_score:
-                line5 += f" | 🤖 AI: {ml_score}% ({ml_level}) | 🏁 Final: {round(final_rating*100)}%"
-
-            overview_lines.append("\n".join([line0, line1, line2, line3, line4, line5]))
-
-    if is_overview_time() and overview_lines:
-        total_start = round(sum(t["amount"] for t in advisor_map.values()
-                                if t.get("status")=="open"), 2)
-        total_now   = round(sum(t["amount"]+t["pnl_usd"] for t in advisor_map.values()
-                                if t.get("status")=="open"), 2)
-        total_count = len(overview_lines)
-
-        # ----- biến Counter ra chuỗi gọn -----
-        lv_counts = ", ".join(f"{ICON[k]}{level_counter[k]}"
-                              for k in LEVEL_COOLDOWN_MINUTES if k in level_counter)
-        pnl_lines = ", ".join(f"{ICON[k]}{round(pnl_bucket[k],1)}$"
-                              for k in LEVEL_COOLDOWN_MINUTES if k in pnl_bucket)
-
-        header  = f"📊 **Tổng quan danh mục {now:%d-%m %H:%M}**"
-        header += f"\nLệnh: {total_count} | PnL: {total_now}/{total_start}$"
-        header += f"\nPhân bổ cấp: {lv_counts}"
-        header += f"\nPnL theo cấp: {pnl_lines}"
-        if watch_list:
-            header += "\n⚠️ *Mâu thuẫn AI-Tech*: " + ", ".join(watch_list[:3])
-
-        send_discord_alert(header + "\n\n" + "\n".join(overview_lines))
-
-
-    log_file = os.path.join(LOG_DIR, f"{now.strftime('%Y-%m-%d')}.txt")
-    sent_count = 0
-    skip_count = 0
-    if os.path.exists(log_file):
-        with open(log_file, "r") as f:
-            for line in f:
-                if "SEND" in line:
-                    sent_count += 1
-                elif "SKIP" in line or "COOLDOWN" in line:
-                    skip_count += 1
-
-    if sent_count:
-        print(f"📤 Sent {sent_count} alerts | ⏳ Skipped {skip_count}")
-    elif skip_count:
-        print(f"📭 No alerts sent – all {skip_count} skipped")
-    else:
-        print("📭 No trades processed or no logs found.")
-
-
-    save_daily_log(advisor_file, list(advisor_map.values()))
+    write_json(advisor_file, list(advisor_map.values()))
     save_cooldown_state(cooldown_state)
+    print(f"✅ Finished processing {len(trades)} open trades.")
 
 if __name__ == "__main__":
     main()
