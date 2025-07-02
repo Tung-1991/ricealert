@@ -1,0 +1,26 @@
+{
+  "features": [
+    "rsi_14",
+    "ema_14",
+    "dist_ema_14",
+    "rsi_20",
+    "ema_20",
+    "dist_ema_20",
+    "rsi_50",
+    "ema_50",
+    "dist_ema_50",
+    "macd_diff",
+    "adx",
+    "atr",
+    "bb_width",
+    "cmf",
+    "candle_body",
+    "candle_range",
+    "body_to_range_ratio",
+    "hour",
+    "day_of_week"
+  ],
+  "trained_at": "2025-07-02T14:43:19.192531+00:00",
+  "label_threshold": 0.0075,
+  "future_offset": 4
+}

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 ml_report.py - AI Trading Signal Assistant
-Version: 4.2 (The Best of Both Worlds)
+Version: 4.3 (Synchronized with New Trainer)
 Date: 2025-07-03
-Description: This definitive version combines the best of all previous iterations.
-             - Delivers immediate, detailed, consolidated signal alerts per symbol.
-             - Restores the periodic overview summary (08:01, 20:01) with a new,
-               clean, and highly scannable format.
-             - All logic is refined for maximum clarity and performance.
+Description: This version is fully synchronized with the overhauled trainer.py (v2.1).
+             - Correctly interprets the new 3-class classification model.
+             - De-normalizes the regression model's output using ATR.
+             - Uses feature names from meta.json for consistency.
+             - All logic is now aligned with the new training methodology.
 """
 import os
 import json
@@ -15,17 +15,19 @@ import time
 import joblib
 import requests
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-from indicator import get_price_data, calculate_indicators
-from typing import List
+
+# IMPORTANT: Ensure this function is identical to the one in trainer.py
+from indicator import get_price_data, calculate_indicators # Assumes calculate_indicators is the new add_features
 
 # ==============================================================================
 # SETUP & CONFIG
 # ==============================================================================
 load_dotenv()
-SYMBOLS        = os.getenv("SYMBOLS", "LINKUSDT").split(",")
+SYMBOLS        = os.getenv("SYMBOLS", "LINKUSDT,TAOUSDT").split(",")
 INTERVALS      = os.getenv("INTERVALS", "1h,4h,1d").split(",")
 WEBHOOK_URL    = os.getenv("DISCORD_AI_WEBHOOK")
 ERROR_WEBHOOK  = os.getenv("DISCORD_ERROR_WEBHOOK", "")
@@ -92,44 +94,57 @@ def is_overview_time() -> bool:
     return datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%H:%M") in {"08:01", "20:01"}
 
 # ==============================================================================
-# NEW CORE LOGIC
+# NEW CORE LOGIC (SYNCHRONIZED WITH TRAINER V2.1)
 # ==============================================================================
 
-def classify_level(score: float, pct: float) -> str:
-    # Score is the probability of class 2 (BUY)
-    if score > 80: return "STRONG_BUY"
-    if score < 20: return "PANIC_SELL"
-    if score > 65: return "BUY"
-    if score < 35: return "SELL"
-    if score > 55: return "WEAK_BUY"
-    if 45 <= score <= 55 and abs(pct) < 0.5: return "HOLD"
+def classify_level(prob_buy: float, prob_sell: float, pct: float) -> str:
+    """New classification logic for the 3-class model."""
+    if prob_buy > 80: return "STRONG_BUY"
+    if prob_sell > 80: return "PANIC_SELL"
+    
+    if prob_buy > 65: return "BUY"
+    if prob_sell > 65: return "SELL"
+    
+    if prob_buy > 55: return "WEAK_BUY"
+    
+    # In the middle "no-man's land"
+    if abs(prob_buy - prob_sell) < 10 and abs(pct) < 0.5:
+        return "HOLD"
+        
     return "AVOID"
 
 def analyze_single_interval(symbol: str, interval: str) -> dict or None:
+    """Analyzes a single symbol/interval pair using the new models."""
     clf, reg, meta = load_model_and_meta(symbol, interval)
     if not clf or not reg or not meta: return None
 
     try:
         df = get_price_data(symbol, interval, limit=200)
-        features = calculate_indicators(df, symbol, interval).iloc[-1].to_dict()
+        # IMPORTANT: This must be the same feature engineering function as in trainer.py
+        # Assuming `calculate_indicators` is the new `add_features`
+        features_df = calculate_indicators(df) 
+        latest_features = features_df.iloc[-1].to_dict()
         
         feature_names = meta["features"]
-        X = pd.DataFrame([features])[feature_names].fillna(0.0)
+        X = pd.DataFrame([latest_features])[feature_names].fillna(0.0)
         
+        # 1. Classifier Prediction (3 classes)
         probabilities = clf.predict_proba(X)[0]
+        prob_sell = probabilities[0] * 100
         prob_buy = probabilities[2] * 100
         
+        # 2. Regressor Prediction (De-normalization)
         predicted_norm_change = float(reg.predict(X)[0])
-        atr = features.get('atr', 0.0)
-        price = features.get('close', 0)
-        if price == 0: return None # Avoid division by zero
+        atr = latest_features.get('atr', 0.0)
+        price = latest_features.get('close', 0)
+        if price == 0: return None
         pct = predicted_norm_change * atr * 100 / price
 
-        score_for_classification = prob_buy
-        level = classify_level(score_for_classification, pct)
+        # 3. Classify and Calculate TP/SL
+        level = classify_level(prob_buy, prob_sell, pct)
         
         direction = 1 if pct >= 0 else -1
-        tp_pct = abs(pct) if abs(pct) > 0.1 else 0.5 # Ensure a minimum target
+        tp_pct = abs(pct) if abs(pct) > 0.1 else 0.5
         risk_ratio = RISK_REWARD_MAP.get(level, 1/3)
         sl_pct = tp_pct * risk_ratio
         
@@ -147,6 +162,7 @@ def analyze_single_interval(symbol: str, interval: str) -> dict or None:
         return None
 
 def generate_report_for_symbol(symbol: str, all_results: List[dict], cooldown: dict) -> None:
+    # (No change needed here, this function is good)
     if not all_results: return
     
     strongest_signal = sorted(all_results, key=lambda x: (x['level'] not in ["STRONG_BUY", "PANIC_SELL"], abs(50 - x['score'])))[0]
@@ -193,6 +209,7 @@ def generate_report_for_symbol(symbol: str, all_results: List[dict], cooldown: d
 # MAIN
 # ==============================================================================
 def main():
+    # (No change needed here, this function is good)
     cooldown = load_cooldown()
     print(f"Starting analysis at {datetime.now()}...")
     
@@ -210,13 +227,11 @@ def main():
             all_symbols_results.extend(results_for_this_symbol)
             generate_report_for_symbol(symbol, results_for_this_symbol, cooldown)
 
-    # RESTORED: Send periodic overview summary
     if is_overview_time() and all_symbols_results:
         print("--- Generating Overview Summary ---")
         header = f"🔥 **Tổng hợp AI ML {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M')}**"
         
         overview_blocks = []
-        # Group results by symbol for the overview
         from itertools import groupby
         sorted_results = sorted(all_symbols_results, key=lambda x: x['symbol'])
         for symbol, group in groupby(sorted_results, key=lambda x: x['symbol']):
