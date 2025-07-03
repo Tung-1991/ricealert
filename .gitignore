@@ -1,17 +1,35 @@
-venv/
+# === Python & Virtual Env ===
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+venv/
 .env
-cooldown_tracker.json
+
+# === General Cache & State Files ===
+*.log
+*.json
+*.sqlite3
+*.db
+
+# === Output, Logs, and Generated Files ===
 output/
 log/
-ricealert-ec406ac4f2f7.json
-trade/tradelog/
-advisor_log/
-ricenews/lognew/
-ricenews/cooldown_tracker.json
 ai_logs/
-cooldown_tracker_ml.json
-ricenews/market_context_cache.json
+advisor_log/
+trade/tradelog/
+ricenews/lognew/
+ricenews/log/
 ricenews/__pycache__/
 advisor_state.json
 ml_state.json
+
+# === Cooldown & Temp Cache ===
+cooldown_tracker.json
+cooldown_tracker_ml.json
+ricenews/cooldown_tracker.json
+ricenews/market_context_cache.json
+
+# === Google Service Account Key (Security!) ===
+ricealert-*.json
