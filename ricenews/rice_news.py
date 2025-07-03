@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # rice_news.py
-# Version: 5.3 (Stability & Readability First)
-# Description: This version provides the definitive fix for the message splitting
-#              loop and formatting issues. The send_discord_alert function is now
-#              robust and non-recursive. The output format is clean and readable.
-#              All other logic from the last stable build is maintained.
+# Version: 5.4 (Intelligent Cooldown Logic)
+# Description: This version implements the "Wise Editor" logic. It processes all
+#              new news items first, then decides whether to send a digest based
+#              on the cooldown of the highest-level news item. This prevents
+#              important news from being missed while preserving the exact
+#              same rich output format of version 5.3.
 
 import os
 import json
@@ -22,7 +23,7 @@ from collections import defaultdict, Counter
 from market_context import get_market_context_data, get_market_context
 
 # ==============================================================================
-# CONFIG & SETUP
+# CONFIG & SETUP (Không thay đổi)
 # ==============================================================================
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(dotenv_path=dotenv_path)
@@ -56,7 +57,7 @@ MACRO_KEYWORDS = ["fomc", "interest rate", "cpi", "inflation", "sec", "lawsuit",
 RSS_SOURCES = {"CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss", "Cointelegraph": "https://cointelegraph.com/rss"}
 
 # ==============================================================================
-# HELPER & UTILITY FUNCTIONS
+# HELPER & UTILITY FUNCTIONS (Không thay đổi)
 # ==============================================================================
 def load_json(file_path, default_value):
     if not os.path.exists(file_path): return default_value
@@ -74,7 +75,7 @@ def should_send_summary(last_summary_ts: float) -> bool:
     return False
 
 # ==============================================================================
-# CORE ANALYSIS
+# CORE ANALYSIS (Không thay đổi)
 # ==============================================================================
 def analyze_market_context_trend(mc: dict) -> str:
     if not mc: return "NEUTRAL"
@@ -153,7 +154,7 @@ def generate_final_summary(alerts: List[Dict], market_trend: str) -> str:
     return f"⚠️ **Đánh giá chung:** {base_summary} {context_summary}"
 
 # ==============================================================================
-# DATA FETCHING & PERSISTENCE
+# DATA FETCHING & PERSISTENCE (Không thay đổi)
 # ==============================================================================
 def fetch_news_sources() -> List[Dict]:
     all_news = []
@@ -180,52 +181,36 @@ def save_news_for_precious(news_item: Dict):
             json.dump(logs, f, indent=2, ensure_ascii=False)
 
 # ==============================================================================
-# DISCORD & SUMMARY FUNCTIONS
+# DISCORD & SUMMARY FUNCTIONS (Không thay đổi)
 # ==============================================================================
 def send_discord_alert(message: str):
-    """SỬA LỖI: Logic chia tin nhắn đúng đắn, không đệ quy."""
     if not DISCORD_WEBHOOK:
         print("[WARN] DISCORD_WEBHOOK is not set.")
         return
-    
     max_len = 2000
     chunks = []
     if len(message) > max_len:
-        print(f"Message is too long ({len(message)} chars). Splitting into chunks...")
-        # Tách tin nhắn thành các dòng
         lines = message.split('\n')
         current_chunk = ""
         for line in lines:
-            # Nếu thêm dòng mới vào sẽ vượt quá giới hạn
             if len(current_chunk) + len(line) + 1 > max_len:
                 chunks.append(current_chunk)
                 current_chunk = line
             else:
-                if current_chunk:
-                    current_chunk += "\n" + line
-                else:
-                    current_chunk = line
-        chunks.append(current_chunk) # Thêm chunk cuối cùng
+                current_chunk += ("\n" if current_chunk else "") + line
+        chunks.append(current_chunk)
     else:
         chunks.append(message)
-
-    # Gửi từng chunk
     for i, chunk in enumerate(chunks):
-        # Đảm bảo chunk không rỗng
-        if not chunk.strip():
-            continue
-            
+        if not chunk.strip(): continue
         try:
-            # Chỉ thêm (Part x/y) nếu có nhiều hơn 1 chunk
             content_to_send = f"(Phần {i+1}/{len(chunks)})\n{chunk}" if len(chunks) > 1 and i > 0 else chunk
             response = requests.post(DISCORD_WEBHOOK, json={"content": content_to_send}, timeout=10)
             response.raise_for_status()
             print(f"✅ Sent chunk {i+1}/{len(chunks)}.")
-            if len(chunks) > 1:
-                time.sleep(1) # Chờ 1 giây giữa các chunk để tránh rate limit
+            if len(chunks) > 1: time.sleep(1)
         except requests.exceptions.RequestException as e:
             print(f"[ERROR] Failed to send chunk {i+1}: {e.response.text if e.response else e}")
-
 
 def send_daily_summary():
     fname = os.path.join(LOG_DIR, f"{datetime.now(VN_TZ).strftime('%Y-%m-%d')}_news_signal.json")
@@ -234,17 +219,13 @@ def send_daily_summary():
         msg = f"**📊 BẢN TIN TỔNG QUAN - {datetime.now(VN_TZ).strftime('%H:%M %d/%m')}**\n\n_Không có tin tức tín hiệu nào được ghi nhận trong ngày hôm nay._"
         send_discord_alert(msg)
         return
-
     context = get_market_context_data()
     market_trend = analyze_market_context_trend(context)
-
     news_by_level = defaultdict(list)
     for item in logs:
         news_by_level[item['level']].append(item)
-
     msg = f"**📊 BẢN TIN TỔNG QUAN - {datetime.now(VN_TZ).strftime('%H:%M %d/%m')}**\n\n"
     msg += f"```Bối cảnh thị trường | Fear & Greed: {context.get('fear_greed', 'N/A')} | BTC.D: {context.get('btc_dominance', 'N/A')}% | Trend: {market_trend}```"
-
     level_order = ["CRITICAL", "WARNING", "ALERT", "WATCHLIST", "INFO"]
     for level in level_order:
         if level in news_by_level:
@@ -252,12 +233,11 @@ def send_daily_summary():
             msg += f"\n{emoji} **{level}** ({len(news_by_level[level])} tin):\n"
             for item in news_by_level[level][:5]:
                 msg += f"- [{item['source_name']}] {item['title']} [Link](<{item['url']}>)\n"
-    
     send_discord_alert(msg)
     print("✅ Daily Summary sent.")
 
 # ==============================================================================
-# MAIN EXECUTION
+# MAIN EXECUTION (NÂNG CẤP LOGIC COOLDOWN)
 # ==============================================================================
 def main():
     print(f"--- Running News Cycle at {datetime.now(VN_TZ).strftime('%Y-%m-%d %H:%M:%S')} ---")
@@ -277,87 +257,97 @@ def main():
         context = get_market_context_data()
     market_trend = analyze_market_context_trend(context)
 
+    # <<< BƯỚC 1: THU THẬP TẤT CẢ TIN MỚI >>>
+    # (Phóng viên mang tất cả tin mới về bàn làm việc của Tổng biên tập)
     all_news = fetch_news_sources()
-    new_alerts_for_digest = []
-    sent_ids_this_cycle = []
-    updated_levels_this_cycle = set()
-
+    new_alerts_this_cycle = []
+    
     for news in all_news:
         if news['id'] in cooldown_data.get("last_sent_id", []):
             continue
-
+        
         level = classify_news_level(news['title'])
-        news['level'] = level
-
-        cooldown_minutes = LEVEL_COOLDOWN_MINUTES.get(level, 120)
-        last_sent_time_for_level = cooldown_data.get("last_sent_level", {}).get(level, 0)
-
-        if now_ts - last_sent_time_for_level < cooldown_minutes * 60:
-            continue
-
-        suggestion, impact_tag = generate_specific_suggestion(news, market_trend)
-
+        suggestion, impact_tag = generate_specific_suggestion({"title": news['title'], "level": level}, market_trend)
+        
         alert_item = {
             "id": news['id'], "title": news['title'], "url": news['url'],
             "source_name": news['source_name'], "published_at": news.get('published_at', datetime.now().isoformat()),
-            "level": level, "category_tag": detect_category_tag(news['title']), "suggestion": suggestion,
-            "impact_tag": impact_tag
+            "level": level, "category_tag": detect_category_tag(news['title']),
+            "suggestion": suggestion, "impact_tag": impact_tag
         }
-        new_alerts_for_digest.append(alert_item)
-        sent_ids_this_cycle.append(news['id'])
-        updated_levels_this_cycle.add(level)
+        new_alerts_this_cycle.append(alert_item)
 
-    if new_alerts_for_digest:
-        print(f"🔥 Found {len(new_alerts_for_digest)} new alerts. Generating digest...")
-
-        for alert in new_alerts_for_digest:
-            json_to_save = {k: v for k, v in alert.items() if k != 'impact_tag'}
-            save_news_for_precious(json_to_save)
-        print(f"✅ Wrote/Updated {len(new_alerts_for_digest)} items to signal file.")
-
-        news_by_level = defaultdict(list)
-        for alert in new_alerts_for_digest:
-            news_by_level[alert['level']].append(alert)
-
-        context_block = f"```Bối cảnh thị trường | Fear & Greed: {context.get('fear_greed', 'N/A')} | BTC.D: {context.get('btc_dominance', 'N/A')}% | Trend: {market_trend}```"
-        news_blocks = []
-
-        level_order = ["CRITICAL", "WARNING", "ALERT", "WATCHLIST", "INFO"]
-        for level in level_order:
-            if level in news_by_level:
-                emoji = {"CRITICAL": "🔴", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "INFO": "ℹ️"}.get(level, "ℹ️")
-                
-                # SỬA LỖI ĐỊNH DẠNG: Thêm một dòng cho tiêu đề level
-                level_header = f"{emoji} **{level}**"
-                news_blocks.append(level_header)
-                
-                for alert in news_by_level[level]:
-                    # SỬA LỖI ĐỊNH DẠNG: Mỗi tin là một khối riêng, bắt đầu bằng gạch đầu dòng
-                    part = (
-                        f"- **[{alert['source_name']}] {alert['title']}**\n"
-                        f"  *↳ Nhận định:* {alert['suggestion']} [Link](<{alert['url']}>)"
-                    )
-                    news_blocks.append(part)
-
-        final_summary = generate_final_summary(new_alerts_for_digest, market_trend)
-        
-        full_digest_message = (f"**🔥 BẢN TIN THỊ TRƯỜE NG - {datetime.now(VN_TZ).strftime('%H:%M')} 🔥**\n\n"
-                               + context_block + "\n\n"
-                               + "\n".join(news_blocks) # Dùng \n để ghép các dòng
-                               + f"\n\n{final_summary}")
-        
-        send_discord_alert(full_digest_message)
-
-        for level in updated_levels_this_cycle:
-            cooldown_data.get("last_sent_level", {})[level] = now_ts
-    else:
+    # <<< BƯỚC 2: XEM XÉT CÁC TIN MỚI >>>
+    # Nếu không có tin nào mới trên bàn, kết thúc chu trình
+    if not new_alerts_this_cycle:
         print("✅ No new alerts to send for this cycle.")
+    else:
+        # <<< BƯỚC 3: KIỂM TRA COOLDOWN CỦA TIN "NÓNG" NHẤT >>>
+        # (Tổng biên tập nhìn vào tin nóng nhất và kiểm tra sổ)
+        level_order = ["CRITICAL", "WARNING", "ALERT", "WATCHLIST", "INFO"]
+        highest_level_in_news = "INFO"
+        for level in level_order:
+            if any(alert['level'] == level for alert in new_alerts_this_cycle):
+                highest_level_in_news = level
+                break
+        
+        cooldown_minutes = LEVEL_COOLDOWN_MINUTES.get(highest_level_in_news, 120)
+        last_sent_time_for_level = cooldown_data.get("last_sent_level", {}).get(highest_level_in_news, 0)
+        
+        should_send_digest = True
+        if now_ts - last_sent_time_for_level < cooldown_minutes * 60:
+            print(f"⏳ Digest skipped. Highest level '{highest_level_in_news}' is on cooldown.")
+            should_send_digest = False
 
-    cooldown_data["last_sent_id"] = (cooldown_data.get("last_sent_id", []) + sent_ids_this_cycle)[-50:]
+        # <<< BƯỚC 4: GỬI BẢN TIN NẾU CẦN >>>
+        # (Nếu được phép, Tổng biên tập cho in TẤT CẢ tin mới trên bàn)
+        if should_send_digest:
+            print(f"🔥 Found {len(new_alerts_this_cycle)} new alerts. Highest level: {highest_level_in_news}. Sending digest...")
+            
+            # --- PHẦN XÂY DỰNG MESSAGE VÀ GỬI ĐI ---
+            # --- LOGIC NÀY ĐƯỢC GIỮ NGUYÊN 100% ĐỂ ĐẢM BẢO OUTPUT KHÔNG ĐỔI ---
+            for alert in new_alerts_this_cycle:
+                json_to_save = {k: v for k, v in alert.items() if k != 'impact_tag'}
+                save_news_for_precious(json_to_save)
+            print(f"✅ Wrote/Updated {len(new_alerts_this_cycle)} items to signal file.")
+
+            news_by_level = defaultdict(list)
+            for alert in new_alerts_this_cycle:
+                news_by_level[alert['level']].append(alert)
+
+            context_block = f"```Bối cảnh thị trường | Fear & Greed: {context.get('fear_greed', 'N/A')} | BTC.D: {context.get('btc_dominance', 'N/A')}% | Trend: {market_trend}```"
+            news_blocks = []
+            for level in level_order:
+                if level in news_by_level:
+                    emoji = {"CRITICAL": "🔴", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "INFO": "ℹ️"}.get(level, "ℹ️")
+                    level_header = f"{emoji} **{level}**"
+                    news_blocks.append(level_header)
+                    for alert in news_by_level[level]:
+                        part = (f"- **[{alert['source_name']}] {alert['title']}**\n"
+                                f"  *↳ Nhận định:* {alert['suggestion']} [Link](<{alert['url']}>)")
+                        news_blocks.append(part)
+            final_summary = generate_final_summary(new_alerts_this_cycle, market_trend)
+            full_digest_message = (f"**🔥 BẢN TIN THỊ TRƯỜNG - {datetime.now(VN_TZ).strftime('%H:%M')} 🔥**\n\n"
+                                   + context_block + "\n\n"
+                                   + "\n".join(news_blocks)
+                                   + f"\n\n{final_summary}")
+            send_discord_alert(full_digest_message)
+            # --- KẾT THÚC PHẦN XÂY DỰNG MESSAGE ---
+
+            # Cập nhật trạng thái cooldown sau khi gửi thành công
+            sent_ids_this_cycle = [alert['id'] for alert in new_alerts_this_cycle]
+            cooldown_data["last_sent_id"] = (cooldown_data.get("last_sent_id", []) + sent_ids_this_cycle)[-50:]
+            
+            updated_levels = set(alert['level'] for alert in new_alerts_this_cycle)
+            for level in updated_levels:
+                cooldown_data.get("last_sent_level", {})[level] = now_ts
+    
+    # Lưu lại trạng thái cooldown (quan trọng cho cả lần chạy gửi tin và không gửi tin)
     with open(COOLDOWN_TRACKER, 'w') as f:
         json.dump(cooldown_data, f, indent=2)
 
     print("--- Cycle Finished ---")
+
 
 if __name__ == "__main__":
     main()

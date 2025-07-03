@@ -13,3 +13,5 @@ ai_logs/
 cooldown_tracker_ml.json
 ricenews/market_context_cache.json
 ricenews/__pycache__/
+advisor_state.json
+ml_state.json

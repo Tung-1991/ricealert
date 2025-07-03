@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 RiceAlert – main runner
-Version: 3.1 (Revolution & Optimized)
-Description: This version introduces significant performance optimizations
-             by calculating all indicators once per run, and is fully
-             compatible with the enhanced trade_advisor.
+Version: 3.2 (Definitive & Robust)
+Description: This definitive version fixes all time-related bugs by ensuring
+             consistent use of timezone-aware datetimes (UTC) across the entire
+             application, from DataFrame columns to state management, for robust
+             and accurate comparisons and cooldown logic.
 """
 
 from dotenv import load_dotenv
@@ -14,7 +15,7 @@ import os
 import time
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
@@ -23,7 +24,7 @@ from csv_logger import log_to_csv, write_named_log
 from trade_advisor import get_advisor_decision
 from order_alerter import send_opportunity_alert
 
-# --- Constants & Config (Không thay đổi) ---
+# --- Constants & Config ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker.json")
 ADVISOR_STATE_FILE = os.path.join(BASE_DIR, "advisor_state.json")
@@ -34,7 +35,7 @@ COOLDOWN_LEVEL_MAP = {
 }
 SEND_LEVELS = ["WATCHLIST", "ALERT", "WARNING", "CRITICAL"]
 
-# --- Helper functions (Không thay đổi) ---
+# --- Helper functions ---
 def load_json_helper(file_path: str) -> dict:
     if os.path.exists(file_path):
         try:
@@ -53,7 +54,7 @@ def save_json_helper(file_path: str, data: dict) -> None:
 
 def load_cooldown() -> dict:
     data = load_json_helper(COOLDOWN_FILE)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     loaded_data = {}
     for key, value in data.items():
         if key == "last_general_report_timestamp":
@@ -62,6 +63,10 @@ def load_cooldown() -> dict:
         try:
             if isinstance(value, str):
                 dt_value = datetime.fromisoformat(value)
+                # <<< CẢI TIẾN: Đảm bảo dt_value luôn là aware để so sánh an toàn
+                if dt_value.tzinfo is None:
+                    dt_value = dt_value.replace(tzinfo=timezone.utc)
+                
                 if now - dt_value < timedelta(days=2):
                     loaded_data[key] = dt_value
         except (TypeError, ValueError):
@@ -86,17 +91,20 @@ def save_advisor_state(state: dict) -> None:
 
 def should_send_report(cooldowns: dict) -> bool:
     last_ts = cooldowns.get("last_general_report_timestamp", 0)
-    now_dt = datetime.now()
+    # <<< SỬA LỖI 1: Luôn dùng UTC cho thời gian báo cáo để đảm bảo nhất quán
+    now_dt = datetime.now(timezone.utc)
+    
+    # Dùng now_dt.replace để giữ lại thông tin múi giờ UTC
     target_times = [now_dt.replace(hour=8, minute=0, second=0, microsecond=0),
                     now_dt.replace(hour=20, minute=0, second=0, microsecond=0)]
+    
     for target_dt in target_times:
         if now_dt.timestamp() >= target_dt.timestamp() and last_ts < target_dt.timestamp():
             return True
     return False
 
-# --- Portfolio & Report Rendering (Không thay đổi) ---
+# --- Portfolio & Report Rendering ---
 def render_portfolio() -> list[str]:
-    # ... (Giữ nguyên code của bạn)
     balances = get_account_balances()
     spot = [b for b in balances if b["source"] == "Spot"]
     flexible = [b for b in balances if b["source"] == "Earn Flexible"]
@@ -128,7 +136,6 @@ def send_portfolio_report() -> None:
     time.sleep(3)
 
 def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
-    # ... (Giữ nguyên code của bạn)
     parts: list[str] = []
     for interval, ind in ind_map.items():
         trade_plan = ind.get("trade_plan", {})
@@ -152,14 +159,14 @@ def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
         parts.append(block)
     return "\n\n".join(parts)
 
-# --- Main loop (ĐÃ ĐƯỢC TỐI ƯU HÓA) ---
+# --- Main loop ---
 def main() -> None:
-    print("🔁 Bắt đầu vòng check hai cửa (phiên bản tối ưu)...")
+    print("🔁 Bắt đầu vòng check hai cửa (phiên bản 3.2 - Hoàn Chỉnh)...")
 
     # --- Setup & Khởi tạo ---
     symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
     intervals = [i.strip() for i in os.getenv("INTERVALS", "1h,4h").split(",")]
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
     log_date_dir = os.path.join(BASE_DIR, "log", now.strftime("%Y-%m-%d"))
@@ -186,12 +193,18 @@ def main() -> None:
                 df_raw = get_price_data(sym, itv)
                 if df_raw.empty or 'close_time' not in df_raw.columns:
                     continue
-                
+
                 if not pd.api.types.is_datetime64_any_dtype(df_raw['close_time']):
                     df_raw["close_time"] = pd.to_datetime(df_raw["close_time"], unit="ms")
-                
+
+                # <<< SỬA LỖI 2: Thêm múi giờ UTC cho cột thời gian của DataFrame
+                # Điều này làm cho nó tương thích với các đối tượng Timestamp có múi giờ
+                if df_raw['close_time'].dt.tz is None:
+                    df_raw['close_time'] = df_raw['close_time'].dt.tz_localize('UTC')
+
                 # Lọc nến đã đóng để tính toán chính xác
-                df_filtered = df_raw[df_raw["close_time"] < now - timedelta(minutes=1)]
+                # Bây giờ cả hai vế đều có múi giờ UTC nên so sánh được
+                df_filtered = df_raw[df_raw["close_time"] < pd.Timestamp(now - timedelta(minutes=1))]
                 if not df_filtered.empty:
                     indicators = calculate_indicators(df_filtered, sym, itv)
                     all_indicators[sym][itv] = indicators
@@ -210,13 +223,10 @@ def main() -> None:
             general_alert_intervals_to_check = intervals if not force_daily else all_timeframes
 
             for interval in general_alert_intervals_to_check:
-                # TỐI ƯU HÓA 2: LẤY DỮ LIỆU ĐÃ TÍNH, KHÔNG TÍNH LẠI
                 ind = all_indicators.get(symbol, {}).get(interval)
                 if not ind:
-                    # print(f"ℹ️ [Data] Không có dữ liệu chỉ báo đã tính cho {symbol}-{interval}. Bỏ qua.")
                     continue
-                
-                # Thêm thông tin RSI từ các khung khác vào `ind` để check_signal
+
                 ind["rsi_1h"] = all_indicators.get(symbol, {}).get("1h", {}).get("rsi_14", 50)
                 ind["rsi_4h"] = all_indicators.get(symbol, {}).get("4h", {}).get("rsi_14", 50)
                 ind["rsi_1d"] = all_indicators.get(symbol, {}).get("1d", {}).get("rsi_14", 50)
@@ -230,13 +240,14 @@ def main() -> None:
                     last_time_general = general_cooldowns.get(cd_key_general)
                     cd_minutes_general = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
 
+                    # Logic so sánh thời gian bây giờ đã hoàn toàn chính xác
                     if force_daily or not last_time_general or (now - last_time_general >= timedelta(minutes=cd_minutes_general)):
                         if not force_daily:
                             print(f"🔔 [Cửa 1] Tín hiệu chung: {symbol}-{interval} ({signal}).")
                             general_cooldowns[cd_key_general] = now
                         else:
                             print(f"🔔 [Cửa 1 - Báo cáo] Tín hiệu chung: {symbol}-{interval} ({signal}).")
-                        
+
                         send_intervals_general.append(interval)
                         alert_levels_general.append(signal)
                     else:
@@ -245,7 +256,6 @@ def main() -> None:
 
                 # --- CỬA 2: XỬ LÝ ALERT CHẤT LƯỢNG CAO ---
                 if not force_daily and interval in intervals:
-                    # TỐI ƯU HÓA 3: TRUYỀN DỮ LIỆU ĐÃ TÍNH VÀO ADVISOR
                     decision_data = get_advisor_decision(symbol, interval, ind, all_indicators)
                     final_score = decision_data.get('final_score', 5.0)
                     decision_type = decision_data.get('decision_type', 'NEUTRAL')
@@ -265,6 +275,9 @@ def main() -> None:
 
                     if last_alert_time_str_advisor:
                         last_alert_time_advisor = datetime.fromisoformat(last_alert_time_str_advisor)
+                        if last_alert_time_advisor.tzinfo is None:
+                            last_alert_time_advisor = last_alert_time_advisor.replace(tzinfo=timezone.utc)
+                        
                         hours_since_last_advisor = (now - last_alert_time_advisor).total_seconds() / 3600
                         if hours_since_last_advisor < cooldown_hours_advisor:
                             is_cooldown_passed_advisor = False
@@ -310,7 +323,7 @@ def main() -> None:
             print(error_msg)
             traceback.print_exc()
             log_lines.append(f"{error_msg}\n{traceback.format_exc()}")
-            
+
     # --- Lưu lại toàn bộ state và log ---
     print("\n[3/3] Đang lưu trạng thái và ghi log...")
     if log_lines:

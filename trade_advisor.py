@@ -1,4 +1,3 @@
-(venv) root@ricealert:~/ricealert$cat trade_advíor.py
 # /root/ricealert/trade_advisor.py
 
 import os
@@ -187,10 +186,15 @@ def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indic
 
     # CẢI TIẾN: Sử dụng news_factor đã được tính toán tinh vi hơn
     # Điểm bối cảnh giờ là trung bình của điểm thị trường và điểm tin tức
-    context_scaled = round(min(max((market_score + context_info['news_factor']) / 2, -1.0), 1.0), 2)
+    # Chuẩn hóa news_factor bằng cách chia cho 3 (vì biên độ của nó là -3 đến +3)
+    normalized_news_factor = context_info['news_factor'] / 3.0
+
+    # Tính điểm bối cảnh với giá trị đã được chuẩn hóa
+    context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2)
 
     # 3. Công thức trọng số (Không đổi)
-    final_rating = (0.55 * tech_scaled) + (0.25 * ai_skew) + (0.20 * context_scaled)
+    # Áp dụng bộ trọng số mới: Tech 45%, AI 30%, Bối cảnh 25%
+    final_rating = (0.45 * tech_scaled) + (0.30 * ai_skew) + (0.25 * context_scaled)
     final_score = (final_rating + 1) * 5
     final_score = round(min(max(final_score, 0), 10), 1)
 
