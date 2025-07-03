@@ -41,8 +41,8 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp, reco
     df_new = pd.DataFrame([log_entry])
 
     # Đảm bảo các giá trị số được định dạng đúng trong Google Sheet
-    for col in ['price', 'advisor_score', 'tech_score', 'ai_pct_change']:
-        df_new[col] = df_new[col].astype(str).str.replace('.', ',')
+    #for col in ['price', 'advisor_score', 'tech_score', 'ai_pct_change']:
+    #    df_new[col] = df_new[col].astype(str).str.replace('.', ',')
 
     if os.path.exists(CSV_PATH):
         try:

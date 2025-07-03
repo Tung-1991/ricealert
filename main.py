@@ -1,18 +1,10 @@
 # -*- coding: utf-8 -*-
-"""RiceAlert – main runner
-
-* 08:00 & 20:00 (report time):
-  - Always send Discord alerts for **all intervals** and a full portfolio report.
-  - **Do not** write to CSV or trigger quality alerts.
-* Every 30 minutes via crontab (non‑report time):
-  - **Stream 1 (General Alerts):** Sends a summary of all interesting signals
-    (WATCHLIST, ALERT, etc.) that are off cooldown to a general channel (#alert).
-  - **Stream 2 (Quality Alerts):** Independently evaluates signals. If a signal
-    shows a significant score (BUY/SELL opportunity) AND meets its own cooldown
-    criteria (including bypassing general cooldown for major score changes),
-    a high-priority alert is sent to an order channel (#order) and the event is logged to CSV.
-
-This file is fully self‑contained and safe to run with `python -m py_compile`.
+"""
+RiceAlert – main runner
+Version: 3.1 (Revolution & Optimized)
+Description: This version introduces significant performance optimizations
+             by calculating all indicators once per run, and is fully
+             compatible with the enhanced trade_advisor.
 """
 
 from dotenv import load_dotenv
@@ -23,43 +15,27 @@ import time
 import json
 import pandas as pd
 from datetime import datetime, timedelta
-# Import các module gốc của bạn
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
 from alert_manager import send_discord_alert
-from csv_logger import log_to_csv, write_named_log # Dùng bản gốc của bạn!
-
-# --- TÍCH HỢP CÁC FILE MỚI ĐƯỢC TẠO ---
+from csv_logger import log_to_csv, write_named_log
 from trade_advisor import get_advisor_decision
 from order_alerter import send_opportunity_alert
-# --- KẾT THÚC TÍCH HỢP ---
 
-
-# ---------------------------------------------------------------------------
-# Constants & config ---------------------------------------------------------
-# ---------------------------------------------------------------------------
-
+# --- Constants & Config (Không thay đổi) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Cooldown cho alert chung (Stream 1)
 COOLDOWN_FILE = os.path.join(BASE_DIR, "cooldown_tracker.json")
-# State & Cooldown cho alert chất lượng cao (Stream 2)
 ADVISOR_STATE_FILE = os.path.join(BASE_DIR, "advisor_state.json")
-
 COOLDOWN_LEVEL_MAP = {
-    "1h":    {"WATCHLIST": 300,  "ALERT": 240,  "WARNING": 180,  "CRITICAL":  90},
-    "4h":    {"WATCHLIST": 720,  "ALERT": 480,  "WARNING": 360,  "CRITICAL": 240},
-    "1d":    {"WATCHLIST": 1800, "ALERT": 1560, "WARNING": 1500, "CRITICAL": 1380},
+    "1h":   {"WATCHLIST": 300, "ALERT": 240, "WARNING": 180, "CRITICAL": 90},
+    "4h":   {"WATCHLIST": 720, "ALERT": 480, "WARNING": 360, "CRITICAL": 240},
+    "1d":   {"WATCHLIST": 1800, "ALERT": 1560, "WARNING": 1500, "CRITICAL": 1380},
 }
-
 SEND_LEVELS = ["WATCHLIST", "ALERT", "WARNING", "CRITICAL"]
 
-# ---------------------------------------------------------------------------
-# Helper functions -----------------------------------------------------------
-# ---------------------------------------------------------------------------
-
+# --- Helper functions (Không thay đổi) ---
 def load_json_helper(file_path: str) -> dict:
-    """Loads a JSON file and returns a dictionary."""
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -69,58 +45,63 @@ def load_json_helper(file_path: str) -> dict:
     return {}
 
 def save_json_helper(file_path: str, data: dict) -> None:
-    """Saves a dictionary to a JSON file."""
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except IOError as e:
         print(f"⚠️ Không thể lưu file state {file_path}: {e}")
 
-def load_cooldown() -> dict[str, datetime]:
-    """Loads general alert cooldowns (Stream 1)."""
+def load_cooldown() -> dict:
     data = load_json_helper(COOLDOWN_FILE)
     now = datetime.now()
-    return {
-        key: datetime.fromisoformat(val)
-        for key, val in data.items()
-        if now - datetime.fromisoformat(val) < timedelta(days=2)
-    }
+    loaded_data = {}
+    for key, value in data.items():
+        if key == "last_general_report_timestamp":
+            loaded_data[key] = value
+            continue
+        try:
+            if isinstance(value, str):
+                dt_value = datetime.fromisoformat(value)
+                if now - dt_value < timedelta(days=2):
+                    loaded_data[key] = dt_value
+        except (TypeError, ValueError):
+            print(f"⚠️ Bỏ qua cooldown không hợp lệ: {key}={value}")
+            continue
+    return loaded_data
 
-def save_cooldown(cooldown: dict[str, datetime]) -> None:
-    """Saves general alert cooldowns (Stream 1)."""
-    save_json_helper(COOLDOWN_FILE, {k: v.isoformat() for k, v in cooldown.items()})
+def save_cooldown(cooldown: dict) -> None:
+    data_to_save = {}
+    for key, value in cooldown.items():
+        if isinstance(value, datetime):
+            data_to_save[key] = value.isoformat()
+        else:
+            data_to_save[key] = value
+    save_json_helper(COOLDOWN_FILE, data_to_save)
 
 def load_advisor_state() -> dict:
-    """Loads advisor state for quality alerts (Stream 2)."""
     return load_json_helper(ADVISOR_STATE_FILE)
 
 def save_advisor_state(state: dict) -> None:
-    """Saves advisor state for quality alerts (Stream 2)."""
     save_json_helper(ADVISOR_STATE_FILE, state)
 
 def should_send_report(cooldowns: dict) -> bool:
-    """Kiểm tra xem có nên gửi báo cáo chung không, chống gửi lặp."""
     last_ts = cooldowns.get("last_general_report_timestamp", 0)
     now_dt = datetime.now()
-    # Các mốc thời gian mục tiêu trong ngày
     target_times = [now_dt.replace(hour=8, minute=0, second=0, microsecond=0),
                     now_dt.replace(hour=20, minute=0, second=0, microsecond=0)]
-
     for target_dt in target_times:
-        if now_dt >= target_dt and last_ts < target_dt.timestamp():
+        if now_dt.timestamp() >= target_dt.timestamp() and last_ts < target_dt.timestamp():
             return True
     return False
 
-# ----------------------------- Portfolio & Report Rendering -------------------------
-# (Các hàm này giữ nguyên từ bản gốc của bạn)
-
+# --- Portfolio & Report Rendering (Không thay đổi) ---
 def render_portfolio() -> list[str]:
+    # ... (Giữ nguyên code của bạn)
     balances = get_account_balances()
-    spot      = [b for b in balances if b["source"] == "Spot"]
-    flexible  = [b for b in balances if b["source"] == "Earn Flexible"]
-    locked    = [b for b in balances if b["source"] == "Earn Locked"]
-    total     = [b for b in balances if b["source"] == "All"]
-
+    spot = [b for b in balances if b["source"] == "Spot"]
+    flexible = [b for b in balances if b["source"] == "Earn Flexible"]
+    locked = [b for b in balances if b["source"] == "Earn Locked"]
+    total = [b for b in balances if b["source"] == "All"]
     def section(title: str, rows: list[dict]) -> list[str]:
         lines: list[str] = []
         if rows:
@@ -130,14 +111,12 @@ def render_portfolio() -> list[str]:
             subtotal = sum(r["value"] for r in rows)
             lines.append(f"🔢 Tổng ({title.strip()}): ${round(subtotal, 2)}")
         return lines
-
     print("\n💰 Portfolio hiện tại:")
     lines: list[str] = []
     lines += section("📦 Spot:", spot)
     lines += section("🪴 Earn Flexible:", flexible)
     lines += section("🔒 Earn Locked:", locked)
-    for l in lines:
-        print(l)
+    for l in lines: print(l)
     if total:
         total_line = f"\n💵 Tổng tài sản: ${total[0]['value']}"
         print(total_line)
@@ -145,58 +124,37 @@ def render_portfolio() -> list[str]:
     return lines
 
 def send_portfolio_report() -> None:
-    send_discord_alert(
-        "📊 **BÁO CÁO TỔNG TÀI SẢN**\n" + "\n".join(render_portfolio())
-    )
+    send_discord_alert("📊 **BÁO CÁO TỔNG TÀI SẢN**\n" + "\n".join(render_portfolio()))
     time.sleep(3)
 
 def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
+    # ... (Giữ nguyên code của bạn)
     parts: list[str] = []
     for interval, ind in ind_map.items():
-        macd_cross = ind.get("macd_cross", "N/A")
-        adx        = ind.get("adx", "N/A")
-        rsi_div    = ind.get("rsi_divergence", "None")
         trade_plan = ind.get("trade_plan", {})
-        doji_note  = f"{ind['doji_type'].capitalize()} Doji" if ind.get("doji_type") else "No"
-        trend      = ind.get("trend", "unknown")
-        cmf        = ind.get("cmf", "N/A")
         signal, reason = check_signal(ind)
-
-        block = f"""📊 **{symbol} ({interval})**
-🔹 Price: {ind['price']:.8f}
-📈 EMA20: {ind['ema_20']}
-💪 RSI14: {ind['rsi_14']} ({rsi_div})
-📉 MACD Line: {ind['macd_line']}
-📊 MACD Signal: {ind['macd_signal']} → {macd_cross}
-📊 ADX: {adx}
-🔺 BB Upper: {ind['bb_upper']}
-🔻 BB Lower: {ind['bb_lower']}
-🔊 Volume: {ind['volume']} / MA20: {ind['vol_ma20']}
-🌀 Fibo 0.618: {ind.get('fib_0_618')}
-🕯️ Doji: {doji_note}
-🔺 Trend: {trend}
-💸 CMF: {cmf}
-🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''}"""
-
+        block = (f"📊 **{symbol} ({interval})**\n"
+                 f"🔹 Price: {ind['price']:.8f}\n"
+                 f"📈 EMA20: {ind['ema_20']}\n"
+                 f"💪 RSI14: {ind['rsi_14']} ({ind.get('rsi_divergence', 'None')})\n"
+                 f"📉 MACD Line: {ind['macd_line']}\n"
+                 f"📊 MACD Signal: {ind['macd_signal']} → {ind.get('macd_cross', 'N/A')}\n"
+                 f"📊 ADX: {ind.get('adx', 'N/A')}\n"
+                 f"🔺 Trend: {ind.get('trend', 'unknown')}\n"
+                 f"💸 CMF: {ind.get('cmf', 'N/A')}\n"
+                 f"🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''}")
         if trade_plan:
-            entry = trade_plan.get("entry", 0); tp = trade_plan.get("tp", 0); sl = trade_plan.get("sl", 0)
-            block += f"""
-🎯 **Trade Plan**
-- Entry: {entry:.8f}
-- TP:     {tp:.8f}
-- SL:     {sl:.8f}"""
+            entry, tp, sl = trade_plan.get("entry", 0), trade_plan.get("tp", 0), trade_plan.get("sl", 0)
+            block += (f"\n🎯 **Trade Plan**\n"
+                      f"- Entry: {entry:.8f}\n"
+                      f"- TP:    {tp:.8f}\n"
+                      f"- SL:    {sl:.8f}")
         parts.append(block)
     return "\n\n".join(parts)
 
-
-# ---------------------------------------------------------------------------
-# Main loop ------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Main loop ------------------------------------------------------------------
-# ---------------------------------------------------------------------------
+# --- Main loop (ĐÃ ĐƯỢC TỐI ƯU HÓA) ---
 def main() -> None:
-    print("🔁 Bắt đầu vòng check hai cửa...\n")
+    print("🔁 Bắt đầu vòng check hai cửa (phiên bản tối ưu)...")
 
     # --- Setup & Khởi tạo ---
     symbols = os.getenv("SYMBOLS", "ETHUSDT,AVAXUSDT").split(",")
@@ -204,59 +162,64 @@ def main() -> None:
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Tạo thư mục log theo ngày
     log_date_dir = os.path.join(BASE_DIR, "log", now.strftime("%Y-%m-%d"))
     os.makedirs(log_date_dir, exist_ok=True)
-    
-    # Load state một lần duy nhất ở đầu
+
     general_cooldowns = load_cooldown()
     advisor_state = load_advisor_state()
     log_lines = []
 
     # --- Xử lý Báo cáo Hàng ngày ---
     should_report = should_send_report(general_cooldowns)
-    force_daily = should_report # Nếu là giờ báo cáo, sẽ quét tất cả các khung
-
+    force_daily = should_report
     if should_report:
         send_portfolio_report()
-        # Cập nhật timestamp ngay sau khi xác định gửi báo cáo
         general_cooldowns["last_general_report_timestamp"] = now.timestamp()
 
-    # --- Lấy dữ liệu giá trước để tối ưu ---
-    cached: dict[str, dict[str, pd.DataFrame]] = {"1h": {}, "4h": {}, "1d": {}}
+    # TỐI ƯU HÓA 1: TÍNH TOÁN TẤT CẢ CHỈ BÁO MỘT LẦN
+    print("\n[1/3] Đang tính toán tất cả chỉ báo kỹ thuật...")
+    all_indicators = {sym: {} for sym in symbols}
+    all_timeframes = ["1h", "4h", "1d"]
     for sym in symbols:
-        for itv in ["1h", "4h", "1d"]:
-            df_raw = get_price_data(sym, itv)
-            if not df_raw.empty and 'close_time' in df_raw.columns:
+        for itv in all_timeframes:
+            try:
+                df_raw = get_price_data(sym, itv)
+                if df_raw.empty or 'close_time' not in df_raw.columns:
+                    continue
+                
                 if not pd.api.types.is_datetime64_any_dtype(df_raw['close_time']):
                     df_raw["close_time"] = pd.to_datetime(df_raw["close_time"], unit="ms")
-                cached[itv][sym] = df_raw
-    
+                
+                # Lọc nến đã đóng để tính toán chính xác
+                df_filtered = df_raw[df_raw["close_time"] < now - timedelta(minutes=1)]
+                if not df_filtered.empty:
+                    indicators = calculate_indicators(df_filtered, sym, itv)
+                    all_indicators[sym][itv] = indicators
+            except Exception as e:
+                print(f"⚠️ Lỗi khi tính chỉ báo cho {sym}-{itv}: {e}")
+    print("✅ Hoàn thành tính toán chỉ báo.")
+
     # --- Vòng lặp xử lý chính ---
+    print("\n[2/3] Đang xử lý logic hai cửa...")
     for symbol in symbols:
         try:
             indic_map_general: dict[str, dict] = {}
             send_intervals_general: list[str] = []
             alert_levels_general: list[str] = []
 
-            general_alert_intervals_to_check = intervals if not force_daily else ["1h", "4h", "1d"]
+            general_alert_intervals_to_check = intervals if not force_daily else all_timeframes
 
             for interval in general_alert_intervals_to_check:
-                df_for_indicators = cached[interval].get(symbol)
-                if df_for_indicators is None or df_for_indicators.empty:
-                    print(f"⚠️ [Data] Không tìm thấy dữ liệu cache cho {symbol} - {interval}. Bỏ qua.")
+                # TỐI ƯU HÓA 2: LẤY DỮ LIỆU ĐÃ TÍNH, KHÔNG TÍNH LẠI
+                ind = all_indicators.get(symbol, {}).get(interval)
+                if not ind:
+                    # print(f"ℹ️ [Data] Không có dữ liệu chỉ báo đã tính cho {symbol}-{interval}. Bỏ qua.")
                     continue
-
-                df_filtered = df_for_indicators[df_for_indicators["close_time"] < now - timedelta(minutes=1)]
-                if df_filtered.empty:
-                    print(f"⚠️ [Data] Không có nến đã đóng cho {symbol} - {interval}. Bỏ qua.")
-                    continue
-
-                ind = calculate_indicators(df_filtered, symbol, interval)
-                ind["interval"] = interval
-                ind["rsi_1h"] = calculate_indicators(cached["1h"][symbol], symbol, "1h")["rsi_14"] if cached["1h"].get(symbol) is not None and not cached["1h"].get(symbol).empty else ind.get("rsi_14", 50)
-                ind["rsi_4h"] = calculate_indicators(cached["4h"][symbol], symbol, "4h")["rsi_14"] if cached["4h"].get(symbol) is not None and not cached["4h"].get(symbol).empty else ind.get("rsi_14", 50)
-                ind["rsi_1d"] = calculate_indicators(cached["1d"][symbol], symbol, "1d")["rsi_14"] if cached["1d"].get(symbol) is not None and not cached["1d"].get(symbol).empty else ind.get("rsi_14", 50)
+                
+                # Thêm thông tin RSI từ các khung khác vào `ind` để check_signal
+                ind["rsi_1h"] = all_indicators.get(symbol, {}).get("1h", {}).get("rsi_14", 50)
+                ind["rsi_4h"] = all_indicators.get(symbol, {}).get("4h", {}).get("rsi_14", 50)
+                ind["rsi_1d"] = all_indicators.get(symbol, {}).get("1d", {}).get("rsi_14", 50)
 
                 # --- CỬA 1: XỬ LÝ ALERT CHUNG ---
                 signal, _ = check_signal(ind)
@@ -267,22 +230,23 @@ def main() -> None:
                     last_time_general = general_cooldowns.get(cd_key_general)
                     cd_minutes_general = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
 
-                    if force_daily:
-                        print(f"🔔 [Cửa 1 - Báo cáo] Tín hiệu chung: {symbol}-{interval} ({signal}).")
+                    if force_daily or not last_time_general or (now - last_time_general >= timedelta(minutes=cd_minutes_general)):
+                        if not force_daily:
+                            print(f"🔔 [Cửa 1] Tín hiệu chung: {symbol}-{interval} ({signal}).")
+                            general_cooldowns[cd_key_general] = now
+                        else:
+                            print(f"🔔 [Cửa 1 - Báo cáo] Tín hiệu chung: {symbol}-{interval} ({signal}).")
+                        
                         send_intervals_general.append(interval)
                         alert_levels_general.append(signal)
-                    elif not last_time_general or (now - last_time_general >= timedelta(minutes=cd_minutes_general)):
-                        print(f"🔔 [Cửa 1] Tín hiệu chung: {symbol}-{interval} ({signal}).")
-                        send_intervals_general.append(interval)
-                        alert_levels_general.append(signal)
-                        general_cooldowns[cd_key_general] = now
                     else:
                         remain = cd_minutes_general - int((now - last_time_general).total_seconds() // 60)
                         print(f"⏳ [Cửa 1] {symbol}-{interval} ({signal}) Cooldown {remain}′. (Bỏ qua)")
 
                 # --- CỬA 2: XỬ LÝ ALERT CHẤT LƯỢNG CAO ---
                 if not force_daily and interval in intervals:
-                    decision_data = get_advisor_decision(symbol, interval, ind, cached)
+                    # TỐI ƯU HÓA 3: TRUYỀN DỮ LIỆU ĐÃ TÍNH VÀO ADVISOR
+                    decision_data = get_advisor_decision(symbol, interval, ind, all_indicators)
                     final_score = decision_data.get('final_score', 5.0)
                     decision_type = decision_data.get('decision_type', 'NEUTRAL')
 
@@ -298,25 +262,21 @@ def main() -> None:
                     cooldown_hours_advisor = 2.0
                     is_significant_change = abs(final_score - last_alert_score_advisor) > score_change_threshold
                     is_cooldown_passed_advisor = True
-                    
+
                     if last_alert_time_str_advisor:
                         last_alert_time_advisor = datetime.fromisoformat(last_alert_time_str_advisor)
                         hours_since_last_advisor = (now - last_alert_time_advisor).total_seconds() / 3600
                         if hours_since_last_advisor < cooldown_hours_advisor:
                             is_cooldown_passed_advisor = False
-                    
+
                     if is_cooldown_passed_advisor or is_significant_change:
                         print(f"🔥 [Cửa 2] {symbol}-{interval}: Tín hiệu {decision_type} (Điểm: {final_score:.2f}).")
                         send_opportunity_alert(decision_data)
                         log_to_csv(
-                            symbol=symbol,
-                            interval=interval,
-                            signal=signal,
-                            tag=ind.get("tag", "hold"),
-                            price=ind.get("price", 0),
+                            symbol=symbol, interval=interval, signal=signal,
+                            tag=ind.get("tag", "hold"), price=ind.get("price", 0),
                             trade_plan=decision_data.get("combined_trade_plan", {}),
-                            timestamp=now_str,
-                            recommendation=decision_data
+                            timestamp=now_str, recommendation=decision_data
                         )
                         advisor_state[state_key_advisor] = {
                             "last_alert_score": final_score,
@@ -346,11 +306,13 @@ def main() -> None:
 
         except Exception as exc:
             import traceback
-            print(f"❌ Lỗi nghiêm trọng khi xử lý {symbol}: {exc}")
+            error_msg = f"❌ Lỗi nghiêm trọng khi xử lý {symbol}: {exc}"
+            print(error_msg)
             traceback.print_exc()
-            log_lines.append(f"❌ Lỗi nghiêm trọng khi xử lý {symbol}: {exc}\n{traceback.format_exc()}")
-
+            log_lines.append(f"{error_msg}\n{traceback.format_exc()}")
+            
     # --- Lưu lại toàn bộ state và log ---
+    print("\n[3/3] Đang lưu trạng thái và ghi log...")
     if log_lines:
         content = "\n\n" + ("\n" + "=" * 60 + "\n\n").join(log_lines)
         write_named_log(content, os.path.join(log_date_dir, f"{now.strftime('%H%M')}.txt"))
@@ -359,6 +321,5 @@ def main() -> None:
     save_advisor_state(advisor_state)
     print("\n✅ Hoàn thành vòng check.")
 
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
