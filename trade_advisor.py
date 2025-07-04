@@ -153,11 +153,12 @@ def generate_combined_trade_plan(base_plan: dict, ai_data: dict) -> dict:
 
 # --- HÀM CHÍNH ĐƯỢC CÁCH MẠNG HÓA ---
 # TỐI ƯU HÓA: Hàm này giờ nhận dữ liệu chỉ báo đã được tính toán trước
-#def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict) -> Dict:
-def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict, ai_data_override: Dict = None) -> Dict: # <<< THÊM PHẦN NÀY VÀO CUỐI
-    # 1. Thu thập dữ liệu
-    context_info, market_trend = get_news_and_context_info(symbol)
-    #ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
+def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict, ai_data_override: Dict = None, context_override: Dict = None) -> Dict:
+    if context_override:
+        context_info = {"news_factor": context_override.get("news_factor", 0)}
+        market_trend = context_override.get("market_trend", "NEUTRAL")
+    else:
+        context_info, market_trend = get_news_and_context_info(symbol)
     ai_data = ai_data_override if ai_data_override is not None else load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
     # TỐI ƯU HÓA: Truyền dữ liệu đã tính vào hàm MTA
     mta_block = get_multi_timeframe_info(symbol, interval, all_indicators)
@@ -194,8 +195,7 @@ def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indic
     context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2)
 
     # 3. Công thức trọng số (Không đổi)
-    # Áp dụng bộ trọng số mới: Tech 45%, AI 30%, Bối cảnh 25%
-    final_rating = (0.45 * tech_scaled) + (0.30 * ai_skew) + (0.25 * context_scaled)
+    final_rating = (0.5 * tech_scaled) + (0.3 * ai_skew) + (0.2 * context_scaled)
     final_score = (final_rating + 1) * 5
     final_score = round(min(max(final_score, 0), 10), 1)
 
