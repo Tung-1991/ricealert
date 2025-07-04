@@ -21,3 +21,8 @@
 # ==============================================================================
 */15 * * * * /root/ricealert/venv/bin/python /root/ricealert/trade/trade_tracker.py >> /root/ricealert/log/trade_tracker.log 2>&1
 15,45 * * * * /root/ricealert/venv/bin/python /root/ricealert/google_sync.py >> /root/ricealert/log/google_sync.log 2>&1
+
+# ==============================================================================
+#  TRAIN MODEL HÀNG NGÀY (Chạy lúc 3:10 sáng)
+# ==============================================================================
+10 3,15 * * * /root/ricealert/venv/bin/python /root/ricealert/trainer.py >> /root/ricealert/log/trainer.log 2>&1

@@ -153,13 +153,14 @@ def generate_combined_trade_plan(base_plan: dict, ai_data: dict) -> dict:
 
 # --- HÀM CHÍNH ĐƯỢC CÁCH MẠNG HÓA ---
 # TỐI ƯU HÓA: Hàm này giờ nhận dữ liệu chỉ báo đã được tính toán trước
-def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict) -> Dict:
+#def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict) -> Dict:
+def get_advisor_decision(symbol: str, interval: str, indicators: dict, all_indicators: Dict, ai_data_override: Dict = None) -> Dict: # <<< THÊM PHẦN NÀY VÀO CUỐI
     # 1. Thu thập dữ liệu
     context_info, market_trend = get_news_and_context_info(symbol)
-    ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
+    #ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
+    ai_data = ai_data_override if ai_data_override is not None else load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
     # TỐI ƯU HÓA: Truyền dữ liệu đã tính vào hàm MTA
     mta_block = get_multi_timeframe_info(symbol, interval, all_indicators)
-
     # 2. Tính điểm theo trọng số (Logic không đổi)
     raw_tech_score = 5.0
     tag = indicators.get("tag", "neutral")
