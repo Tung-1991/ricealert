@@ -91,17 +91,24 @@ def save_advisor_state(state: dict) -> None:
 
 def should_send_report(cooldowns: dict) -> bool:
     last_ts = cooldowns.get("last_general_report_timestamp", 0)
-    # <<< SỬA LỖI 1: Luôn dùng UTC cho thời gian báo cáo để đảm bảo nhất quán
-    now_dt = datetime.now(timezone.utc)
-    
-    # Dùng now_dt.replace để giữ lại thông tin múi giờ UTC
-    target_times = [now_dt.replace(hour=8, minute=0, second=0, microsecond=0),
-                    now_dt.replace(hour=20, minute=0, second=0, microsecond=0)]
-    
-    for target_dt in target_times:
-        if now_dt.timestamp() >= target_dt.timestamp() and last_ts < target_dt.timestamp():
+
+    # Bây giờ (UTC), và phiên bản giờ VN (UTC+7)
+    now_utc = datetime.now(timezone.utc)
+    now_vn = now_utc.astimezone(timezone(timedelta(hours=7)))
+
+    # Mốc 8h và 20h GIỜ VIỆT NAM, chuyển về UTC để so sánh
+    target_times = [
+        now_vn.replace(hour=8, minute=0, second=0, microsecond=0).astimezone(timezone.utc),
+        now_vn.replace(hour=20, minute=0, second=0, microsecond=0).astimezone(timezone.utc),
+    ]
+
+    for target in target_times:
+        if now_utc >= target and last_ts < target.timestamp():
             return True
+
     return False
+
+
 
 # --- Portfolio & Report Rendering ---
 def render_portfolio() -> list[str]:
