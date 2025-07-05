@@ -1,219 +1,170 @@
-# /root/ricealert/signal_logic.py
+# /root/ricealert/signal_logic.py (PHIÊN BẢN ĐÃ MERGE)
 from typing import Dict
 
 def check_signal(indicators: dict) -> Dict:
     """
-    Kiểm tra các chỉ báo và trả về một dictionary chứa level, tag, và lý do.
-    Hàm này giữ nguyên 100% logic gốc, chỉ thay đổi định dạng return.
+    Kiểm tra các chỉ báo bằng hệ thống tính điểm linh hoạt để đưa ra tín hiệu
+    thay vì các quy tắc if/elif cứng nhắc.
     """
-    rsi = indicators.get('rsi_14')
+    # Lấy dữ liệu, giữ nguyên như cũ
     rsi_1h = indicators.get("rsi_1h")
     rsi_4h = indicators.get("rsi_4h")
     rsi_1d = indicators.get("rsi_1d")
-    macd = indicators.get('macd_line')
-    macd_signal = indicators.get('macd_signal')
-    bb_upper = indicators.get('bb_upper')
-    bb_lower = indicators.get('bb_lower')
     price = indicators.get('price')
-    ema = indicators.get('ema_20')
     volume = indicators.get('volume')
     vol_ma = indicators.get('vol_ma20')
-    doji_raw = indicators.get('doji_type')
-    doji = doji_raw.lower() if isinstance(doji_raw, str) else ""
-
     macd_cross = indicators.get('macd_cross')
     adx = indicators.get('adx')
     rsi_div = indicators.get('rsi_divergence')
     trend = indicators.get('trend')
     cmf = indicators.get('cmf')
-    candle = indicators.get('candle_pattern')
-    interval = indicators.get("interval")
-    fib_0_618 = indicators.get("fib_0_618")
+    bb_upper = indicators.get('bb_upper')
+    bb_lower = indicators.get('bb_lower')
+    doji_raw = indicators.get('doji_type')
+    doji = doji_raw.lower() if isinstance(doji_raw, str) else ""
 
-    required_fields = [rsi, rsi_1h, rsi_4h, rsi_1d, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma,
-                       macd_cross, adx, trend, cmf]
-
-    # --- THAY ĐỔI 1: Sửa return khi thiếu dữ liệu ---
+    required_fields = [rsi_1h, rsi_4h, rsi_1d, price, volume, vol_ma, macd_cross, adx, trend, cmf, bb_upper, bb_lower]
+    
+    # *** BẮT ĐẦU THAY ĐỔI TỪ CODE UPDATE ***
     if any(v is None for v in required_fields):
-        indicators["tag"] = "avoid"
-        return {"level": "HOLD", "tag": "avoid", "reason": "Thiếu dữ liệu chỉ báo quan trọng."}
+        return {
+            "level": "HOLD", 
+            "tag": "avoid", 
+            "reason": "Thiếu dữ liệu chỉ báo quan trọng.",
+            "raw_tech_score": 0.0 # Thêm dòng này
+        }
+    # *** KẾT THÚC THAY ĐỔI ***
 
+    # =======================================================================
+    # === HỆ THỐNG TÍNH ĐIỂM LINH HOẠT (DYNAMIC SCORING SYSTEM) ===
+    # =======================================================================
+    scores = {}
     reasons = []
+
+    # 1. Điểm Xu Hướng (Trend Score)
+    if trend == "uptrend":
+        scores['trend'] = 1.5
+        reasons.append("Trend Tăng (+1.5)")
+    elif trend == "downtrend":
+        scores['trend'] = -1.5
+        reasons.append("Trend Giảm (-1.5)")
+    else:
+        scores['trend'] = 0
+
+    # 2. Điểm RSI Đa Khung Thời Gian (Multi-Timeframe RSI Score)
+    rsi_score = 0
+    if rsi_1h > 60: rsi_score += 0.5
+    if rsi_1h > 70: rsi_score += 0.5 # Rất mạnh
+    if rsi_4h > 55: rsi_score += 1.0
+    if rsi_1d > 55: rsi_score += 1.0
+    if rsi_1h < 40: rsi_score -= 0.5
+    if rsi_1h < 30: rsi_score -= 0.5 # Rất yếu
+    if rsi_4h < 45: rsi_score -= 1.0
+    if rsi_1d < 45: rsi_score -= 1.0
+    if rsi_score != 0:
+        scores['rsi'] = rsi_score
+        reasons.append(f"RSI đa khung ({rsi_score:+.1f})")
+
+    # 3. Điểm MACD (MACD Score)
+    if macd_cross == "bullish":
+        scores['macd'] = 1.5
+        reasons.append("MACD cắt lên (+1.5)")
+    elif macd_cross == "bearish":
+        scores['macd'] = -1.5
+        reasons.append("MACD cắt xuống (-1.5)")
+
+    # 4. Điểm Phân Kỳ RSI (Divergence Score) - Tín hiệu rất mạnh
+    if rsi_div == "bullish":
+        scores['rsi_div'] = 2.0
+        reasons.append("Phân kỳ tăng RSI (+2.0)")
+    elif rsi_div == "bearish":
+        scores['rsi_div'] = -2.0
+        reasons.append("Phân kỳ giảm RSI (-2.0)")
+
+    # 5. Điểm Dòng Tiền CMF (Money Flow Score)
+    if cmf > 0.05:
+        scores['cmf'] = 1.0
+        reasons.append("Dòng tiền dương mạnh (+1.0)")
+    elif cmf < -0.05:
+        scores['cmf'] = -1.0
+        reasons.append("Dòng tiền âm mạnh (-1.0)")
+
+    # 6. Điểm Sức Mạnh Xu Hướng ADX (Trend Strength Score)
+    if adx > 25:
+        # ADX cao củng cố cho xu hướng hiện tại
+        scores['adx'] = 0.5 * (1 if scores.get('trend', 0) >= 0 else -1)
+        reasons.append(f"ADX > 25 củng cố trend ({scores['adx']:+.1f})")
+    elif adx < 20:
+        # ADX yếu làm giảm độ tin cậy của các tín hiệu khác
+        scores['adx'] = -0.5
+        reasons.append("ADX < 20, trend yếu (-0.5)")
+
+    # 7. Điểm Volume (Volume Score)
+    if volume > 1.5 * vol_ma:
+        scores['volume'] = 1.0
+        reasons.append("Volume đột biến (+1.0)")
+    elif volume < 0.7 * vol_ma:
+        scores['volume'] = -0.5
+        reasons.append("Volume thấp (-0.5)")
+
+    # 8. Điểm Bollinger Bands (BB Score)
+    if price > bb_upper * 0.995:
+        scores['bb'] = 0.5 # Có thể là breakout hoặc quá mua
+        reasons.append("Giá chạm BB trên (+0.5)")
+    if price < bb_lower * 1.005:
+        scores['bb'] = -0.5 # Có thể là breakdown hoặc quá bán
+        reasons.append("Giá chạm BB dưới (-0.5)")
+
+    # 9. Điểm Nến Doji Đảo Chiều (Reversal Doji Score)
+    if trend == "uptrend" and doji in ["gravestone", "shooting_star"]:
+        scores['doji'] = -1.5
+        reasons.append(f"Doji đỉnh ({doji}) (-1.5)")
+    elif trend == "downtrend" and doji in ["dragonfly", "hammer"]:
+        scores['doji'] = 1.5
+        reasons.append(f"Doji đáy ({doji}) (+1.5)")
+
+
+    # === TỔNG HỢP ĐIỂM VÀ RA QUYẾT ĐỊNH ===
+    total_score = sum(scores.values())
+
     signal_type = "HOLD"
     tag = "neutral"
 
-    # =======================================================================
-    # === TOÀN BỘ LOGIC IF/ELIF CỦA BẠN ĐƯỢC GIỮ NGUYÊN 100% Ở ĐÂY ===
-    # =======================================================================
-    # ================= TAG: buy_high =================
-    if (
-        trend == "uptrend" and
-        rsi_1h > 68 and rsi_4h > 65 and rsi_1d > 60 and
-        macd_cross == "bullish" and
-        price > bb_upper * 0.995 and cmf > 0.05 and volume > vol_ma
-    ):
-        tag = "buy_high"
-        if adx > 40:
-            signal_type = "CRITICAL"
-            reasons.append("Breakout mạnh: RSI cao đa timeframe + MACD bullish + volume lớn + CMF dương + ADX cao")
-        elif adx < 10 and volume < 0.5 * vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Sideway yếu + volume cực thấp → thị trường chết lâm sàng")
-        elif adx > 25:
-            signal_type = "WARNING"
-            reasons.append("Đà tăng mạnh: RSI cao + BB trên + ADX > 25")
-        elif cmf > 0:
-            signal_type = "ALERT"
-            reasons.append("RSI cao + MACD bullish + CMF dương")
-        else:
-            signal_type = "WATCHLIST"
-            reasons.append("Trend tăng + RSI cao, theo dõi breakout")
-
-    # ================= TAG: sell_high =================
-    elif (
-        trend == "downtrend" and
-        rsi_1h > 70 and rsi_4h > 65 and rsi_1d > 65 and
-        cmf < -0.03 and
-        price > bb_upper * 0.995
-    ):
-        tag = "sell_high"
-        if macd_cross == "bearish" and volume > 1.2 * vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Đỉnh mạnh: RSI cao + MACD bearish + volume lớn")
-        elif rsi_div == "bearish" or doji in ["gravestone", "shooting_star"]:
-            if volume > vol_ma:
-                signal_type = "WARNING"
-                reasons.append("Bulltrap: RSI cao + doji đỉnh hoặc phân kỳ giảm giá")
-            else:
-                signal_type = "WATCHLIST"
-                reasons.append("RSI cao nhưng có dấu hiệu bulltrap nhẹ")
-        elif doji in ["gravestone"] and volume > vol_ma:
-            signal_type = "ALERT"
-            reasons.append("Doji đỉnh + volume xác nhận")
-        elif cmf < 0:
-            signal_type = "WATCHLIST"
-            reasons.append("RSI cao + CMF âm nhẹ")
-        else:
-            signal_type = "WATCHLIST"
-            reasons.append("Có dấu hiệu tạo đỉnh, cần theo dõi")
-
-    # ================= TAG: buy_low =================
-    elif (
-        trend == "uptrend" and
-        rsi_1h < 35 and rsi_4h < 40 and rsi_1d < 45 and
-        macd_cross == "bullish" and
-        price < bb_lower * 1.01
-    ):
-        tag = "buy_low"
-        if cmf > 0 and volume > 1.2 * vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Vùng mua mạnh: RSI thấp + MACD bullish + volume lớn")
-        elif fib_0_618 and abs(price - fib_0_618) / fib_0_618 < 0.01:
-            signal_type = "WARNING"
-            reasons.append("RSI thấp + gần Fibo 0.618")
-        elif rsi_div == "bullish" or doji in ["dragonfly", "long_legged"]:
-            if volume > vol_ma:
-                signal_type = "WARNING"
-                reasons.append("Beartrap: RSI thấp + doji đảo chiều hoặc phân kỳ tăng")
-            else:
-                signal_type = "WATCHLIST"
-                reasons.append("Có thể là beartrap, cần theo dõi")
-        else:
-            signal_type = "WATCHLIST"
-            reasons.append("Giá thấp + RSI thấp cần theo dõi")
-
-    # ================= TAG: sell_low =================
-    elif (
-        trend == "downtrend" and
-        rsi_1h < 30 and rsi_4h < 35 and rsi_1d < 40 and
-        cmf < -0.05 and
-        price < bb_lower
-    ):
-        tag = "sell_low"
-        if macd_cross == "bearish" and volume > vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Bán tháo: RSI thấp + MACD bearish + volume cao")
-        elif rsi_div == "bearish" or doji in ["gravestone", "shooting_star"]:
-            if volume > vol_ma:
-                signal_type = "WARNING"
-                reasons.append("Bulltrap: RSI cao + doji đỉnh hoặc phân kỳ giảm giá")
-            else:
-                signal_type = "WATCHLIST"
-                reasons.append("RSI cao nhưng có dấu hiệu bulltrap nhẹ")
-        elif doji in ["common"] and volume > vol_ma:
-            signal_type = "ALERT"
-            reasons.append("Giảm mạnh nhưng có thể hồi nhẹ + volume xác nhận")
-        elif cmf < 0:
-            signal_type = "WATCHLIST"
-            reasons.append("Lực bán mạnh dần, CMF âm")
-        else:
-            signal_type = "WATCHLIST"
-            reasons.append("Giá giảm nhưng tín hiệu chưa rõ")
-
-    # ================= TAG: canbuy =================
-    elif (
-        rsi_1h > 55 and trend == "uptrend" and cmf > 0
-    ):
+    if total_score >= 4.0:
+        signal_type = "CRITICAL"
+        tag = "buy_high" if rsi_1h > 65 else "canbuy"
+    elif total_score >= 2.5:
+        signal_type = "WARNING"
         tag = "canbuy"
-        if rsi_div == "bullish" and volume > 1.3 * vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Breakout sớm: phân kỳ RSI + volume cao")
-        elif macd_cross == "bullish" and cmf > 0.05:
-            signal_type = "WARNING"
-            reasons.append("MACD bullish + CMF dương")
-        elif macd_cross == "bullish":
-            signal_type = "ALERT"
-            reasons.append("MACD bullish, tín hiệu tăng nhẹ")
-        else:
-            signal_type = "WATCHLIST"
-            reasons.append("Tín hiệu tích cực, cần theo dõi thêm")
-
-    # ================= TAG: neutral =================
-    elif (
-        abs(price - ema) / ema < 0.01 and 45 <= rsi <= 55 and adx < 20
-    ):
+    elif total_score >= 1.0:
+        signal_type = "ALERT"
+        tag = "canbuy"
+    elif total_score > -1.0:
+        signal_type = "WATCHLIST"
         tag = "neutral"
-        if adx < 10 and volume < 0.5 * vol_ma:
-            signal_type = "CRITICAL"
-            reasons.append("Sideway yếu + volume cực thấp → thị trường chết lâm sàng")
-        elif adx > 25:
-            signal_type = "WARNING"
-            reasons.append("Sideway mạnh + ADX cao")
-        elif doji:
-            signal_type = "ALERT"
-            reasons.append("Sideway + Doji xuất hiện")
-        elif trend:
-            signal_type = "WATCHLIST"
-            reasons.append("Giá dao động quanh EMA, xu hướng chưa rõ")
-        else:
-            signal_type = "HOLD"
-            reasons.append("Chưa có xu hướng rõ ràng")
-
-    # ================= TAG: avoid =================
-    else:
+    elif total_score <= -4.0:
+        signal_type = "CRITICAL"
+        tag = "sell_low"
+    elif total_score <= -2.5:
+        signal_type = "WARNING"
+        tag = "sell_high"
+    elif total_score <= -1.0:
+        signal_type = "ALERT"
         tag = "avoid"
-        if (rsi_div == "bearish" and cmf < -0.03 and adx < 15):
-            signal_type = "CRITICAL"
-            reasons.append("Tín hiệu nhiễu cực mạnh, xung đột đa chỉ báo")
-        elif volume < 0.6 * vol_ma and adx < 10:
-            signal_type = "WARNING"
-            reasons.append("Volume thấp + ADX yếu")
-        elif adx < 10 or cmf == 0:
-            signal_type = "ALERT"
-            reasons.append("Không có động lượng + CMF trung tính")
-        elif rsi and 45 <= rsi <= 55:
-            signal_type = "WATCHLIST"
-            reasons.append("RSI trung tính, không rõ xu hướng")
-        else:
-            signal_type = "HOLD"
-            reasons.append("Tín hiệu yếu, nên đứng ngoài")
 
-    # --- THAY ĐỔI 2: Sửa return cuối cùng ---
-    # Cập nhật lại tag vào dict indicators để tương thích ngược nếu cần
-    indicators["tag"] = tag
+    # Trường hợp điểm gần 0, sideway, không rõ ràng
+    if -1.0 < total_score < 1.0:
+        signal_type = "HOLD"
+        tag = "neutral"
+        if adx < 15 and volume < 0.8 * vol_ma:
+            tag = "avoid" # Thị trường chết
+            reasons.append("Thị trường thanh khoản thấp, nên tránh")
 
-    # Nối các lý do lại thành một chuỗi duy nhất
-    final_reason = " + ".join(reasons) if reasons else "Không có lý do cụ thể."
+    final_reason = f"Tổng điểm: {total_score:.1f} | " + " + ".join(reasons) if reasons else "Không có tín hiệu rõ ràng."
 
-    # Trả về một dictionary có cấu trúc rõ ràng
-    return {"level": signal_type, "tag": tag, "reason": final_reason}
+    return {
+        "level": signal_type,
+        "tag": tag,
+        "reason": final_reason,
+        "raw_tech_score": total_score
+    }

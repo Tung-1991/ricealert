@@ -1,42 +1,20 @@
-# trade_advisor.py (Cập nhật - Phiên bản 5.3 - Debug Output)
-
-# -*- coding: utf-8 -*-
-# PHIÊN BẢN 5.3 - Debug Output
-# Mô tả: Thêm các điểm thành phần đã chuẩn hóa vào debug_info để hiển thị.
-
-import os
-import json
+# /root/ricealert/trade_advisor.py
+import os, json
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from signal_logic import check_signal
 
 # ==============================================================================
 # =================== ⚙️ TRUNG TÂM CẤU HÌNH & TINH CHỈNH ⚙️ =====================
 # ==============================================================================
 FULL_CONFIG = {
-    "NOTES": "Cấu hình được tinh chỉnh để tăng độ nhạy.",
-    "WEIGHTS": { 'tech': 0.40, 'context': 0.30, 'ai': 0.30 }, # Trọng số mới của bạn
-    "BASE_SCORE_MAP": {
-        ("buy_high", "CRITICAL"): 8.5, ("buy_low", "CRITICAL"): 8.5,
-        ("buy_high", "WARNING"): 7.5, ("buy_low", "WARNING"): 7.5,
-        ("buy_high", "ALERT"): 6.5, ("buy_low", "ALERT"): 6.5,
-        ("canbuy", "CRITICAL"): 7.0, ("canbuy", "WARNING"): 7.0,
-        ("canbuy", "ALERT"): 6.0,
-        ("neutral", "ANY"): 5.0,
-        ("avoid", "ANY"): 4.0,
-        ("sell_high", "ANY"): 2.5, ("sell_low", "ANY"): 2.5,
-    },
-    "SCORE_MODIFIERS": {
-        "rsi_bullish_div": 1.5, "rsi_bearish_div": -2.0,
-        "cmf_strong_pos": 1.0, "cmf_strong_neg": -1.0,
-    },
-    "DECISION_THRESHOLDS": {
-        "buy": 5.95,
-        "sell": 3.95
-    },
+    "NOTES": "v6.1 - Flexible Weights",
+    "SCORE_RANGE": 8.0,
+    "WEIGHTS": { 'tech': 0.45, 'context': 0.25, 'ai': 0.30 },
+    "DECISION_THRESHOLDS": { "buy": 6.5, "sell": 3.5 },
     "TRADE_PLAN_RULES": {
-        "default_rr_ratio": 1.8, "high_score_rr_ratio": 2.0,
-        "critical_score_rr_ratio": 2.5, "default_sl_percent": 0.03
+        "default_rr_ratio": 1.8, "high_score_rr_ratio": 2.2,
+        "critical_score_rr_ratio": 2.8, "default_sl_percent": 0.03
     },
     "CONTEXT_SETTINGS": {
         "NEWS_LEVEL_SCORE": {"CRITICAL": 2.0, "WARNING": 1.5, "ALERT": 1.0, "WATCHLIST": 0.5, "INFO": 0.2},
@@ -45,7 +23,7 @@ FULL_CONFIG = {
     }
 }
 
-# Các hàm logic bên dưới không cần thay đổi...
+# Các hàm logic bên dưới không thay đổi
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NEWS_DIR = os.path.join(BASE_DIR, "ricenews/lognew")
 AI_DIR = os.path.join(BASE_DIR, "ai_logs")
@@ -95,84 +73,96 @@ def get_live_context_and_ai(symbol: str, interval: str, config: dict) -> Tuple[D
     return final_context, ai_data
 
 def generate_combined_trade_plan(base_plan: dict, score: float, config: dict) -> dict:
-    entry = base_plan.get('entry', 0)
-    if entry == 0: return base_plan
+    entry = base_plan.get('price', 0)
+    if entry == 0: return {"entry": 0, "tp": 0, "sl": 0}
     rules = config['TRADE_PLAN_RULES']
-    risk_distance = entry - base_plan.get('sl', entry * (1 - rules['default_sl_percent']))
-    if risk_distance <= 0: risk_distance = entry * rules['default_sl_percent']
+    risk_distance = entry * rules['default_sl_percent']
+    reward_ratio = rules['default_rr_ratio']
     if score >= 8.5: reward_ratio = rules['critical_score_rr_ratio']
     elif score >= 7.0: reward_ratio = rules['high_score_rr_ratio']
-    else: reward_ratio = rules['default_rr_ratio']
     reward_distance = risk_distance * reward_ratio
     new_tp = entry + reward_distance
     new_sl = entry - risk_distance
-    return {"entry": entry, "tp": new_tp, "sl": new_sl}
+    return {"entry": round(entry, 8), "tp": round(new_tp, 8), "sl": round(new_sl, 8)}
 
 def get_advisor_decision(
     symbol: str, interval: str, indicators: dict, config: dict,
-    ai_data_override: Dict = None, context_override: Dict = None,
+    ai_data_override: Optional[Dict] = None,
+    context_override: Optional[Dict] = None,
+    weights_override: Optional[Dict] = None,
 ) -> Dict:
     if context_override is not None and ai_data_override is not None:
         context, ai_data = context_override, ai_data_override
     else:
         context, ai_data = get_live_context_and_ai(symbol, interval, config)
+
     market_trend = context.get("market_trend", "NEUTRAL")
     news_factor = context.get("news_factor", 0)
-    signal_details = check_signal(indicators)
-    tag = signal_details.get("tag", "avoid")
-    level = signal_details.get("level", "HOLD")
-    raw_tech_score = config['BASE_SCORE_MAP'].get((tag, level), config['BASE_SCORE_MAP'].get((tag, "ANY"), 4.5))
-    modifiers = config['SCORE_MODIFIERS']
-    if indicators.get('rsi_divergence') == 'bullish': raw_tech_score += modifiers['rsi_bullish_div']
-    elif indicators.get('rsi_divergence') == 'bearish': raw_tech_score -= modifiers['rsi_bearish_div']
-    cmf = indicators.get('cmf', 0)
-    if cmf > 0.05: raw_tech_score += modifiers['cmf_strong_pos']
-    elif cmf < -0.05: raw_tech_score -= modifiers['cmf_strong_neg']
-    tech_score_10 = round(min(max(raw_tech_score, 0), 10), 1)
-    
-    weights = config['WEIGHTS'] # Lấy trọng số ở đây
 
+    # 1. Lấy điểm kỹ thuật trực tiếp từ signal_logic
+    signal_details = check_signal(indicators)
+    raw_tech_score = signal_details.get("raw_tech_score", 0.0)
+
+    # =========================================================================
+    # ==== 🕵️‍♂️ BẮT ĐẦU VÙNG CODE CHẨN ĐOÁN LỖI 🕵️‍♂️ ====
+    # =========================================================================
+    # In ra lý do tại sao điểm kỹ thuật thô bằng 0 để tìm lỗi
+    if raw_tech_score == 0.0 and "Thiếu dữ liệu" in signal_details.get("reason", ""):
+        # Liệt kê các key bắt buộc từ file signal_logic.py để so sánh
+        required_keys_from_logic = ["rsi_1h", "rsi_4h", "rsi_1d", "price", "volume", "vol_ma20", "macd_cross", "adx", "trend", "cmf", "bb_upper", "bb_lower"]
+        # Tìm xem trong dictionary 'indicators' đang thiếu key nào
+        missing_keys = [key for key in required_keys_from_logic if indicators.get(key) is None]
+        print(f"[DEBUG-ADVISOR] 🕵️ Score thô=0. Lý do: '{signal_details.get('reason')}'. Các chỉ báo bị thiếu: {missing_keys}")
+    # =========================================================================
+    # ==== KẾT THÚC VÙNG CODE CHẨN ĐOÁN LỖI ====
+    # =========================================================================
+
+    # Chuyển điểm kỹ thuật thô (-8 đến +8) về thang 0-10 và sau đó là -1 đến +1
+    score_range = config.get("SCORE_RANGE", 8.0)
+    tech_score_10 = round(min(max(5.0 + (raw_tech_score * 5.0 / score_range), 0), 10), 1)
+    tech_scaled = (tech_score_10 / 5.0) - 1.0
+
+    # 2. Tính điểm AI
     prob_buy = ai_data.get("prob_buy", 50.0)
     prob_sell = ai_data.get("prob_sell", 0.0)
-    ai_skew = (prob_buy - prob_sell) / 100.0 # Giá trị AI đã scale
+    ai_skew = (prob_buy - prob_sell) / 100.0
 
+    # 3. Tính điểm Context
     market_score_map = {"STRONG_UPTREND": 1.0, "UPTREND": 0.5, "STRONG_DOWNTREND": -1.0, "DOWNTREND": -0.5}
     market_score = market_score_map.get(market_trend, 0)
     normalized_news_factor = news_factor / 3.0
-    context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2) # Giá trị Context đã scale
-    
-    tech_scaled = (tech_score_10 / 5.0) - 1.0 # Giá trị Tech đã scale
-    
+    context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2)
+
+    # 4. Tính điểm tổng hợp
+    weights = weights_override if weights_override is not None else config['WEIGHTS']
     final_rating = (weights['tech'] * tech_scaled) + \
                    (weights['context'] * context_scaled) + \
                    (weights['ai'] * ai_skew)
-    
+
     final_score = round(min(max((final_rating + 1) * 5, 0), 10), 1)
-    
+
+    # 5. Ra quyết định
     thresholds = config['DECISION_THRESHOLDS']
     decision_type = "NEUTRAL"
-    if final_score >= thresholds['buy']: decision_type = "OPPORTUNITY_BUY"
-    elif final_score <= thresholds['sell']: decision_type = "OPPORTUNITY_SELL"
-    
-    base_trade_plan = indicators.get("trade_plan", {"entry": indicators.get("price", 0)})
+    if final_score >= thresholds['buy']:
+        decision_type = "OPPORTUNITY_BUY"
+    elif final_score <= thresholds['sell']:
+        decision_type = "OPPORTUNITY_SELL"
+
+    base_trade_plan = {"price": indicators.get("price", 0)}
     combined_trade_plan = generate_combined_trade_plan(base_trade_plan, final_score, config)
-    
+
+    # === CODE MERGED START ===
     return {
-        "decision_type": decision_type, 
-        "final_score": final_score, 
-        "tech_score": tech_score_10,
-        "signal_details": signal_details, 
-        "ai_prediction": {"prob_buy": prob_buy, "prob_sell": prob_sell, "pct": ai_data.get('pct', None)}, # Ensure pct is passed
-        "market_trend": market_trend, 
-        "news_factor": news_factor,
-        "full_indicators": indicators, 
-        "combined_trade_plan": combined_trade_plan,
+        "decision_type": decision_type, "final_score": final_score, "tech_score": tech_score_10,
+        "signal_details": signal_details,
+        "ai_prediction": {"prob_buy": prob_buy, "prob_sell": prob_sell, "pct": ai_data.get('pct', None)},
+        "market_trend": market_trend, "news_factor": news_factor,
+        "full_indicators": indicators, "combined_trade_plan": combined_trade_plan,
         "debug_info": {
-            "weights_used": weights, 
-            "config_notes": config.get("NOTES", "N/A"),
-            # THAY ĐỔI: Thêm các điểm thành phần đã scale vào debug_info
-            "tech_scaled_value": tech_scaled,
-            "context_scaled_value": context_scaled,
-            "ai_skew_value": ai_skew
+            "weights_used": weights, "config_notes": config.get("NOTES", "N/A"),
+            "tech_scaled_value": tech_scaled, "context_scaled_value": context_scaled, "ai_skew_value": ai_skew,
+            "context_used": context # <-- Dòng được thêm vào
         }
     }
+    # === CODE MERGED END ===

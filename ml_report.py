@@ -1,37 +1,25 @@
-# -*- coding: utf-8 -*-
-"""
-ml_report.py - AI Trading Signal Assistant (Event-Driven & Integrated)
-Version: 5.5 (Adaptive & Refined Cooldown)
-Date: 2025-07-03
-Description: This version features an adaptive classification logic that uses
-             different thresholds for each timeframe (1h, 4h, 1d). It also reverts
-             to a universal, consistent cooldown mechanism for all signal changes
-             to control alert frequency effectively.
-"""
-import os
-import json
-import time
-import joblib
-import requests
-import pandas as pd
-import numpy as np
-import ta
+# /root/ricealert/ml_report.py
+import os, json, time, joblib, requests, sys
+import pandas as pd, numpy as np, ta
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from typing import List, Dict
 from itertools import groupby
 
+# --- Thiết lập đường dẫn ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+
 # ==============================================================================
 # SETUP & CONFIG
 # ==============================================================================
 load_dotenv()
-SYMBOLS       = os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT,LINKUSDT,SUIUSDT").split(",")
+SYMBOLS       = os.getenv("SYMBOLS", "LINKUSDT,TAOUSDT,ETHUSDT,AVAXUSDT,INJUSDT,SUIUSDT,FETUSDT").split(",")
 INTERVALS     = os.getenv("INTERVALS", "1h,4h,1d").split(",")
 WEBHOOK_URL   = os.getenv("DISCORD_AI_WEBHOOK")
 ERROR_WEBHOOK = os.getenv("DISCORD_ERROR_WEBHOOK", "")
 
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR   = os.path.join(BASE_DIR, "data")
 LOG_DIR    = os.path.join(BASE_DIR, "ai_logs")
 STATE_FILE = os.path.join(BASE_DIR, "ml_state.json")
@@ -39,41 +27,31 @@ STATE_FILE = os.path.join(BASE_DIR, "ml_state.json")
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ... (Các hằng số và map khác giữ nguyên) ...
 COOLDOWN_BY_LEVEL = {
-    "STRONG_BUY": 2 * 3600,   # 🔥 Cho lặp lại sau 2h, đừng bỏ lỡ
-    "PANIC_SELL": 2 * 3600,   # 🚨 Để nhắc lại nếu cần
-    "BUY": 3 * 3600,          # ❇️ Tín hiệu đẹp nhưng vẫn cần kiểm soát
-    "SELL": 3 * 3600,         # ❌ Bán gọn nhưng không lặp lại nhiều
-
-    "WEAK_BUY": 4 * 3600,     # 🟡 Lập lại ít hơn
-    "WEAK_SELL": 4 * 3600,    # 🔻 Tránh spam tin bán yếu
-
-    "HOLD": 6 * 3600,         # 🔍 Trạng thái chờ → nên giữ im lặng lâu
-    "AVOID": 6 * 3600         # 🚧 Không đáng giao dịch → không cần nói nhiều
+    "STRONG_BUY": 1 * 3600, "PANIC_SELL": 1 * 3600,
+    "BUY": 2 * 3600, "SELL": 2 * 3600,
+    "WEAK_BUY": 4 * 3600, "WEAK_SELL": 4 * 3600,
+    "HOLD": 8 * 3600, "AVOID": 8 * 3600
 }
-
-
-
 LEVEL_MAP = {
-    "STRONG_BUY": {"icon": "🔥", "name": "STRONG BUY"},
-    "BUY":        {"icon": "✅", "name": "BUY"},
-    "WEAK_BUY":   {"icon": "🟡", "name": "WEAK BUY"},
-    "HOLD":       {"icon": "🔍", "name": "HOLD"},
-    "AVOID":      {"icon": "🚧", "name": "AVOID"},
-    "WEAK_SELL":  {"icon": "🔻", "name": "WEAK SELL"},
-    "SELL":       {"icon": "❌", "name": "SELL"},
-    "PANIC_SELL": {"icon": "🚨", "name": "PANIC SELL"},
+    "STRONG_BUY": {"icon": "🚀", "name": "STRONG BUY"}, "BUY": {"icon": "✅", "name": "BUY"},
+    "WEAK_BUY": {"icon": "🟢", "name": "WEAK BUY"}, "HOLD": {"icon": "🔍", "name": "HOLD"},
+    "AVOID": {"icon": "🚧", "name": "AVOID"}, "WEAK_SELL": {"icon": "🔻", "name": "WEAK SELL"},
+    "SELL": {"icon": "❌", "name": "SELL"}, "PANIC_SELL": {"icon": "🆘", "name": "PANIC SELL"},
 }
-
 
 # ==============================================================================
-# HÀM TÍNH TOÁN (Đồng bộ với trainer.py)
+# HÀM TÍNH TOÁN
 # ==============================================================================
 def get_price_data(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+    # (Hàm này giữ nguyên)
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     try:
-        data = requests.get(url, params=params, timeout=10).json()
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
         if not isinstance(data, list) or not data: return pd.DataFrame()
         df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
         df = df.iloc[:, :6]
@@ -86,53 +64,88 @@ def get_price_data(symbol: str, interval: str, limit: int) -> pd.DataFrame:
         print(f"[ERROR] Exception in get_price_data for {symbol} {interval}: {e}")
         return pd.DataFrame()
 
+# === CODE MERGED START ===
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     close = out["close"]
-    for n in [14, 20, 50]:
+    volume = out["volume"]
+
+    # Bổ sung các chỉ báo cần thiết cho signal_logic
+    out['price'] = close
+    out['vol_ma20'] = volume.rolling(window=20).mean()
+    bb = ta.volatility.BollingerBands(close, window=20)
+    out['bb_upper'] = bb.bollinger_hband()
+    out['bb_lower'] = bb.bollinger_lband()
+    out['bb_width'] = (out['bb_upper'] - out['bb_lower']) / (bb.bollinger_mavg() + 1e-9)
+    
+    macd_indicator = ta.trend.MACD(close)
+    out['macd'] = macd_indicator.macd()
+    out['macd_signal'] = macd_indicator.macd_signal()
+    out["macd_diff"] = macd_indicator.macd_diff()
+    macd_cross_cond = [
+        (out['macd'].shift(1) < out['macd_signal'].shift(1)) & (out['macd'] > out['macd_signal']),
+        (out['macd'].shift(1) > out['macd_signal'].shift(1)) & (out['macd'] < out['macd_signal'])
+    ]
+    macd_cross_choices = ['bullish', 'bearish']
+    out['macd_cross'] = np.select(macd_cross_cond, macd_cross_choices, default='neutral')
+    
+    # Đồng bộ logic Trend về EMA 20/50
+    ema_fast = ta.trend.ema_indicator(close, window=20)
+    ema_slow = ta.trend.ema_indicator(close, window=50)
+    trend_cond = [ema_fast > ema_slow, ema_fast < ema_slow]
+    trend_choices = ['uptrend', 'downtrend']
+    out['trend'] = np.select(trend_cond, trend_choices, default='sideway')
+    
+    # Các chỉ báo cũ cho AI
+    for n in [14, 28, 50]:
         out[f'rsi_{n}'] = ta.momentum.rsi(close, window=n)
         out[f'ema_{n}'] = ta.trend.ema_indicator(close, window=n)
         out[f'dist_ema_{n}'] = (close - out[f'ema_{n}']) / (out[f'ema_{n}'] + 1e-9)
-    macd = ta.trend.MACD(close)
-    out["macd_diff"] = macd.macd_diff()
     out["adx"] = ta.trend.adx(out["high"], out["low"], close)
-    out['atr'] = ta.volatility.average_true_range(out["high"], out["low"], close)
-    bb = ta.volatility.BollingerBands(close)
-    out['bb_width'] = (bb.bollinger_hband() - bb.bollinger_lband()) / (bb.bollinger_mavg() + 1e-9)
-    out['cmf'] = ta.volume.chaikin_money_flow(out["high"], out["low"], close, out["volume"])
-    out['candle_body'] = abs(close - out['open'])
-    out['candle_range'] = out['high'] - out['low']
-    out['body_to_range_ratio'] = out['candle_body'] / (out['candle_range'] + 1e-9)
-    out['hour'] = out.index.hour
+    out['atr'] = ta.volatility.average_true_range(out["high"], out["low"], close, window=14)
+    out['cmf'] = ta.volume.chaikin_money_flow(out["high"], out["low"], close, volume, window=20)
+    for n in [1, 2, 3, 5, 8, 13, 21]:
+        out[f'pct_change_lag_{n}'] = close.pct_change(periods=n)
+        out[f'rsi_14_lag_{n}'] = out['rsi_14'].shift(n)
+        out[f'bb_width_lag_{n}'] = out['bb_width'].shift(n)
+    log_return = np.log(close / close.shift(1))
+    out['volatility_20'] = log_return.rolling(window=20).std() * np.sqrt(20)
+    out['volatility_50'] = log_return.rolling(window=50).std() * np.sqrt(50)
+    out['hour_of_day'] = out.index.hour
     out['day_of_week'] = out.index.dayofweek
-    return out.dropna()
+    out['vol_x_rsi'] = volume * out['rsi_14']
+    out['adx_x_cmf'] = out['adx'] * out['cmf']
+
+    # Không cần One-Hot Encoding ở đây vì model sẽ dùng các feature đã được train
+    
+    # Dọn dẹp cuối cùng
+    out.replace([np.inf, -np.inf], np.nan, inplace=True)
+    out.bfill(inplace=True)
+    out.ffill(inplace=True)
+    out.fillna(0, inplace=True)
+    return out
+# === CODE MERGED END ===
+
 
 # ==============================================================================
 # UTILITY & HELPER FUNCTIONS
 # ==============================================================================
 def write_json(path: str, data: dict):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    with open(path, "w") as f: json.dump(data, f, indent=2)
 
 def send_discord_alert(payload: Dict) -> None:
-    if not WEBHOOK_URL:
-        print("[ERROR] DISCORD_AI_WEBHOOK not set")
-        return
+    if not WEBHOOK_URL: return
     try:
         requests.post(WEBHOOK_URL, json=payload, timeout=10).raise_for_status()
-        time.sleep(3)
-    except Exception as exc:
-        print(f"[ERROR] Discord alert failed: {exc}")
+        time.sleep(2)
+    except Exception as exc: print(f"[ERROR] Discord alert failed: {exc}")
 
 def send_error_alert(msg: str) -> None:
     ts = datetime.now(timezone.utc).isoformat()
-    with open(os.path.join(LOG_DIR, "error_ml.log"), "a") as f:
-        f.write(f"{ts} | {msg}\n")
+    with open(os.path.join(LOG_DIR, "error_ml.log"), "a") as f: f.write(f"{ts} | {msg}\n")
     if ERROR_WEBHOOK:
-        try:
-            requests.post(ERROR_WEBHOOK, json={"content": f"⚠️ ML_REPORT ERROR: {msg}"}, timeout=10)
-        except Exception:
-            pass
+        try: requests.post(ERROR_WEBHOOK, json={"content": f"⚠️ ML_REPORT ERROR: {msg}"}, timeout=10)
+        except Exception: pass
 
 def load_state() -> dict:
     if not os.path.exists(STATE_FILE): return {}
@@ -141,27 +154,23 @@ def load_state() -> dict:
     except (json.JSONDecodeError, FileNotFoundError): return {}
 
 def save_state(data: dict) -> None:
-    with open(STATE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    with open(STATE_FILE, "w") as f: json.dump(data, f, indent=2)
 
 def load_model_and_meta(symbol: str, interval: str):
     try:
         clf = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_clf_{interval}.pkl"))
         reg = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_reg_{interval}.pkl"))
-        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json")) as f:
-            meta = json.load(f)
+        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json")) as f: meta = json.load(f)
         return clf, reg, meta
     except Exception as exc:
         send_error_alert(f"Failed to load model/meta for {symbol} {interval}: {exc}")
         return None, None, None
 
 def should_send_overview(state: dict) -> bool:
-    """Kiểm tra xem có nên gửi báo cáo tổng quan AI không."""
     last_ts = state.get("last_overview_timestamp", 0)
     now_dt = datetime.now(ZoneInfo("Asia/Bangkok"))
     target_times = [now_dt.replace(hour=8, minute=1, second=0, microsecond=0),
                     now_dt.replace(hour=20, minute=1, second=0, microsecond=0)]
-
     for target_dt in target_times:
         if now_dt.timestamp() >= target_dt.timestamp() and last_ts < target_dt.timestamp():
             return True
@@ -170,152 +179,126 @@ def should_send_overview(state: dict) -> bool:
 # ==============================================================================
 # CORE LOGIC & ANALYSIS
 # ==============================================================================
-# Trong file ml_report.py
-
 def classify_level(prob_buy: float, prob_sell: float, pct: float, interval: str) -> str:
-    """
-    Logic phân loại được làm chặt hơn với "vùng chết" (Dead Zone) lớn hơn
-    để bỏ qua các tín hiệu nhiễu không đáng kể.
-    """
-    # Ngưỡng đã được điều chỉnh theo đề xuất của bạn, mạnh tay hơn.
     THRESHOLDS = {
-        "1h": {"strong_prob": 78, "dead_zone_pct": 1.0}, # Vùng chết 1.0% cho 1h
-        "4h": {"strong_prob": 75, "dead_zone_pct": 1.5}, # Vùng chết 1.5% cho 4h
-        "1d": {"strong_prob": 70, "dead_zone_pct": 2.5}  # Vùng chết 2.5% cho 1d
+        "1h": {"dead_zone_pct": 0.4}, "4h": {"dead_zone_pct": 0.8}, "1d": {"dead_zone_pct": 1.2}
     }
     thresholds = THRESHOLDS.get(interval, THRESHOLDS["4h"])
-
-    # === BƯỚC 1: KIỂM TRA "VÙNG CHẾT" TRƯỚC TIÊN ===
-    # Nếu dự đoán thay đổi nằm trong khoảng (-1.2%, +1.2%) cho khung 1h, coi là HOLD.
-    if abs(pct) < thresholds['dead_zone_pct']:
-        return "HOLD"
-
-    # === BƯỚC 2: KIỂM TRA CÁC TÍN HIỆU MẠNH ===
-    if prob_buy > thresholds['strong_prob']: return "STRONG_BUY"
-    if prob_sell > thresholds['strong_prob']: return "PANIC_SELL"
-
-    # === BƯỚC 3: KIỂM TRA CÁC TÍN HIỆU TIÊU CHUẨN ===
+    if abs(pct) < thresholds['dead_zone_pct']: return "HOLD"
+    if prob_buy > 75: return "STRONG_BUY"
+    if prob_sell > 75: return "PANIC_SELL"
     if prob_buy > 65: return "BUY"
     if prob_sell > 65: return "SELL"
-    
-    # === BƯỚC 4: KIỂM TRA TÍN HIỆU YẾU ===
     if prob_buy > 55: return "WEAK_BUY"
     if prob_sell > 55: return "WEAK_SELL"
-
-    # === BƯỚC 5: MẶC ĐỊNH LÀ TRÁNH ===
-    # Chỉ khi dự đoán đủ lớn nhưng xác suất lại thấp thì mới là AVOID.
     return "AVOID"
 
 def analyze_single_interval(symbol: str, interval: str) -> dict or None:
     clf, reg, meta = load_model_and_meta(symbol, interval)
     if not clf or not reg or not meta: return None
     try:
-        df_raw = get_price_data(symbol, interval, limit=200)
+        df_raw = get_price_data(symbol, interval, limit=300)
+        if df_raw.empty or len(df_raw) < 100: return None
         features_df = add_features(df_raw)
-        if features_df.empty: return None
-
         latest = features_df.iloc[-1]
-        X = pd.DataFrame([latest], columns=features_df.columns)[meta["features"]]
-        if X.isnull().values.any(): return None
-
+        model_features = meta["features"]
+        latest_data_for_model = {feature: latest.get(feature, 0) for feature in model_features}
+        X = pd.DataFrame([latest_data_for_model])
+        X = X[model_features]
+        if X.isnull().values.any():
+            send_error_alert(f"NaNs found in X for {symbol} {interval} even after handling.")
+            X.fillna(0, inplace=True)
         probs = clf.predict_proba(X)[0]
-        prob_sell, prob_buy = probs[0] * 100, probs[2] * 100
+        classes = clf.classes_.tolist()
+        prob_sell = probs[classes.index(0)] * 100 if 0 in classes else 0.0
+        prob_buy = probs[classes.index(2)] * 100 if 2 in classes else 0.0
         norm_change = float(reg.predict(X)[0])
         atr, price = latest.get('atr'), latest.get('close')
-
-        if not price or not np.isfinite(price) or price <= 0 or not atr or atr <= 0: return None
-
+        if not price or not np.isfinite(price) or price <= 0: return None
+        if not atr or not np.isfinite(atr) or atr <= 0: atr = price * 0.01
         pct = norm_change * atr * 100 / price
-        level = classify_level(prob_buy, prob_sell, pct, interval) # Truyền interval vào
-
-        # risk_ratio thông minh hơn dựa trên cấp độ tín hiệu
-        risk_map = {
-            "STRONG_BUY": 1/3,   # TP gấp 3 SL
-            "BUY": 1/2.5,        # TP gấp 2.5 SL
-            "WEAK_BUY": 1/2,     # TP gấp 2 SL
-            "HOLD": 1/1.5,
-            "AVOID": 1/1.5,
-            "WEAK_SELL": 1/2,
-            "SELL": 1/2.5,
-            "PANIC_SELL": 1/3
-        }
-        risk_ratio = risk_map.get(level, 1/1.5) # Mặc định R:R là 1:1.5
+        level = classify_level(prob_buy, prob_sell, pct, interval)
+        risk_map = {"STRONG_BUY": 1/3, "BUY": 1/2.5, "WEAK_BUY": 1/2, "HOLD": 1/1.5, "AVOID": 1/1.5,
+                    "WEAK_SELL": 1/2, "SELL": 1/2.5, "PANIC_SELL": 1/3}
+        risk_ratio = risk_map.get(level, 1/1.5)
         direction = 1 if pct >= 0 else -1
-        tp_pct = abs(pct) if abs(pct) > 0.2 else 0.5 # Tăng ngưỡng pct tối thiểu
+        tp_pct = max(abs(pct), 0.5)
         sl_pct = tp_pct * risk_ratio
-
         return {
-            "symbol": symbol, "interval": interval,
-            "prob_buy": round(prob_buy, 2),
-            "prob_sell": round(prob_sell, 2),
-            "pct": round(pct, 2), "price": price,
+            "symbol": symbol, "interval": interval, "prob_buy": round(prob_buy, 2),
+            "prob_sell": round(prob_sell, 2), "pct": round(pct, 2), "price": price,
             "tp": price * (1 + direction * (tp_pct / 100)),
             "sl": price * (1 - direction * (sl_pct / 100)),
             "level": level,
         }
     except Exception as e:
         send_error_alert(f"Analysis failed for {symbol} {interval}: {e}")
+        import traceback
+        send_error_alert(traceback.format_exc())
         return None
 
 # ==============================================================================
 # ALERT GENERATION & FILE WRITING
 # ==============================================================================
-def generate_instant_alert(result: Dict, old_level: str) -> None:
-    level_info = LEVEL_MAP.get(result['level'], {"icon": "❓", "name": "KHÔNG XÁC ĐỊNH"})
-    old_level_info = LEVEL_MAP.get(old_level, {"icon": "❓", "name": "KHÔNG RÕ"})
+def format_price(price):
+    if not isinstance(price, (int, float)) or not np.isfinite(price): return "N/A"
+    return f"{price:.8f}" if price < 0.1 else f"{price:.4f}"
 
+def generate_instant_alert(result: Dict, old_level: str) -> None:
+    level_info = LEVEL_MAP.get(result['level'], {"icon": "❓", "name": "UNKNOWN"})
+    old_level_info = LEVEL_MAP.get(old_level, {"icon": "❓", "name": "N/A"})
     from_str = f"Từ {old_level_info.get('name', 'N/A')} ({old_level_info.get('icon', '❓')})" if old_level else "Tín hiệu mới"
     to_str = f"chuyển sang {level_info['name']} {level_info['icon']}"
-    header = f"🔔 Thay đổi Tín hiệu AI: {result['symbol']} ({result['interval']})\n➡️ {from_str} {to_str}"
-
-    strategy = (f"🧠 **Chiến lược Đề xuất:**\n"
-                f"Một cơ hội giao dịch tiềm năng đang xuất hiện trên biểu đồ {result['interval']}. "
-                f"Xác suất của mô hình đã có sự thay đổi đáng chú ý.\n\n"
-                f"- **Tín hiệu chính:** Dựa trên khung {result['interval']} ({level_info['name']}).\n"
-                f"- **Mục tiêu (TP) đề xuất:** `{result['tp']:.4f}`\n"
-                f"- **Cắt lỗ (SL) đề xuất:** `{result['sl']:.4f}`")
-
-    details = (f"📋 **Chi tiết Dự báo (Khung {result['interval']}):**\n"
-               f"- **Giá hiện tại:** {result['price']:.4f}\n"
-               f"- **Xác suất Mua:** {result['prob_buy']:.2f}%\n"
-               f"- **Xác suất Bán:** {result['prob_sell']:.2f}%\n"
-               f"- **Dự đoán thay đổi:** {result['pct']:+.2f}%")
-
-    full_message = f"{header}\n\n{strategy}\n\n{details}"
-    send_discord_alert({"content": full_message})
+    header = f"🔔 **AI Alert: {result['symbol']} ({result['interval']})**\n`{from_str} -> {to_str}`"
+    price_fmt = format_price(result['price'])
+    tp_fmt = format_price(result['tp'])
+    sl_fmt = format_price(result['sl'])
+    fields = [
+        {"name": "Giá hiện tại", "value": f"`{price_fmt}`", "inline": True},
+        {"name": "Dự đoán thay đổi", "value": f"`{result['pct']:+.2f}%`", "inline": True},
+        {"name": "Xác suất Mua/Bán", "value": f"`{result['prob_buy']:.1f}% / {result['prob_sell']:.1f}%`", "inline": True}
+    ]
+    description = ""
+    if result['level'] not in ["HOLD", "AVOID"]:
+        description = f"Một cơ hội giao dịch **{level_info['name']}** tiềm năng đã xuất hiện."
+        fields.extend([
+            {"name": "Mục tiêu (TP) đề xuất", "value": f"`{tp_fmt}`", "inline": True},
+            {"name": "Cắt lỗ (SL) đề xuất", "value": f"`{sl_fmt}`", "inline": True}
+        ])
+    else:
+        if result['level'] == "HOLD":
+            description = "Biến động dự đoán quá nhỏ, không đủ để tạo cơ hội giao dịch. Khuyến nghị quan sát thêm."
+        elif result['level'] == "AVOID":
+            description = "Tín hiệu nhiễu, không đáng tin cậy. Xác suất dự đoán thấp dù biến động có thể lớn. Khuyến nghị đứng ngoài."
+    embed = {
+        "title": header, "description": description, "color": 3447003,
+        "fields": fields,
+        "footer": {"text": f"AI Model v6.0 | {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S')}"}
+    }
+    send_discord_alert({"embeds": [embed]})
     print(f"✅ Alert sent for {result['symbol']}-{result['interval']}: {old_level} -> {result['level']}")
 
 def generate_summary_report(all_results: List[Dict]) -> None:
     if not all_results: return
-    embed_title = f"🔥 Tổng quan Thị trường AI - {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M (%d/%m/%Y)')}"
-    embed = {"title": embed_title, "description": "*Tổng hợp tín hiệu và các mức giá quan trọng theo mô hình AI.*", "color": 3447003, "fields": [], "footer": {"text": "Dữ liệu được cung cấp bởi AI Model v5.5 (Adaptive & Refined Cooldown)"}}
-
+    embed_title = f"📊 Tổng quan Thị trường AI - {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M (%d/%m/%Y)')}"
+    embed = {"title": embed_title, "description": "*Tổng hợp tín hiệu và các mức giá quan trọng theo mô hình AI.*", "color": 5814783, "fields": [], "footer": {"text": "AI Model v6.0"}}
     sorted_results = sorted(all_results, key=lambda x: x['symbol'])
     for symbol, group in groupby(sorted_results, key=lambda x: x['symbol']):
         field_value = ""
-        sorted_group = sorted(list(group), key=lambda x: INTERVALS.index(x['interval']))
+        sorted_group = sorted(list(group), key=lambda x: INTERVALS.index(x['interval']) if x['interval'] in INTERVALS else len(INTERVALS))
         for res in sorted_group:
             level_info = LEVEL_MAP.get(res['level'], {"icon": "❓", "name": "N/A"})
-            price_str = f"{res['price']:.2f}" if res['price'] >= 1 else f"{res['price']:.4f}"
-            tp_str = f"{res['tp']:.2f}" if res['tp'] >= 1 else f"{res['tp']:.4f}"
-            sl_str = f"{res['sl']:.2f}" if res['sl'] >= 1 else f"{res['sl']:.4f}"
-            line = (f"`{res['interval']:<2}` {level_info['icon']}**{level_info['name']}** `{res['pct']:+5.2f}%` | "
-                    f"Giá:`{price_str}` TP:`{tp_str}` SL:`{sl_str}`\n")
+            line = f"`{res['interval']:<3}` {level_info['icon']} **{level_info['name']:<10}** `{res['pct']:>+6.2f}%` ({res['prob_buy']:.0f}/{res['prob_sell']:.0f})\n"
             field_value += line
-        embed["fields"].append({"name": f"➡️ {symbol}", "value": field_value, "inline": False})
-
+        embed["fields"].append({"name": f"**{symbol}**", "value": field_value, "inline": True})
     send_discord_alert({"embeds": [embed]})
     print("✅ Summary report sent.")
 
-# ==============================================================================
-# MAIN
-# ==============================================================================
 def main():
     print(f"🧠 Bắt đầu chu trình phân tích AI lúc {datetime.now()}...")
     state = load_state()
     all_current_results = []
     now_utc = datetime.now(timezone.utc)
-
     for symbol in SYMBOLS:
         for interval in INTERVALS:
             state_key = f"{symbol}-{interval}"
@@ -323,41 +306,27 @@ def main():
             if not current_result:
                 print(f"❌ Analysis failed for {symbol} {interval}, skipping.")
                 continue
-
             output_path = os.path.join(LOG_DIR, f"{symbol}_{interval}.json")
             write_json(output_path, current_result)
             all_current_results.append(current_result)
-
             previous_state = state.get(state_key, {})
             previous_level = previous_state.get("last_level")
             current_level = current_result["level"]
-
-            # Logic cảnh báo và cooldown được áp dụng cho MỌI thay đổi
             if current_level != previous_level:
                 last_alert_ts = previous_state.get("last_alert_timestamp", 0)
-                # Lấy thời gian cooldown dựa trên MỨC TÍN HIỆU MỚI
-                cooldown_duration = COOLDOWN_BY_LEVEL.get(current_level, 3600) # 1 giờ mặc định
-
+                cooldown_duration = COOLDOWN_BY_LEVEL.get(current_level, 3600)
                 if now_utc.timestamp() - last_alert_ts > cooldown_duration:
-                    # Nếu đã hết thời gian chờ, gửi cảnh báo và cập nhật trạng thái
                     generate_instant_alert(current_result, previous_level)
-                    state[state_key] = {
-                        "last_level": current_level,
-                        "last_alert_timestamp": now_utc.timestamp()
-                    }
+                    state[state_key] = {"last_level": current_level, "last_alert_timestamp": now_utc.timestamp()}
                 else:
-                    # Nếu vẫn trong thời gian chờ, chỉ ghi log và không gửi cảnh báo
                     print(f"⏳ Cooldown active for {state_key}. Change from {previous_level} to {current_level} detected but no alert sent.")
-                    # Vẫn cập nhật `last_level` để hệ thống biết trạng thái hiện tại
                     if state_key not in state: state[state_key] = {}
                     state[state_key]['last_level'] = current_level
-
     if should_send_overview(state):
         if all_current_results:
             generate_summary_report(all_current_results)
             state["last_overview_timestamp"] = now_utc.timestamp()
             print("✅ AI Summary report sent and timestamp updated.")
-
     save_state(state)
     print("✅ Phân tích AI hoàn tất.")
 

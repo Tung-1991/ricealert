@@ -37,5 +37,4 @@ ricealert-*.json
 
 #backtest
 backtest/data_cache/
-backtest/*.json
-backtest/*.csv
+backtest/backtest_results
