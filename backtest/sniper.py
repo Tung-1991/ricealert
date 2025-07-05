@@ -25,57 +25,46 @@ from trade_advisor import get_advisor_decision, FULL_CONFIG
 # ================= 🔬 PHÒNG THÍ NGHIỆM CHIẾN LƯỢC 🔬 =====================
 # ==============================================================================
 STRATEGY_CONFIGS = {
-    # ⚙️ Chiến lược 1: Bảo Thủ & An Toàn
-    "BaoThu_AnToan": {
-        "NOTES": "Ưu tiên tín hiệu chất lượng cao, SL chặt chẽ để bảo toàn vốn.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.6, 'ai': 0.4, 'context': 0.0},
-        "ENTRY_SCORE_THRESHOLD": 7.0, # Ngưỡng vào lệnh cao
-        "RR_RATIO": 2.0,             # Tỷ lệ Lời/Lỗ an toàn
-        "SL_PERCENT": 0.018,         # Stoploss rất chặt
-        "SCORE_RANGE_OVERRIDE": 7
-    },
-
-    # ⚙️ Chiến lược 2: Rủi Ro Cao - Lợi Nhuận Đột Phá
-    "RuiRoCao_LoiNhuanDotPha": {
-        "NOTES": "Bắt nhiều sóng hơn với ngưỡng vào lệnh thấp, chấp nhận SL rộng hơn.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.3, 'ai': 0.7, 'context': 0.0}, # Tin vào AI để bắt tín hiệu sớm
-        "ENTRY_SCORE_THRESHOLD": 5.5, # Ngưỡng vào lệnh thấp để không bỏ lỡ cơ hội
-        "RR_RATIO": 2.5,             # Kỳ vọng lợi nhuận cao hơn
-        "SL_PERCENT": 0.03,          # Stoploss rộng hơn để chịu biến động
-        "SCORE_RANGE_OVERRIDE": 7
-    },
-
-    # ⚙️ Chiến lược 3: AI Thuần Túy
-    "AI_ThuanTuy": {
-        "NOTES": "Kiểm tra hiệu suất độc lập của mô hình AI.",
+    # ⚙️ MỚI: AI với rủi ro thực tế - SL 3%, RR 2
+    "AI_ThucTe_3SL_2RR": {
+        "NOTES": "AI Gốc - Thử nghiệm SL 3% và RR 2.0 để cân bằng Lợi nhuận/Rủi ro.",
         "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
-        "ENTRY_SCORE_THRESHOLD": 6.2,
-        "RR_RATIO": 2.2,
-        "SL_PERCENT": 0.025,
+        "ENTRY_SCORE_THRESHOLD": 6.5,  # Ngưỡng vào lệnh hợp lý
+        "RR_RATIO": 2.0,               # Tỷ lệ RR tiêu chuẩn
+        "SL_PERCENT": 0.03,            # << SL 3%, một con số thực tế hơn nhiều
         "SCORE_RANGE_OVERRIDE": 7
     },
 
-    # ⚙️ Chiến lược 4: PTKT Cổ Điển
-    "PTKT_CoDien": {
-        "NOTES": "Kiểm tra hiệu suất của các chỉ báo kỹ thuật truyền thống.",
-        "WEIGHTS_OVERRIDE": {'tech': 1.0, 'ai': 0.0, 'context': 0.0},
+    # ⚙️ MỚI: AI với rủi ro vừa phải - SL 5%, RR 2
+    "AI_ThucTe_5SL_2RR": {
+        "NOTES": "AI Gốc - Cho phép biến động nhiều hơn với SL 5%.",
+        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 6.5,
         "RR_RATIO": 2.0,
-        "SL_PERCENT": 0.02,
+        "SL_PERCENT": 0.05,            # << SL 5%, phù hợp cho swing trade ngắn
         "SCORE_RANGE_OVERRIDE": 7
     },
 
-    # ⚙️ Chiến lược 5: Hybrid Cân Bằng
-    "Hybrid_CanBang": {
-        "NOTES": "Kết hợp hài hòa giữa AI và PTKT, tìm điểm vào lệnh tối ưu.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.5, 'ai': 0.5, 'context': 0.0},
-        "ENTRY_SCORE_THRESHOLD": 6.0,
-        "RR_RATIO": 2.1,
-        "SL_PERCENT": 0.022,
+    # ⚙️ MỚI: AI với rủi ro cao hơn - SL 8%, RR 1.8
+    "AI_ThucTe_8SL_1.8RR": {
+        "NOTES": "AI Gốc - SL rộng (8%) để bắt các con sóng lớn, RR giảm nhẹ.",
+        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
+        "ENTRY_SCORE_THRESHOLD": 6.0, # Giảm ngưỡng để bắt nhiều tín hiệu hơn
+        "RR_RATIO": 1.8,
+        "SL_PERCENT": 0.08,            # << SL 8%, chấp nhận rủi ro cao hơn
         "SCORE_RANGE_OVERRIDE": 7
+    },
+    
+    # Giữ lại chiến lược AI 20% SL để so sánh
+    "AI_Goc_20SL": {
+        "NOTES": "Chiến lược AI gốc với SL 20% để làm cơ sở so sánh.",
+        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
+        "ENTRY_SCORE_THRESHOLD": 7,
+        "RR_RATIO": 1,
+        "SL_PERCENT": 0.2,
+        "SCORE_RANGE_OVERRIDE": 8
     }
 }
-
 # --- Các hằng số Backtest ---
 SYMBOLS_TO_TEST = ["ETHUSDT", "AVAXUSDT", "INJUSDT", "LINKUSDT", "SUIUSDT", "FETUSDT", "TAOUSDT"]
 INTERVALS_TO_TEST = ["1h", "4h", "1d"]

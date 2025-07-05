@@ -9,9 +9,9 @@ from signal_logic import check_signal
 # ==============================================================================
 FULL_CONFIG = {
     "NOTES": "v6.1 - Flexible Weights",
-    "SCORE_RANGE": 8.0,
-    "WEIGHTS": { 'tech': 0.45, 'context': 0.25, 'ai': 0.30 },
-    "DECISION_THRESHOLDS": { "buy": 6.5, "sell": 3.5 },
+    "SCORE_RANGE": 7.0,
+    "WEIGHTS": { 'tech': 0.4, 'context': 0.2, 'ai': 0.4 },
+    "DECISION_THRESHOLDS": { "buy": 6.0, "sell": 4.0 },
     "TRADE_PLAN_RULES": {
         "default_rr_ratio": 1.8, "high_score_rr_ratio": 2.2,
         "critical_score_rr_ratio": 2.8, "default_sl_percent": 0.03
@@ -68,7 +68,9 @@ def get_live_context_and_ai(symbol: str, interval: str, config: dict) -> Tuple[D
         total_score = sum(news_level_score.get(n.get('level', 'INFO'), 0.1) * get_news_sentiment(n.get('title', ''), config) for n in processed_news)
         news_factor = total_score
     news_factor = max(-3.0, min(news_factor, 3.0))
-    final_context = {"market_trend": market_trend, "news_factor": news_factor}
+    final_context = market_context.copy() # Bắt đầu bằng cách sao chép TẤT CẢ dữ liệu gốc
+    final_context["market_trend"] = market_trend # Thêm kết quả phân tích trend vào
+    final_context["news_factor"] = news_factor   # Thêm điểm tin tức vào
     ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
     return final_context, ai_data
 
