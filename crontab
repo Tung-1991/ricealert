@@ -15,6 +15,7 @@
 2,32 * * * * /root/ricealert/venv/bin/python /root/ricealert/ricenews/rice_news.py >> /root/ricealert/log/news.log 2>&1
 4,34 * * * * /root/ricealert/venv/bin/python /root/ricealert/main.py >> /root/ricealert/log/main.log 2>&1
 5,35 * * * * /root/ricealert/venv/bin/python /root/ricealert/my_precious.py >> /root/ricealert/log/my_precious.log 2>&1
+*/15 * * * * /root/ricealert/venv/bin/python /root/ricealert/backtest/paper_trader.py >> /root/ricealert/paper.log 2>&1
 
 # ==============================================================================
 #  TÁC VỤ PHỤ TRỢ

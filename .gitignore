@@ -38,3 +38,4 @@ ricealert-*.json
 #backtest
 backtest/data_cache/
 backtest/backtest_results
+backtest/paper_data/
