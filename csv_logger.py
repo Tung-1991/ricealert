@@ -8,8 +8,15 @@ VN_TZ = timezone(timedelta(hours=7))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "output", "signal_log.csv")
 
-def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp, recommendation: dict):
+def log_to_csv(symbol, interval, price, timestamp, recommendation: dict):
     os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
+
+    # Tự động trích xuất thông tin từ recommendation
+    signal_details = recommendation.get("signal_details", {})
+    level = signal_details.get("level", "HOLD")
+    tag = signal_details.get("tag", "unknown")
+
+    trade_plan = recommendation.get("combined_trade_plan", {})
 
     entry = trade_plan.get("entry", 0)
     tp    = trade_plan.get("tp", 0)
@@ -19,30 +26,33 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp, reco
     entry_exit_pnl = "0/0/0"
     status = "No"
 
-    # SỬA ĐỔI: Ghi lại các cột điểm mới và đổi tên cột "ai_score"
+    # Tính toán ai_skew và cập nhật tên cột
+    ai_pred = recommendation.get("ai_prediction", {})
+    prob_buy = ai_pred.get("prob_buy", 50.0)
+    prob_sell = ai_pred.get("prob_sell", 0.0)
+    ai_skew = (prob_buy - prob_sell) / 100.0
+
     log_entry = {
         "timestamp": timestamp,
         "symbol": symbol,
         "interval": interval,
-        "signal": signal,
+        "signal": level,
         "tag": tag,
         "price": price,
-        "trade_plan": trade_plan_str,
+        # --- THAY ĐỔI TÊN TRƯỜNG TẠI ĐÂY ---
+        "advisor_trade_plan": trade_plan_str, 
+        # --- HẾT THAY ĐỔI ---
         "entry_exit_pnl": entry_exit_pnl,
         "status": status,
         "money": 0,
         "advisor_score": recommendation.get("final_score", 0),
         "tech_score": recommendation.get("tech_score", 0),
-        "ai_pct_change": recommendation.get("ai_pct_change", 0), # Đổi tên từ ai_score
+        "ai_skew": round(ai_skew, 4),
         "market_trend": recommendation.get("market_trend", "NEUTRAL"),
         "news_factor": recommendation.get("news_factor", 0),
     }
 
     df_new = pd.DataFrame([log_entry])
-
-    # Đảm bảo các giá trị số được định dạng đúng trong Google Sheet
-    #for col in ['price', 'advisor_score', 'tech_score', 'ai_pct_change']:
-    #    df_new[col] = df_new[col].astype(str).str.replace('.', ',')
 
     if os.path.exists(CSV_PATH):
         try:
@@ -54,8 +64,9 @@ def log_to_csv(symbol, interval, signal, tag, price, trade_plan, timestamp, reco
     else:
         df_combined = df_new
 
-    # Đảm bảo các cột mới được thêm vào nếu file cũ chưa có
-    header = ["timestamp", "symbol", "interval", "signal", "tag", "price", "trade_plan", "entry_exit_pnl", "status", "money", "advisor_score", "tech_score", "ai_pct_change", "market_trend", "news_factor"]
+    # --- THAY ĐỔI TÊN TRƯỜNG TRONG HEADER TẠI ĐÂY ---
+    header = ["timestamp", "symbol", "interval", "signal", "tag", "price", "advisor_trade_plan", "entry_exit_pnl", "status", "money", "advisor_score", "tech_score", "ai_skew", "market_trend", "news_factor"]
+    # --- HẾT THAY ĐỔI ---
     df_combined = df_combined.reindex(columns=header)
 
     df_combined.to_csv(CSV_PATH, index=False)

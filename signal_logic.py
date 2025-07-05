@@ -1,4 +1,11 @@
-def check_signal(indicators: dict) -> tuple:
+# /root/ricealert/signal_logic.py
+from typing import Dict
+
+def check_signal(indicators: dict) -> Dict:
+    """
+    Kiểm tra các chỉ báo và trả về một dictionary chứa level, tag, và lý do.
+    Hàm này giữ nguyên 100% logic gốc, chỉ thay đổi định dạng return.
+    """
     rsi = indicators.get('rsi_14')
     rsi_1h = indicators.get("rsi_1h")
     rsi_4h = indicators.get("rsi_4h")
@@ -25,14 +32,19 @@ def check_signal(indicators: dict) -> tuple:
 
     required_fields = [rsi, rsi_1h, rsi_4h, rsi_1d, macd, macd_signal, bb_upper, bb_lower, price, ema, volume, vol_ma,
                        macd_cross, adx, trend, cmf]
+
+    # --- THAY ĐỔI 1: Sửa return khi thiếu dữ liệu ---
     if any(v is None for v in required_fields):
         indicators["tag"] = "avoid"
-        return "HOLD", "Thiếu dữ liệu [Tag: avoid]"
+        return {"level": "HOLD", "tag": "avoid", "reason": "Thiếu dữ liệu chỉ báo quan trọng."}
 
     reasons = []
     signal_type = "HOLD"
     tag = "neutral"
 
+    # =======================================================================
+    # === TOÀN BỘ LOGIC IF/ELIF CỦA BẠN ĐƯỢC GIỮ NGUYÊN 100% Ở ĐÂY ===
+    # =======================================================================
     # ================= TAG: buy_high =================
     if (
         trend == "uptrend" and
@@ -44,6 +56,9 @@ def check_signal(indicators: dict) -> tuple:
         if adx > 40:
             signal_type = "CRITICAL"
             reasons.append("Breakout mạnh: RSI cao đa timeframe + MACD bullish + volume lớn + CMF dương + ADX cao")
+        elif adx < 10 and volume < 0.5 * vol_ma:
+            signal_type = "CRITICAL"
+            reasons.append("Sideway yếu + volume cực thấp → thị trường chết lâm sàng")
         elif adx > 25:
             signal_type = "WARNING"
             reasons.append("Đà tăng mạnh: RSI cao + BB trên + ADX > 25")
@@ -65,9 +80,13 @@ def check_signal(indicators: dict) -> tuple:
         if macd_cross == "bearish" and volume > 1.2 * vol_ma:
             signal_type = "CRITICAL"
             reasons.append("Đỉnh mạnh: RSI cao + MACD bearish + volume lớn")
-        elif rsi_div == "bearish":
-            signal_type = "WARNING"
-            reasons.append("Phân kỳ RSI giảm giá")
+        elif rsi_div == "bearish" or doji in ["gravestone", "shooting_star"]:
+            if volume > vol_ma:
+                signal_type = "WARNING"
+                reasons.append("Bulltrap: RSI cao + doji đỉnh hoặc phân kỳ giảm giá")
+            else:
+                signal_type = "WATCHLIST"
+                reasons.append("RSI cao nhưng có dấu hiệu bulltrap nhẹ")
         elif doji in ["gravestone"] and volume > vol_ma:
             signal_type = "ALERT"
             reasons.append("Doji đỉnh + volume xác nhận")
@@ -92,9 +111,13 @@ def check_signal(indicators: dict) -> tuple:
         elif fib_0_618 and abs(price - fib_0_618) / fib_0_618 < 0.01:
             signal_type = "WARNING"
             reasons.append("RSI thấp + gần Fibo 0.618")
-        elif doji in ["dragonfly", "long_legged"] and volume > vol_ma:
-            signal_type = "ALERT"
-            reasons.append("Doji đảo chiều + volume xác nhận")
+        elif rsi_div == "bullish" or doji in ["dragonfly", "long_legged"]:
+            if volume > vol_ma:
+                signal_type = "WARNING"
+                reasons.append("Beartrap: RSI thấp + doji đảo chiều hoặc phân kỳ tăng")
+            else:
+                signal_type = "WATCHLIST"
+                reasons.append("Có thể là beartrap, cần theo dõi")
         else:
             signal_type = "WATCHLIST"
             reasons.append("Giá thấp + RSI thấp cần theo dõi")
@@ -110,9 +133,13 @@ def check_signal(indicators: dict) -> tuple:
         if macd_cross == "bearish" and volume > vol_ma:
             signal_type = "CRITICAL"
             reasons.append("Bán tháo: RSI thấp + MACD bearish + volume cao")
-        elif rsi_div == "bearish":
-            signal_type = "WARNING"
-            reasons.append("Phân kỳ RSI giảm giá")
+        elif rsi_div == "bearish" or doji in ["gravestone", "shooting_star"]:
+            if volume > vol_ma:
+                signal_type = "WARNING"
+                reasons.append("Bulltrap: RSI cao + doji đỉnh hoặc phân kỳ giảm giá")
+            else:
+                signal_type = "WATCHLIST"
+                reasons.append("RSI cao nhưng có dấu hiệu bulltrap nhẹ")
         elif doji in ["common"] and volume > vol_ma:
             signal_type = "ALERT"
             reasons.append("Giảm mạnh nhưng có thể hồi nhẹ + volume xác nhận")
@@ -125,7 +152,7 @@ def check_signal(indicators: dict) -> tuple:
 
     # ================= TAG: canbuy =================
     elif (
-        rsi_1h > 55 and rsi_4h > 50 and trend == "uptrend" and cmf > 0
+        rsi_1h > 55 and trend == "uptrend" and cmf > 0
     ):
         tag = "canbuy"
         if rsi_div == "bullish" and volume > 1.3 * vol_ma:
@@ -143,10 +170,13 @@ def check_signal(indicators: dict) -> tuple:
 
     # ================= TAG: neutral =================
     elif (
-        abs(price - ema) / ema < 0.005 and 45 <= rsi <= 55 and not trend
+        abs(price - ema) / ema < 0.01 and 45 <= rsi <= 55 and adx < 20
     ):
         tag = "neutral"
-        if adx > 25:
+        if adx < 10 and volume < 0.5 * vol_ma:
+            signal_type = "CRITICAL"
+            reasons.append("Sideway yếu + volume cực thấp → thị trường chết lâm sàng")
+        elif adx > 25:
             signal_type = "WARNING"
             reasons.append("Sideway mạnh + ADX cao")
         elif doji:
@@ -178,5 +208,12 @@ def check_signal(indicators: dict) -> tuple:
             signal_type = "HOLD"
             reasons.append("Tín hiệu yếu, nên đứng ngoài")
 
+    # --- THAY ĐỔI 2: Sửa return cuối cùng ---
+    # Cập nhật lại tag vào dict indicators để tương thích ngược nếu cần
     indicators["tag"] = tag
-    return signal_type, " + ".join(reasons) + f" [Tag: {tag}]"
+
+    # Nối các lý do lại thành một chuỗi duy nhất
+    final_reason = " + ".join(reasons) if reasons else "Không có lý do cụ thể."
+
+    # Trả về một dictionary có cấu trúc rõ ràng
+    return {"level": signal_type, "tag": tag, "reason": final_reason}

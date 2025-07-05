@@ -170,37 +170,40 @@ def should_send_overview(state: dict) -> bool:
 # ==============================================================================
 # CORE LOGIC & ANALYSIS
 # ==============================================================================
+# Trong file ml_report.py
+
 def classify_level(prob_buy: float, prob_sell: float, pct: float, interval: str) -> str:
     """
-    Logic phân loại thông minh hơn, có khả năng thích ứng với từng khung thời gian.
+    Logic phân loại được làm chặt hơn với "vùng chết" (Dead Zone) lớn hơn
+    để bỏ qua các tín hiệu nhiễu không đáng kể.
     """
-    # Ngưỡng linh hoạt theo khung thời gian
-    # Khung 1h nhạy hơn, pct nhỏ đã là HOLD. Khung 1d cần pct lớn hơn mới coi là HOLD.
+    # Ngưỡng đã được điều chỉnh theo đề xuất của bạn, mạnh tay hơn.
     THRESHOLDS = {
-        "1h": {"hold_pct": 0.3, "strong_prob": 78},
-        "4h": {"hold_pct": 0.6, "strong_prob": 75},
-        "1d": {"hold_pct": 1.0, "strong_prob": 70}
+        "1h": {"strong_prob": 78, "dead_zone_pct": 1.0}, # Vùng chết 1.0% cho 1h
+        "4h": {"strong_prob": 75, "dead_zone_pct": 1.5}, # Vùng chết 1.5% cho 4h
+        "1d": {"strong_prob": 70, "dead_zone_pct": 2.5}  # Vùng chết 2.5% cho 1d
     }
-    # Lấy ngưỡng cho interval hiện tại, mặc định là 4h nếu không tìm thấy
     thresholds = THRESHOLDS.get(interval, THRESHOLDS["4h"])
 
-    # Tín hiệu có độ chắc chắn cao (sử dụng strong_prob linh hoạt)
+    # === BƯỚC 1: KIỂM TRA "VÙNG CHẾT" TRƯỚC TIÊN ===
+    # Nếu dự đoán thay đổi nằm trong khoảng (-1.2%, +1.2%) cho khung 1h, coi là HOLD.
+    if abs(pct) < thresholds['dead_zone_pct']:
+        return "HOLD"
+
+    # === BƯỚC 2: KIỂM TRA CÁC TÍN HIỆU MẠNH ===
     if prob_buy > thresholds['strong_prob']: return "STRONG_BUY"
     if prob_sell > thresholds['strong_prob']: return "PANIC_SELL"
 
-    # Các tín hiệu tiêu chuẩn
+    # === BƯỚC 3: KIỂM TRA CÁC TÍN HIỆU TIÊU CHUẨN ===
     if prob_buy > 65: return "BUY"
     if prob_sell > 65: return "SELL"
-
-    # Tín hiệu sideway rõ ràng (sử dụng hold_pct linh hoạt)
-    if abs(prob_buy - prob_sell) < 10 and abs(pct) < thresholds['hold_pct']:
-        return "HOLD"
-
-    # Tín hiệu yếu
+    
+    # === BƯỚC 4: KIỂM TRA TÍN HIỆU YẾU ===
     if prob_buy > 55: return "WEAK_BUY"
     if prob_sell > 55: return "WEAK_SELL"
 
-    # Mặc định là TRÁNH nếu không rơi vào các trường hợp trên
+    # === BƯỚC 5: MẶC ĐỊNH LÀ TRÁNH ===
+    # Chỉ khi dự đoán đủ lớn nhưng xác suất lại thấp thì mới là AVOID.
     return "AVOID"
 
 def analyze_single_interval(symbol: str, interval: str) -> dict or None:

@@ -20,7 +20,7 @@
     "hour",
     "day_of_week"
   ],
-  "trained_at": "2025-07-03T20:10:22.683363+00:00",
+  "trained_at": "2025-07-05T05:38:04.799000+00:00",
   "label_threshold": 0.015,
   "future_offset": 1
 }
