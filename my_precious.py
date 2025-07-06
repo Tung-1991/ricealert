@@ -177,7 +177,7 @@ def main():
 
             # Tính toán các thông tin đặc thù của my_precious
             real_entry = trade.get("real_entry") or parse_trade_plan(trade["trade_plan"])["entry"]
-            price_now = full_indicators_from_advisor.get('price', 0)
+            price_now = full_indicators_from_advisor.get('entry_price', full_indicators_from_advisor.get('price', 0))
 
             # --- LOGIC MỚI: TÍNH TOÁN ĐIỂM ĐIỀU CHỈNH PNL ---
             pnl = round((price_now - real_entry) / real_entry * 100, 2) if real_entry else 0
