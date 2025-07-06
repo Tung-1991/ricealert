@@ -1,4 +1,4 @@
-# main.py (PHIÊN BẢN 6.0 - HOÀN CHỈNH CUỐI CÙNG)
+# main.py (PHIÊN BẢN 6.0 - HOÀN CHỈNH CUỐI CÙNG VỚI PORTFOLIO)
 
 # -*- coding: utf-8 -*-
 from dotenv import load_dotenv
@@ -8,6 +8,7 @@ import os
 import time
 import json
 from datetime import datetime, timedelta, timezone
+# BỔ SUNG: Import get_account_balances
 from portfolio import get_account_balances
 from indicator import get_price_data, calculate_indicators
 from signal_logic import check_signal
@@ -103,11 +104,12 @@ def send_summary_report(report_lines: list[str]):
     chunks = []
     current_chunk = ""
     for line in full_content.split('\n'):
-        if len(current_chunk) + len(line) + 1 > 1950:
+        # +1 cho ký tự xuống dòng
+        if len(current_chunk) + len(line) + 1 > 1950: 
             chunks.append(current_chunk)
             current_chunk = ""
         current_chunk += line + "\n"
-    
+
     if current_chunk:
         chunks.append(current_chunk)
 
@@ -118,6 +120,30 @@ def send_summary_report(report_lines: list[str]):
         time.sleep(2)
 
 # --- Portfolio & Report Rendering ---
+# BỔ SUNG: Hàm format_portfolio_data
+def format_portfolio_data(balances: list[dict]) -> list[str]:
+    """Formats portfolio data into a list of strings for the report."""
+    portfolio_lines = ["\n--- 💰 **TỔNG QUAN PORTFOLIO** 💰 ---"]
+    total_value = 0.0
+    
+    # Sort balances to put TOTAL at the end if it exists
+    sorted_balances = sorted(balances, key=lambda x: (x.get("asset") != "TOTAL", -x.get("value", 0)))
+
+    for item in sorted_balances:
+        asset = item.get("asset", "N/A")
+        amount = item.get("amount", "N/A")
+        value = item.get("value", 0.0)
+        source = item.get("source", "N/A")
+
+        if asset == "TOTAL":
+            portfolio_lines.append(f"**Tổng Giá Trị Tài Khoản:** `{value:,.2f} USDT`")
+        else:
+            portfolio_lines.append(f"• `{asset}`: `{amount}` ({source}) → `{value:,.2f} USDT`")
+            total_value += value # Accumulate total here if TOTAL isn't present in input, or for sanity check
+
+    return portfolio_lines
+
+
 def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
     """Tạo định dạng chi tiết cho một symbol, lấy lại format từ phiên bản cũ."""
     parts: list[str] = []
@@ -172,31 +198,37 @@ def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
     return "\n\n".join(parts)
 
 
-def format_daily_summary(symbols: list, all_indicators: dict, now_str: str) -> list[str]:
-    """Tạo một danh sách báo cáo với ID đầy đủ và không dùng code block."""
+def format_daily_summary(symbols: list, all_indicators: dict, now_str: str, portfolio_balances: list[dict]) -> list[str]:
+    """Tạo một danh sách báo cáo với ID đầy đủ và không dùng code block, bao gồm portfolio."""
     report_lines = []
     level_icons = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "HOLD": "⏸️"}
+
+    # BỔ SUNG: Thêm phần tổng quan Portfolio vào đầu báo cáo
+    if portfolio_balances:
+        report_lines.extend(format_portfolio_data(portfolio_balances))
+        report_lines.append("\n" + "="*50 + "\n") # Dòng phân cách Portfolio và Tín hiệu
+
 
     for symbol in symbols:
         symbol_data = all_indicators.get(symbol, {})
         if not symbol_data: continue
-        
+
         # Thêm dòng tên symbol để phân tách
         report_lines.append(f"\n**--- {symbol.upper()} ---**")
 
         for interval in ["1h", "4h", "1d"]:
             ind = symbol_data.get(interval, {})
             if not ind: continue
-            
+
             # Trích xuất dữ liệu
             price = ind.get('price', 0)
             signal_details = check_signal(ind)
             level = signal_details.get("level", "HOLD")
             tag = signal_details.get("tag", "")
             score = ind.get("advisor_score")
-            
+
             icon = level_icons.get(level, "ℹ️")
-            
+
             # === THAY ĐỔI CHÍNH ===
             # Tạo lại ID đầy đủ và đưa vào dòng báo cáo
             id_str = f"**{now_str}  {symbol.upper()}  {interval}**"
@@ -279,7 +311,7 @@ def main() -> None:
 
                 price = ind.get('price', 0)
                 score = ind.get('advisor_score', 0)
-                detail_msg = f"   - Khung {interval}: Giá={price:.4f}, Score={score:.1f}"
+                detail_msg = f"    - Khung {interval}: Giá={price:.4f}, Score={score:.1f}"
                 print(detail_msg); log_output_lines.append(detail_msg)
 
                 signal_details = check_signal(ind)
@@ -290,7 +322,7 @@ def main() -> None:
                     cd_minutes = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
                     is_cooldown_passed = not last_time or (now - last_time >= timedelta(minutes=cd_minutes))
                     if is_cooldown_passed:
-                        c1_msg = f"   => 🔔 TÍN HIỆU CỬA 1: {signal} | Score: {score:.1f}"
+                        c1_msg = f"    => 🔔 TÍN HIỆU CỬA 1: {signal} | Score: {score:.1f}"
                         print(c1_msg); log_output_lines.append(c1_msg)
                         general_cooldowns[cd_key] = now
                         send_intervals_general.append(interval)
@@ -307,7 +339,7 @@ def main() -> None:
                 title = f"[{symbol.upper()}] **{highest}** từ khung {', '.join(send_intervals_general)}"
                 ids = "\n".join([f"🆔 ID: {now_str}  {symbol.upper()}  {iv}" for iv in send_intervals_general])
                 send_discord_alert(f"{title}\n{ids}\n\n{report_content}")
-                discord_msg = f"   => 📨 Đã gửi cảnh báo Cửa 1 qua Discord."
+                discord_msg = f"    => 📨 Đã gửi cảnh báo Cửa 1 qua Discord."
                 print(discord_msg); log_output_lines.append(discord_msg)
                 time.sleep(3)
 
@@ -323,7 +355,7 @@ def main() -> None:
                     last_score = last_state.get("last_alert_score", 5.0)
                     last_time_str = last_state.get("last_alert_timestamp")
 
-                    c2_check_msg = f"   - Cửa 2 ({interval}): Đang check. Score hiện tại={final_score:.2f}, Score lần trước={last_score:.2f}"
+                    c2_check_msg = f"    - Cửa 2 ({interval}): Đang check. Score hiện tại={final_score:.2f}, Score lần trước={last_score:.2f}"
                     print(c2_check_msg); log_output_lines.append(c2_check_msg)
 
                     is_significant_change = abs(final_score - last_score) > ADVISOR_CONFIG["SCORE_CHANGE_THRESHOLD"]
@@ -334,7 +366,7 @@ def main() -> None:
                             is_cooldown_passed = False
 
                     if is_significant_change or is_cooldown_passed:
-                        c2_msg = f"   => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})" if is_significant_change else f"   => ⏰ TÍN HIỆU CỬA 2: Hết cooldown"
+                        c2_msg = f"    => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})" if is_significant_change else f"    => ⏰ TÍN HIỆU CỬA 2: Hết cooldown"
                         print(c2_msg); log_output_lines.append(c2_msg)
                         send_opportunity_alert(decision_data)
                         log_to_csv(symbol=symbol, interval=interval, price=decision_data.get('full_indicators', {}).get('price', 0), timestamp=now_str, recommendation=decision_data)
@@ -349,12 +381,21 @@ def main() -> None:
 
     # --- Xử lý gửi báo cáo tóm tắt hàng ngày ---
     if force_daily:
-        summary_lines = format_daily_summary(symbols, all_indicators, now_str)
+        # LẤY DỮ LIỆU PORTFOLIO TẠI ĐÂY
+        msg_portfolio = "\nĐang lấy dữ liệu Portfolio..."
+        print(msg_portfolio); log_output_lines.append(msg_portfolio)
+        portfolio_balances = get_account_balances()
+        if not portfolio_balances:
+            err_msg = "⚠️ Không thể lấy dữ liệu portfolio. Báo cáo sẽ không bao gồm portfolio."
+            print(err_msg); log_output_lines.append(err_msg)
+        
+        # TRUYỀN DỮ LIỆU PORTFOLIO VÀO HÀM format_daily_summary
+        summary_lines = format_daily_summary(symbols, all_indicators, now_str, portfolio_balances)
         if summary_lines:
             send_summary_report(summary_lines)
 
         general_cooldowns["last_general_report_timestamp"] = now.timestamp()
-        log_output_lines.append("\nĐã gửi Báo cáo tóm tắt hàng ngày.")
+        log_output_lines.append("\nĐã gửi Báo cáo tóm tắt hàng ngày (bao gồm Portfolio).")
 
     # --- Lưu lại toàn bộ state và ghi log---
     msg_save = "\n[3/3] Đang lưu trạng thái và ghi log..."

@@ -34,7 +34,6 @@ ricenews/market_context_cache.json
 # === Google Service Account Key (Security!) ===
 ricealert-*.json
 
-
 #backtest
 backtest/data_cache/
 backtest/backtest_results

@@ -237,6 +237,10 @@ def main():
             # Logic kiểm tra thay đổi và gửi alert
             prev = advisor_map.get(trade_id, {})
             
+            # Cờ xác định đây có phải là lần đầu tiên lệnh được xử lý hay không
+            # BỔ SUNG: Cơ chế luôn gửi alert cho lệnh mới
+            is_first_evaluation = trade_id not in advisor_map
+
             # Tính toán thay đổi PnL và Score so với lần alert gần nhất
             prev_pnl_percent = prev.get("pnl_percent", 0)
             actual_pnl_change_value = abs(prev_pnl_percent - pnl)
@@ -247,25 +251,30 @@ def main():
             pnl_change_significant = actual_pnl_change_value > PNL_ALERT_THRESHOLD
             score_change_significant = actual_score_change_value > SCORE_ALERT_THRESHOLD
 
-            if pnl_change_significant or score_change_significant:
+            # Gửi alert nếu là lần đánh giá đầu tiên HOẶC có thay đổi đáng kể
+            if is_first_evaluation or pnl_change_significant or score_change_significant:
+                # TRUYỀN THÊM 'prev_data' VÀO report_payload để hàm build_alert_message sử dụng
+                report_payload["prev_data"] = prev 
                 alert_msg = build_alert_message(report_payload)
                 send_discord_alert(alert_msg)
-                log_to_txt(f"SEND alert for {symbol} ({interval}) - Level: {level_key} | Score: {final_score:.1f} (Base: {base_score:.1f}, PnL Adj: {pnl_adjustment_score:+.2f})")
+                log_to_txt(f"SEND alert for {symbol} ({interval}) - Level: {level_key} | Score: {final_score:.1f} (Base: {base_score:.1f}, PnL Adj: {pnl_adjustment_score:+.2f}){'(First Eval)' if is_first_evaluation else ''}")
             else: # Dòng debug mới để hiển thị lý do không gửi alert
                 reasons_not_sent = []
-                if not pnl_change_significant:
-                    reasons_not_sent.append(f"PnL: {actual_pnl_change_value:.2f}% < {PNL_ALERT_THRESHOLD:.1f}%")
-                if not score_change_significant:
-                    reasons_not_sent.append(f"Score: {actual_score_change_value:.2f} < {SCORE_ALERT_THRESHOLD:.1f}")
+                if not is_first_evaluation: # Chỉ hiển thị lý do này nếu không phải lần đầu
+                    if not pnl_change_significant:
+                        reasons_not_sent.append(f"PnL: {actual_pnl_change_value:.2f}% < {PNL_ALERT_THRESHOLD:.1f}%")
+                    if not score_change_significant:
+                        reasons_not_sent.append(f"Score: {actual_score_change_value:.2f} < {SCORE_ALERT_THRESHOLD:.1f}")
                 
-                reason_str = ", ".join(reasons_not_sent)
+                reason_str = ", ".join(reasons_not_sent) if reasons_not_sent else "No significant change and not first evaluation."
                 
                 print(f"DEBUG: Không gửi alert cho {symbol}. Lý do: [{reason_str}]")
                 log_to_txt(f"DEBUG: Không gửi alert cho {symbol}. Lý do: [{reason_str}]")
 
 
             # Cập nhật advisor_map với cả base_score và final_score
-            advisor_map[trade_id] = {"id": trade_id, "pnl_percent": pnl, "final_score": final_score, "base_score": base_score}
+            # Luôn cập nhật level_key hiện tại vào advisor_map để sử dụng cho lần so sánh tiếp theo
+            advisor_map[trade_id] = {"id": trade_id, "pnl_percent": pnl, "final_score": final_score, "base_score": base_score, "level_key": level_key}
 
         except Exception as e:
             print(f"DEBUG: Lỗi nghiêm trọng khi xử lý lệnh {trade.get('id', 'N/A')} - {symbol}: {e}") # Dòng debug
@@ -451,16 +460,28 @@ def build_alert_message(payload: dict) -> str:
     trade = payload["trade"]
     pnl = payload["pnl"]
     advisor_decision = payload["advisor_decision"]
-    level_key = payload["level_key"]
+    level_key = payload["level_key"] # Cấp độ hiện tại
     all_indicators = payload["all_indicators"]
 
+    # Lấy dữ liệu trước đó từ payload
+    prev_data = payload.get("prev_data", {}) 
+    # Lấy level key từ lần đánh giá trước. Nếu không có (lệnh mới), gán là "NEW".
+    prev_level_key = prev_data.get("level_key", "NEW")
+    
     symbol, interval, trade_id = trade['symbol'], trade['interval'], trade['id']
     real_entry = payload["real_entry"]
     initial_investment_usd = trade.get('amount', 1000) # Lấy số vốn ban đầu của lệnh
     pnl_usd = round(initial_investment_usd * pnl / 100, 1)
     current_value_usd = initial_investment_usd + pnl_usd # Giá trị hiện tại của khoản đầu tư
 
-    title_block = f"{ICON.get(level_key, ' ')} [{level_key.replace('_', ' ')}] Đánh giá lệnh: {symbol} ({interval})"
+    # --- CẬP NHẬT TITLE BLOCK ĐỂ HIỂN THỊ TRẠNG THÁI TRƯỚC ĐÓ / NEW ---
+    if prev_level_key == "NEW":
+        title_block = f"{ICON.get(level_key, ' ')} [NEW → {level_key.replace('_', ' ')}] Đánh giá lệnh: {symbol} ({interval})"
+    else:
+        # Lấy ICON cho trạng thái trước đó nếu có, nếu không thì là rỗng
+        prev_icon = ICON.get(prev_level_key, '')
+        title_block = f"{prev_icon} [{prev_level_key.replace('_', ' ')} → {level_key.replace('_', ' ')}] Đánh giá lệnh: {symbol} ({interval})"
+
 
     info_block = (f"📌 ID: {trade_id}  {symbol}  {interval}\n"
                   f"📆 In time: {trade.get('in_time')}  |  Đã giữ: {calc_held_hours(trade.get('in_time'))} h  |  RealEntry: {format_price(real_entry)}\n"

@@ -26,7 +26,7 @@ import pytz
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt # Import matplotlib để vẽ biểu đồ
-import ta # Import thư viện ta cho các chỉ báo kỹ thuật
+# import ta # KHÔNG CẦN IMPORT TA Ở ĐÂY, ĐÃ CÓ TRONG INDICATOR.PY
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple
@@ -59,7 +59,8 @@ TACTICS_LAB = {
 # --- Cài đặt chung & Báo cáo ---
 INITIAL_CAPITAL = 10000.0
 SYMBOLS_TO_SCAN = ["ETHUSDT", "AVAXUSDT", "INJUSDT", "LINKUSDT", "SUIUSDT", "FETUSDT", "TAOUSDT"]
-INTERVALS_TO_SCAN = ["1h", "4h"]
+INTERVALS_TO_SCAN = ["1h", "4h"] # Các interval để quét lệnh mới
+ALL_TIME_FRAMES = ["1h", "4h", "1d"] # Tất cả các interval để tính chỉ báo và snapshot thị trường
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 PSYCHOLOGY_PNL_THRESHOLD_PERCENT = -5.0 # Ngưỡng "sợ hãi" chung cho toàn danh mục
 
@@ -321,12 +322,11 @@ def run_paper_trade_session():
     all_indicators = {}
     # Luôn lấy dữ liệu BTC trên 1D và 4H cho Market Snapshot
     all_symbols_to_fetch = SYMBOLS_TO_SCAN + ["BTCUSDT"]
-    # Luôn lấy 1h, 4h cho altcoins và 1d, 4h cho BTC
-    all_intervals_to_fetch = list(set(INTERVALS_TO_SCAN + ["1h", "4h", "1d"]))
-
+    # Luôn lấy 1h, 4h, 1d cho tất cả các symbol để đảm bảo đủ dữ liệu cho Trade Advisor và Market Snapshot
+    
     for symbol in all_symbols_to_fetch:
         all_indicators[symbol] = {}
-        for interval in all_intervals_to_fetch:
+        for interval in ALL_TIME_FRAMES: # Sử dụng ALL_TIME_FRAMES
             try:
                 df = get_price_data(symbol, interval, limit=200)
                 # calculate_indicators đã tự xử lý trường hợp thiếu dữ liệu và trả về dict mặc định
@@ -337,7 +337,22 @@ def run_paper_trade_session():
             except Exception as e:
                 log_message(f"❌ Lỗi khi tính chỉ báo cho {symbol}-{interval}: {e}")
                 # Đảm bảo vẫn có entry trống để tránh lỗi KeyError sau này
-                all_indicators[symbol][interval] = {"price": 0, "closed_candle_price": 0}
+                all_indicators[symbol][interval] = {"price": 0, "closed_candle_price": 0, "rsi_14": 50.0, "trend": "sideway", "adx": 20.0, "atr_percent": 1.5, "doji_type": "none", "candle_pattern": "none"}
+
+
+    # BỔ SUNG: Làm giàu dữ liệu chỉ báo với RSI đa khung thời gian cho tất cả các symbol
+    # Điều này cần được thực hiện SAU KHI TẤT CẢ all_indicators đã được populate từ get_price_data và calculate_indicators
+    log_message("\nĐang làm giàu dữ liệu chỉ báo với RSI đa khung thời gian...")
+    for sym_enrich in all_symbols_to_fetch:
+        rsi_h1 = all_indicators.get(sym_enrich, {}).get("1h", {}).get("rsi_14", 50)
+        rsi_h4 = all_indicators.get(sym_enrich, {}).get("4h", {}).get("rsi_14", 50)
+        rsi_d1 = all_indicators.get(sym_enrich, {}).get("1d", {}).get("rsi_14", 50)
+        for itv_enrich in ALL_TIME_FRAMES:
+            if all_indicators.get(sym_enrich, {}).get(itv_enrich):
+                all_indicators[sym_enrich][itv_enrich]['rsi_1h'] = rsi_h1
+                all_indicators[sym_enrich][itv_enrich]['rsi_4h'] = rsi_h4
+                all_indicators[sym_enrich][itv_enrich]['rsi_1d'] = rsi_d1
+    log_message("✅ Hoàn thành làm giàu dữ liệu chỉ báo.")
 
 
     # 2. Đóng các lệnh cũ
@@ -383,17 +398,17 @@ def run_paper_trade_session():
     btc_h4_indicators = all_indicators.get("BTCUSDT", {}).get("4h", {})
 
     # Để lấy AI score của BTC, cần chạy Trade Advisor trên BTC H4
-    # Đảm bảo các chỉ báo cần thiết cho advisor có giá trị mặc định nếu thiếu
+    # indicators_for_advisor đã được làm giàu RSI đa khung thời gian ở trên
     btc_h4_advisor_input = btc_h4_indicators.copy()
     btc_h4_advisor_input['price'] = btc_h4_indicators.get('closed_candle_price', btc_h4_indicators.get('price', 0))
 
-    # Bổ sung RSI đa khung thời gian cho BTC vào btc_h4_advisor_input
-    for tf in ["1h", "4h", "1d"]:
-        df_rsi = get_price_data("BTCUSDT", tf)
-        if not df_rsi.empty and len(df_rsi) >= 20:
-            btc_h4_advisor_input[f"rsi_{tf}"] = round(ta.momentum.rsi(df_rsi["close"], window=14).iloc[-2], 2)
-        else:
-            btc_h4_advisor_input[f"rsi_{tf}"] = 50.0
+    # KHÔNG CẦN THÊM DÒNG NÀY NỮA VÌ ĐÃ LÀM GIÀU Ở TRÊN
+    # for tf in ["1h", "4h", "1d"]:
+    #     df_rsi = get_price_data("BTCUSDT", tf)
+    #     if not df_rsi.empty and len(df_rsi) >= 20:
+    #         btc_h4_advisor_input[f"rsi_{tf}"] = round(ta.momentum.rsi(df_rsi["close"], window=14).iloc[-2], 2)
+    #     else:
+    #         btc_h4_advisor_input[f"rsi_{tf}"] = 50.0
 
     btc_h4_advisor_decision = {}
     if btc_h4_advisor_input.get('price', 0) != 0 and not btc_h4_indicators.get('reason'):
@@ -422,7 +437,7 @@ def run_paper_trade_session():
         # Bỏ qua nếu đã có lệnh mở với symbol này
         if any(t['symbol'] == symbol for t in portfolio_state['active_trades']): continue
 
-        for interval in INTERVALS_TO_SCAN:
+        for interval in INTERVALS_TO_SCAN: # Chỉ quét các interval đã cấu hình để mở lệnh
             # Lấy chỉ báo của nến ĐÃ ĐÓNG cho quyết định của Trade Advisor
             # và giá live cho entry
             current_symbol_indicators = all_indicators.get(symbol, {}).get(interval)
@@ -441,13 +456,14 @@ def run_paper_trade_session():
                 continue
 
 
+            # KHÔNG CẦN THÊM DÒNG NÀY NỮA VÌ ĐÃ LÀM GIÀU Ở TRÊN
             # Bổ sung RSI đa khung thời gian cho altcoin (rsi_1h, rsi_4h, rsi_1d)
-            for tf_alt in ["1h", "4h", "1d"]:
-                df_rsi_alt = get_price_data(symbol, tf_alt)
-                if not df_rsi_alt.empty and len(df_rsi_alt) >= 20:
-                    indicators_for_advisor[f"rsi_{tf_alt}"] = round(ta.momentum.rsi(df_rsi_alt["close"], window=14).iloc[-2], 2)
-                else:
-                    indicators_for_advisor[f"rsi_{tf_alt}"] = 50.0
+            # for tf_alt in ["1h", "4h", "1d"]:
+            #     df_rsi_alt = get_price_data(symbol, tf_alt)
+            #     if not df_rsi_alt.empty and len(df_rsi_alt) >= 20:
+            #         indicators_for_advisor[f"rsi_{tf_alt}"] = round(ta.momentum.rsi(df_rsi_alt["close"], window=14).iloc[-2], 2)
+            #     else:
+            #         indicators_for_advisor[f"rsi_{tf_alt}"] = 50.0
 
             decision = get_advisor_decision(
                 symbol, interval, indicators_for_advisor, ADVISOR_BASE_CONFIG,
@@ -514,11 +530,12 @@ def run_paper_trade_session():
                     "tp": tp_price, "sl": sl_price, "amount_usd": amount_usd,
                     "entry_time": datetime.now(VIETNAM_TZ).isoformat(), "entry_score": final_score
                 }
+                portfolio_state["capital"] -= amount_usd # Trừ vốn khi mở lệnh
                 portfolio_state["active_trades"].append(new_trade)
                 opened_this_session = True
 
                 log_icon = "🔥" if trade_type == "TREND_FOLLOW" else "💡"
-                log_message(f"{log_icon} Lệnh Mới ({selected_tactic_name}/{trade_type}): {symbol} | Score: {final_score:.2f} | Entry: {entry_price:.4f} | TP: {tp_price:.4f} | SL: {sl_price:.4f}")
+                log_message(f"{log_icon} Lệnh Mới ({selected_tactic_name}/{trade_type}): {symbol} | Score: {final_score:.2f} | Entry: {entry_price:.4f} | TP: {tp_price:.4f} | SL: {sl_price:.4f} | Amount: ${amount_usd:,.2f}")
                 break # Chỉ mở 1 lệnh mới mỗi phiên quét
         if opened_this_session: break # Chỉ mở 1 lệnh mới mỗi phiên quét
 
@@ -531,7 +548,7 @@ def run_paper_trade_session():
     # 6. Logic gửi báo cáo (Cả 2 loại)
     # 6.1 Báo cáo tổng quan hàng ngày (8h, 20h)
     if should_send_daily_summary():
-        report_content = build_daily_summary_report(portfolio_state)
+        report_content = build_daily_summary_report(portfolio_state, all_indicators) # TRUYỀN all_indicators
         send_discord_report(report_content)
 
         # Vẽ và gửi biểu đồ Equity Curve kèm báo cáo hàng ngày
@@ -539,13 +556,14 @@ def run_paper_trade_session():
         send_discord_image(EQUITY_CURVE_IMAGE_FILE, "📊 **Cập nhật Đường Vốn (Equity Curve)**")
 
         timestamps = load_json_file(TIMESTAMP_FILE, {})
-        timestamps["last_daily_report_sent"] = datetime.now().timestamp()
+        # Cập nhật timestamp theo mốc giờ đã gửi
+        timestamps["last_daily_report_time_slot"] = datetime.now(VIETNAM_TZ).strftime("%Y-%m-%d-%H")
         save_json_file(TIMESTAMP_FILE, timestamps)
 
     # 6.2 Cảnh báo biến động (Mỗi 4h nếu PnL thay đổi > 0.5%)
     should_send, pnl_change_pct = should_send_volatility_report(portfolio_state)
     if should_send:
-        report_content = build_volatility_report(portfolio_state, pnl_change_pct)
+        report_content = build_volatility_report(portfolio_state, pnl_change_pct, all_indicators) # TRUYỀN all_indicators
         send_discord_report(report_content)
         timestamps = load_json_file(TIMESTAMP_FILE, {})
         timestamps["last_volatility_report_sent"] = datetime.now().timestamp()
@@ -553,22 +571,25 @@ def run_paper_trade_session():
         save_json_file(TIMESTAMP_FILE, timestamps)
 
 # ==============================================================================
-# ========================  BÁO CÁO & ĐIỀU KIỆN GỬI =========================
+# ======================== BÁO CÁO & ĐIỀU KIỆN GỬI =========================
 # ==============================================================================
 
 def should_send_daily_summary() -> bool:
     """Kiểm tra xem có nên gửi báo cáo tóm tắt hàng ngày không."""
     now_vn = datetime.now(VIETNAM_TZ)
-    # Gửi vào 8h sáng và 8h tối
-    if now_vn.hour not in [8, 20]: return False
+    timestamps = load_json_file(TIMESTAMP_FILE, {"last_daily_report_time_slot": ""}) # Lưu dạng "YYYY-MM-DD-HH"
 
-    timestamps = load_json_file(TIMESTAMP_FILE, {"last_daily_report_sent": 0})
-    # Cooldown 11 tiếng để tránh gửi 2 lần trong cùng 1 khung giờ
-    if (now_vn.timestamp() - timestamps.get("last_daily_report_sent", 0)) > 11 * 3600:
+    current_time_slot = now_vn.strftime("%Y-%m-%d-%H")
+    last_sent_time_slot = timestamps.get("last_daily_report_time_slot", "")
+
+    # Chỉ gửi nếu hiện tại là 8h hoặc 20h và chưa gửi cho mốc thời gian này hôm nay
+    if now_vn.hour == 8 and current_time_slot != last_sent_time_slot:
+        return True
+    elif now_vn.hour == 20 and current_time_slot != last_sent_time_slot:
         return True
     return False
 
-def build_daily_summary_report(state: Dict) -> str:
+def build_daily_summary_report(state: Dict, all_indicators: Dict) -> str: # BỔ SUNG THAM SỐ all_indicators
     """Xây dựng báo cáo tóm tắt hàng ngày cho danh mục."""
     now_vn = datetime.now(VIETNAM_TZ)
     if not state: return "Chưa có dữ liệu danh mục để báo cáo."
@@ -590,6 +611,7 @@ def build_daily_summary_report(state: Dict) -> str:
             held_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
 
             # Ước tính PnL hiện tại nếu có live price trong all_indicators
+            # SỬ DỤNG THAM SỐ all_indicators
             current_price_info = all_indicators.get(trade['symbol'], {}).get(trade['interval'])
             current_live_price = current_price_info.get('price') if current_price_info else None
 
@@ -631,7 +653,7 @@ def should_send_volatility_report(current_state: Dict) -> Tuple[bool, float]:
 
     return False, 0
 
-def build_volatility_report(state: Dict, pnl_change: float) -> str:
+def build_volatility_report(state: Dict, pnl_change: float, all_indicators: Dict) -> str: # BỔ SUNG THAM SỐ all_indicators
     """Xây dựng báo cáo cảnh báo biến động."""
     capital = state.get('capital', INITIAL_CAPITAL)
     pnl_icon = "📈" if pnl_change >= 0 else "📉"
@@ -656,7 +678,18 @@ def build_volatility_report(state: Dict, pnl_change: float) -> str:
         report_lines.append(f"\n**5 Lệnh mở gần nhất:**")
         for trade in active_trades[:5]:
             icon = "🔥" if trade['trade_type'] == "TREND_FOLLOW" else "💡"
-            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['opened_by_tactic']}/{trade['trade_type']})")
+            
+            # Ước tính PnL hiện tại cho lệnh đang mở
+            current_price_info = all_indicators.get(trade['symbol'], {}).get(trade['interval'])
+            current_live_price = current_price_info.get('price') if current_price_info else None
+            
+            current_pnl_str = "N/A"
+            if current_live_price and trade['entry_price'] > 0:
+                current_pnl_pct = (current_live_price - trade['entry_price']) / trade['entry_price'] * 100
+                current_pnl_usd = trade['amount_usd'] * (current_live_price - trade['entry_price']) / trade['entry_price']
+                current_pnl_str = f"PnL: `${current_pnl_usd:,.2f}` (`{current_pnl_pct:+.2f}%`)"
+            
+            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['opened_by_tactic']}/{trade['trade_type']}) | {current_pnl_str}")
     else:
         report_lines.append(f"\n`Không có lệnh nào được mở gần đây.`")
 
@@ -664,25 +697,7 @@ def build_volatility_report(state: Dict, pnl_change: float) -> str:
 
 if __name__ == "__main__":
     log_message("====== 🚀 QUẢN LÝ DANH MỤC (PAPER TRADE) BẮT ĐẦU PHIÊN LÀM VIỆC 🚀 ======")
-    # Đặt biến global all_indicators ở đây hoặc chuyển đổi kiến trúc để hàm build_daily_summary_report
-    # và build_volatility_report không cần biến global này (ví dụ: truyền vào như tham số)
-    # Tạm thời để nó chạy được, ta sẽ khai báo ở phạm vi global hoặc truyền tham số.
-    # Vì all_indicators được tạo ra trong run_paper_trade_session, nên nó không khả dụng trực tiếp
-    # cho build_daily_summary_report khi hàm này được gọi từ run_paper_trade_session.
-    # Tuy nhiên, do daily summary và volatility report được gọi cuối cùng sau khi all_indicators
-    # đã được populate, nên nếu nó được xử lý trong cùng một luồng, nó sẽ hoạt động.
-    # Vấn đề là hàm `build_daily_summary_report` gọi `all_indicators.get` trực tiếp.
-    # Để khắc phục, ta cần đảm bảo `all_indicators` là biến toàn cục hoặc được truyền vào.
-    # Trong trường hợp này, vì `all_indicators` được tạo và sử dụng trong `run_paper_trade_session`,
-    # cách tốt nhất là truyền nó như một tham số cho `build_daily_summary_report` nếu cần,
-    # hoặc tính toán lại `current_price_info` trong hàm đó.
-    # Tạm thời, tôi sẽ giữ nguyên để phù hợp với cấu trúc ban đầu, nhưng đây là điểm cần lưu ý.
-
-    # Khởi tạo all_indicators rỗng nếu không sẽ gặp lỗi NameError khi chạy build_daily_summary_report
-    # (nếu nó được gọi trước khi all_indicators được gán trong run_paper_trade_session)
-    # Tuy nhiên, trong luồng hiện tại, nó được gọi sau, nên không phải vấn đề chính,
-    # nhưng việc thiếu `import ta` là lỗi cú pháp rõ ràng.
-    all_indicators = {} # Khởi tạo để tránh lỗi NameError trong build_daily_summary_report nếu nó được gọi
-
+    # all_indicators sẽ được populate trong run_paper_trade_session
+    # và được truyền vào các hàm báo cáo.
     run_paper_trade_session()
     log_message("====== ✅ QUẢN LÝ DANH MỤC (PAPER TRADE) KẾT THÚC PHIÊN LÀM VIỆC ✅ ======")
