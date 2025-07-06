@@ -181,27 +181,27 @@ def main():
 
             # --- LOGIC MỚI: TÍNH TOÁN ĐIỂM ĐIỀU CHỈNH PNL ---
             pnl = round((price_now - real_entry) / real_entry * 100, 2) if real_entry else 0
-            
+
             # Chuẩn hóa PnL về khoảng [-1, 1]. Coi PnL 25% là mức tối đa để có ảnh hưởng.
             # Điều này có nghĩa là lời 25% hay 100% đều có tác động như nhau.
-            pnl_norm = max(-1.0, min(1.0, pnl / 25.0)) 
-            
+            pnl_norm = max(-1.0, min(1.0, pnl / 25.0))
+
             # PnL có thể điều chỉnh tối đa +/- 0.75 điểm trên thang điểm 10.
             # Đây là "trọng số" của PnL. Bạn có thể thay đổi con số 0.75 này.
-            PNL_ADJUSTMENT_WEIGHT = 0.75 
+            PNL_ADJUSTMENT_WEIGHT = 0.75
             pnl_adjustment_score = pnl_norm * PNL_ADJUSTMENT_WEIGHT
-            
+
             # Tính điểm cuối cùng của MyPrecious
             my_precious_score = base_score + pnl_adjustment_score
             my_precious_score = min(max(my_precious_score, 0), 10) # Kẹp lại trong khoảng 0-10
-            
+
             # Ghi đè lại final_score trong advisor_decision để các hàm sau sử dụng
             advisor_decision['final_score'] = my_precious_score
             #--------------------------------------------------------------
 
             # Logic còn lại sẽ sử dụng my_precious_score (đã được cập nhật vào final_score)
             final_score = my_precious_score # Gán lại để các biến sau này dùng đúng
-            
+
             # ### THAY ĐỔI 4: XÁC ĐỊNH LEVEL DỰA TRÊN FINAL_SCORE MỚI ###
             # Ngưỡng này có thể được tinh chỉnh cho phù hợp hơn
             level_key_map = [
@@ -259,27 +259,64 @@ def format_price(price):
     return f"{price:.8f}" if price < 0.1 else f"{price:.4f}"
 
 def generate_indicator_text_block(ind: dict) -> str:
-    # Hàm này gần như không đổi, chỉ cần đảm bảo các key tồn tại
-    price_info = ind.get('price', 0)
+    """
+    Tạo khối hiển thị chỉ báo kỹ thuật chi tiết, đồng bộ với format của main.py.
+    """
+    # --- Helper để format số cho đẹp ---
+    def f(val, precision=4):
+        return f"{val:.{precision}f}" if isinstance(val, (int, float)) else str(val)
+
+    # --- Trích xuất tất cả các chỉ số từ dict 'ind' ---
+    price = ind.get('price', 0.0)
     trade_plan = ind.get('trade_plan', {})
-    lines = [
-        f"Giá hiện tại: {format_price(price_info)}   |   Entry {format_price(trade_plan.get('entry', 0))}   |   TP {format_price(trade_plan.get('tp', 0))}   |   SL {format_price(trade_plan.get('sl', 0))}",
-        f"📈 EMA20: {ind.get('ema_20', 0):.2f}     💪 RSI14: {ind.get('rsi_14', 0):.2f} → {'quá mua' if ind.get('rsi_14', 50)>70 else 'quá bán' if ind.get('rsi_14', 50)<30 else 'trung tính'}",
-        f"📉 MACD: {ind.get('macd_line', 0):.3f} vs Signal: {ind.get('macd_signal', 0):.3f} → {ind.get('macd_cross', 'N/A')}",
-        f"📊 ADX: {ind.get('adx', 0):.1f} → {'có trend' if ind.get('adx', 0)>20 else 'yếu'}",
-        f"💸 CMF: {ind.get('cmf', 0):.3f}",
-    ]
+    ema_20 = ind.get('ema_20', 'N/A')
+    rsi_14 = ind.get('rsi_14', 'N/A')
+    rsi_div = ind.get('rsi_divergence') or 'None'
+    macd_line = ind.get('macd_line', 'N/A')
+    macd_signal_val = ind.get('macd_signal', 'N/A')
+    macd_cross = ind.get('macd_cross', 'N/A')
+    adx = ind.get('adx', 'N/A')
+    bb_upper = ind.get('bb_upper', 'N/A')
+    bb_lower = ind.get('bb_lower', 'N/A')
+    volume = ind.get('volume', 'N/A')
+    vol_ma20 = ind.get('vol_ma20', 'N/A')
+    fib_0_618 = ind.get('fib_0_618', 'N/A')
+    doji_note = f"{ind['doji_type'].replace('_', ' ').title()} Doji" if ind.get("doji_type") else "No"
+    trend = ind.get("trend", "unknown")
+    cmf = ind.get("cmf", 'N/A')
+    
+    # Lấy thông tin tín hiệu kỹ thuật đã được gắn vào
     signal_details = ind.get("signal_details", {})
-    if signal_details:
-        lines.append(f"🔹 Tín hiệu KT: {signal_details.get('level', 'N/A')} ({signal_details.get('tag', 'N/A')}) – {signal_details.get('reason', '...')}")
-    return "\n".join(lines)
+    signal_reason = signal_details.get('reason', '...')
+
+    # --- Tạo khối hiển thị mới ---
+    # Dòng đầu tiên vẫn giữ thông tin về trade plan
+    header_line = f"Giá hiện tại: {format_price(price)} | Entry: {format_price(trade_plan.get('entry', 0))} | TP: {format_price(trade_plan.get('tp', 0))} | SL: {format_price(trade_plan.get('sl', 0))}"
+
+    # Các dòng sau là chỉ báo chi tiết
+    indicator_lines = f"""📈 EMA20: {f(ema_20)}
+💪 RSI14: {f(rsi_14, 2)} ({rsi_div})
+📉 MACD Line: {f(macd_line)}
+📊 MACD Signal: {f(macd_signal_val)} → {str(macd_cross).capitalize()}
+🧭 ADX: {f(adx, 2)}
+🔺 BB Upper: {f(bb_upper)}
+🔻 BB Lower: {f(bb_lower)}
+🔊 Volume: {f(volume, 2)} / MA20: {f(vol_ma20, 2)}
+🌀 Fibo 0.618: {f(fib_0_618)}
+🕯️ Doji: {doji_note}
+📈 Trend: {trend.capitalize()}
+💸 CMF: {f(cmf)}
+🔹 Tín hiệu KT: {signal_details.get('level', 'N/A')} ({signal_details.get('tag', 'N/A')}) – {signal_reason}"""
+
+    return f"{header_line}\n{indicator_lines}"
+
 
 def generate_summary_block(symbol: str, interval: str, pnl: float, advisor_decision: dict):
     final_score = advisor_decision.get('final_score', 5.0)
     tech_score = advisor_decision.get('tech_score', 5.0)
     ml_data = advisor_decision.get('ai_prediction', {})
     news_factor = advisor_decision.get('news_factor', 0)
-    
+
     tech_desc = "Thị trường không rõ ràng"
     if tech_score >= 7: tech_desc = "Tín hiệu kỹ thuật ủng hộ"
     elif tech_score <= 3.5: tech_desc = "Tín hiệu kỹ thuật yếu, rủi ro"
@@ -290,7 +327,7 @@ def generate_summary_block(symbol: str, interval: str, pnl: float, advisor_decis
         ml_log_path = os.path.join(AI_DIR, f"{symbol}_{interval}.json")
         if os.path.exists(ml_log_path):
            ai_level = load_json(ml_log_path, {}).get("level", "AVOID")
-        
+
         ai_desc = f"🚧 {ai_level.replace('_', ' ')} – ML dự đoán: {ml_data.get('pct', 0):.2f}% ({ml_data.get('prob_buy', 0):.1f}%/{ml_data.get('prob_sell', 0):.1f}%)"
 
     news_desc = "Tích cực" if news_factor > 0 else "Tiêu cực" if news_factor < 0 else "Trung lập"
@@ -304,10 +341,10 @@ def generate_news_and_context_block_v2(advisor_decision: dict) -> str:
     news_factor = advisor_decision.get("news_factor", 0.0)
     # Lấy lại market_context để hiển thị chi tiết hơn
     mc_data = advisor_decision.get("debug_info", {}).get("context_used", {}) # Cần thêm vào trade_advisor
-    
+
     mc_text = (f"🌐 **Bối cảnh thị trường (Trend: {market_trend})** | "
                f"Fear & Greed: `{mc_data.get('fear_greed', 'N/A')}` | BTC.D: `{mc_data.get('btc_dominance', 'N/A')}%`")
-    
+
     news_block = "⚪ Không có tin tức mới ảnh hưởng."
     if news_factor != 0.0:
         # Chúng ta không có sẵn tiêu đề tin tức ở đây, chỉ có điểm số
@@ -316,7 +353,7 @@ def generate_news_and_context_block_v2(advisor_decision: dict) -> str:
             news_block = "🗞️ **Tin tức:** Có các tin tức mang tính tích cực."
         else:
             news_block = "🗞️ **Tin tức:** Có các tin tức mang tính tiêu cực."
-            
+
     return f"{mc_text}\n{news_block}"
 
 def generate_mta_block(symbol: str, current_interval: str, all_indicators: dict) -> str:
@@ -330,7 +367,7 @@ def generate_mta_block(symbol: str, current_interval: str, all_indicators: dict)
             # Lấy dữ liệu AI cho khung thời gian phụ
             ai_data_tf = load_json(os.path.join(AI_DIR, f"{symbol}_{tf}.json"), {})
             ai_bias = "tăng" if ai_data_tf.get("prob_buy", 50) > 60 else "giảm" if ai_data_tf.get("prob_sell", 0) > 60 else "trung lập"
-            
+
             lines.append(f"{icon} **{tf}**: Trend {trend:<9} | RSI: {ind_tf.get('rsi_14', 0):.1f} | AI: {ai_bias}")
     return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -340,7 +377,7 @@ def generate_final_strategy_block(pnl: float, level_key: str, advisor_decision: 
     market_trend = advisor_decision.get('market_trend', "NEUTRAL")
     news_factor = advisor_decision.get("news_factor", 0)
     ml_data = advisor_decision.get("ai_prediction", {})
-    
+
     reco_map = {
         "PANIC_SELL": "🔻 **Ưu tiên hàng đầu là thoát lệnh NGAY LẬP TỨC để bảo toàn vốn.**",
         "SELL": "🔻 **Tín hiệu tiêu cực chiếm ưu thế, cân nhắc giảm vị thế hoặc chốt lời/cắt lỗ.**",
@@ -351,7 +388,7 @@ def generate_final_strategy_block(pnl: float, level_key: str, advisor_decision: 
         "STRONG_BUY": "🚀 **Tất cả các yếu tố đều ủng hộ xu hướng tăng.** Có thể tự tin gia tăng vị thế."
     }
     reco = [reco_map.get(level_key, "")]
-    
+
     reasons = [
         f"**Cấp độ Lệnh:** {level_key} (dựa trên điểm tổng hợp {final_score:.1f}/10)",
         f"**Kỹ thuật:** Điểm {tech_score:.1f}/10. {'Tích cực.' if tech_score >= 7 else 'Tiêu cực.' if tech_score <= 3.5 else 'Trung lập.'}",
@@ -378,10 +415,10 @@ def build_alert_message(payload: dict) -> str:
     advisor_decision = payload["advisor_decision"]
     level_key = payload["level_key"]
     all_indicators = payload["all_indicators"]
-    
+
     symbol, interval, trade_id = trade['symbol'], trade['interval'], trade['id']
     real_entry = payload["real_entry"]
-    
+
     title_block = f"{ICON.get(level_key, ' ')} [{level_key.replace('_', ' ')}] Đánh giá lệnh: {symbol} ({interval})"
 
     info_block = (f"📌 ID: {trade_id}  {symbol}  {interval}\n"
@@ -395,7 +432,7 @@ def build_alert_message(payload: dict) -> str:
     ind_text_block = generate_indicator_text_block(main_indicators)
 
     summary_block = generate_summary_block(symbol, interval, pnl, advisor_decision)
-    
+
     # News block mới sẽ đơn giản hơn
     news_block = generate_news_and_context_block_v2(advisor_decision)
 
@@ -424,7 +461,7 @@ def build_overview_report(overview_data: list, level_counter: Counter, now: date
     for t_payload in sorted(overview_data, key=lambda x: x["advisor_decision"].get('final_score', 0)):
         t = t_payload["trade"]
         advisor_decision = t_payload["advisor_decision"]
-        
+
         final_score = advisor_decision.get('final_score', 5.0)
         # Lấy base_score từ advisor_map nếu có, nếu không thì dùng final_score đã điều chỉnh
         # Điều này đảm bảo hiển thị đúng base_score ban đầu từ advisor

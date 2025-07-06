@@ -1,4 +1,4 @@
-# main.py (phiên bản 4.3 - Khôi phục output chi tiết)
+# main.py (PHIÊN BẢN 6.0 - HOÀN CHỈNH CUỐI CÙNG)
 
 # -*- coding: utf-8 -*-
 from dotenv import load_dotenv
@@ -81,9 +81,8 @@ def should_send_report(cooldowns: dict) -> bool:
         if now_utc >= target_utc and last_ts < target_utc.timestamp():
             return True
     return False
-    
+
 def write_log_file(log_path, content):
-    """Hàm ghi log đơn giản, tạo thư mục nếu chưa có."""
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, 'w', encoding='utf-8') as f:
@@ -91,55 +90,131 @@ def write_log_file(log_path, content):
     except Exception as e:
         print(f"❌ Lỗi nghiêm trọng khi ghi file log: {e}")
 
+def send_summary_report(report_lines: list[str]):
+    """Gửi báo cáo dạng danh sách tự do, chia tin nhắn nếu cần."""
+    main_header = "📝 **BÁO CÁO TÍN HIỆU ĐỊNH KỲ**"
+    if not report_lines:
+        send_discord_alert(f"{main_header}\nKhông có dữ liệu để báo cáo.")
+        return
+
+    # Nối tất cả các dòng lại thành một chuỗi duy nhất để xử lý
+    full_content = "\n".join(report_lines)
+
+    chunks = []
+    current_chunk = ""
+    for line in full_content.split('\n'):
+        if len(current_chunk) + len(line) + 1 > 1950:
+            chunks.append(current_chunk)
+            current_chunk = ""
+        current_chunk += line + "\n"
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    # Gửi lần lượt các chunk
+    for i, chunk in enumerate(chunks):
+        header_to_send = main_header if i == 0 else f"**(Báo cáo phần {i+1}/{len(chunks)})**"
+        send_discord_alert(f"{header_to_send}\n{chunk}")
+        time.sleep(2)
+
 # --- Portfolio & Report Rendering ---
 def format_symbol_report(symbol: str, ind_map: dict[str, dict]) -> str:
+    """Tạo định dạng chi tiết cho một symbol, lấy lại format từ phiên bản cũ."""
     parts: list[str] = []
     for interval, ind in ind_map.items():
+        def f(val, precision=4):
+            return f"{val:.{precision}f}" if isinstance(val, (int, float)) else str(val)
+
+        price = ind.get('price', 0.0)
+        ema_20 = ind.get('ema_20', 'N/A')
+        rsi_14 = ind.get('rsi_14', 'N/A')
+        rsi_div = ind.get('rsi_divergence') or 'None'
+        macd_line = ind.get('macd_line', 'N/A')
+        macd_signal_val = ind.get('macd_signal', 'N/A')
+        macd_cross = ind.get('macd_cross', 'N/A')
+        adx = ind.get('adx', 'N/A')
+        bb_upper = ind.get('bb_upper', 'N/A')
+        bb_lower = ind.get('bb_lower', 'N/A')
+        volume = ind.get('volume', 'N/A')
+        vol_ma20 = ind.get('vol_ma20', 'N/A')
+        fib_0_618 = ind.get('fib_0_618', 'N/A')
+        doji_note = f"{ind['doji_type'].replace('_', ' ').title()} Doji" if ind.get("doji_type") else "No"
+        trend = ind.get("trend", "unknown")
+        cmf = ind.get("cmf", 'N/A')
+
         signal_details = check_signal(ind)
-        signal, reason, tag = signal_details.get("level", "HOLD"), signal_details.get("reason", ""), signal_details.get("tag", "")
+        signal = signal_details.get("level", "HOLD")
+        reason = signal_details.get("reason", "")
+        tag = signal_details.get("tag", "")
+
         advisor_score = ind.get("advisor_score")
         signal_line = f"🧠 Signal: **{signal}** {f'→ {reason}' if reason else ''} {f'(🏷️ {tag})' if tag else ''}"
-        if advisor_score is not None: signal_line += f" | (Score: {advisor_score:.1f}/10)"
-        block = (f"📊 **{symbol} ({interval})**\n"
-                 f"🔹 Price: {ind['price']:.8f}\n"
-                 f"💪 RSI14: {ind['rsi_14']} | 1h: {ind.get('rsi_1h', 'N/A')} | 4h: {ind.get('rsi_4h', 'N/A')} | 1d: {ind.get('rsi_1d', 'N/A')}\n"
-                 f"📉 MACD: {ind.get('macd_cross', 'N/A')}\n"
-                 f"🔺 Trend: {ind.get('trend', 'unknown')} | ADX: {ind.get('adx', 'N/A')}\n"
-                 f"{signal_line}")
+        if advisor_score is not None:
+            signal_line += f" | (Score: {advisor_score:.1f}/10)"
+
+        block = f"""📊 **{symbol} ({interval})**
+🔹 Price: {f(price, 8)}
+📈 EMA20: {f(ema_20)}
+💪 RSI14: {f(rsi_14, 2)} ({rsi_div})
+📉 MACD Line: {f(macd_line)}
+📊 MACD Signal: {f(macd_signal_val)} → {macd_cross.capitalize()}
+🧭 ADX: {f(adx, 2)}
+🔺 BB Upper: {f(bb_upper)}
+🔻 BB Lower: {f(bb_lower)}
+🔊 Volume: {f(volume, 2)} / MA20: {f(vol_ma20, 2)}
+🌀 Fibo 0.618: {f(fib_0_618)}
+🕯️ Doji: {doji_note}
+📈 Trend: {trend.capitalize()}
+💸 CMF: {f(cmf)}
+{signal_line}"""
+
         parts.append(block)
     return "\n\n".join(parts)
 
-def format_daily_summary(symbols: list, all_indicators: dict, now_str: str) -> str:
-    summary_parts = ["📝 **BÁO CÁO TÍN HIỆU ĐỊNH KỲ**"]
+
+def format_daily_summary(symbols: list, all_indicators: dict, now_str: str) -> list[str]:
+    """Tạo một danh sách báo cáo với ID đầy đủ và không dùng code block."""
+    report_lines = []
+    level_icons = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "HOLD": "⏸️"}
+
     for symbol in symbols:
         symbol_data = all_indicators.get(symbol, {})
         if not symbol_data: continue
-        header = f"\n**{symbol.upper()}**"
-        table_lines = ["```md"]
-        table_lines.append(f"{'ID':<28} | {'Giá':<12} | {'Tín Hiệu':<20} | Score")
-        table_lines.append(f"{'-'*28} | {'-'*12} | {'-'*20} | {'-'*5}")
+        
+        # Thêm dòng tên symbol để phân tách
+        report_lines.append(f"\n**--- {symbol.upper()} ---**")
+
         for interval in ["1h", "4h", "1d"]:
             ind = symbol_data.get(interval, {})
             if not ind: continue
+            
+            # Trích xuất dữ liệu
             price = ind.get('price', 0)
             signal_details = check_signal(ind)
             level = signal_details.get("level", "HOLD")
             tag = signal_details.get("tag", "")
             score = ind.get("advisor_score")
-            id_str = f"{now_str.split(' ')[0]} | {symbol.upper()} | {interval}"
+            
+            icon = level_icons.get(level, "ℹ️")
+            
+            # === THAY ĐỔI CHÍNH ===
+            # Tạo lại ID đầy đủ và đưa vào dòng báo cáo
+            id_str = f"**{now_str}  {symbol.upper()}  {interval}**"
             price_str = f"{price:.4f}"
-            signal_str = f"{level}" + (f"-{tag}" if tag else "")
-            score_str = f"{score:.1f}" if score is not None else "N/A"
-            table_lines.append(f"{id_str:<28} | {price_str:<12} | {signal_str:<20} | {score_str}")
-        table_lines.append("```")
-        summary_parts.append(header + "\n" + "\n".join(table_lines))
-    return "\n".join(summary_parts)
+            signal_str = f"**{level}**" + (f" ({tag})" if tag else "")
+            score_str = f"**{score:.1f}**" if score is not None else "N/A"
+
+            # Định dạng dòng mới kết hợp cả ID và thông tin tín hiệu
+            line = f"{icon} {id_str}\n G-Signal: {signal_str} | Giá: *{price_str}* | Score: {score_str}"
+            report_lines.append(line)
+
+    return report_lines
 
 # --- Main loop ---
 def main() -> None:
     log_output_lines = []
-    
-    msg_start = "🔁 Bắt đầu vòng check hai cửa (phiên bản 4.3 - Output chi tiết)..."
+
+    msg_start = "🔁 Bắt đầu vòng check (phiên bản 6.0 - Final)..."
     print(msg_start); log_output_lines.append(msg_start)
 
     # --- Setup & Khởi tạo ---
@@ -149,9 +224,9 @@ def main() -> None:
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     general_cooldowns = load_cooldown()
     advisor_state = load_advisor_state()
-    
+
     force_daily = should_send_report(general_cooldowns)
-    
+
     # --- TÍNH TOÁN TẤT CẢ CHỈ BÁO MỘT LẦN ---
     msg_calc = "\n[1/3] Đang tính toán tất cả chỉ báo kỹ thuật..."
     print(msg_calc); log_output_lines.append(msg_calc)
@@ -163,8 +238,6 @@ def main() -> None:
                 df_raw = get_price_data(sym, itv)
                 if df_raw.empty: continue
                 all_indicators[sym][itv] = calculate_indicators(df_raw, sym, itv)
-                calc_msg = f"   -> Đã tính toán cho {sym}-{itv}"
-                print(calc_msg); log_output_lines.append(calc_msg)
             except Exception as e:
                 err_msg = f"⚠️ Lỗi khi tính chỉ báo cho {sym}-{itv}: {e}"
                 print(err_msg); log_output_lines.append(err_msg)
@@ -189,8 +262,7 @@ def main() -> None:
         try:
             symbol_msg = f"\n--- Đang xử lý: {symbol.upper()} ---"
             print(symbol_msg); log_output_lines.append(symbol_msg)
-            
-            # === Tính toán Advisor và gắn điểm vào all_indicators ===
+
             for interval in all_timeframes:
                 ind = all_indicators.get(symbol, {}).get(interval, {})
                 if not ind: continue
@@ -205,12 +277,9 @@ def main() -> None:
                 ind = all_indicators.get(symbol, {}).get(interval, {})
                 if not ind: continue
 
-                # In ra các chỉ số chính để theo dõi
                 price = ind.get('price', 0)
-                rsi = ind.get('rsi_14', 0)
-                macd_cross = ind.get('macd_cross', 'N/A')
                 score = ind.get('advisor_score', 0)
-                detail_msg = f"   - Khung {interval}: Giá={price:.4f}, RSI={rsi:.1f}, MACD='{macd_cross}', Score={score:.1f}"
+                detail_msg = f"   - Khung {interval}: Giá={price:.4f}, Score={score:.1f}"
                 print(detail_msg); log_output_lines.append(detail_msg)
 
                 signal_details = check_signal(ind)
@@ -221,8 +290,7 @@ def main() -> None:
                     cd_minutes = COOLDOWN_LEVEL_MAP.get(interval, {}).get(signal, 90)
                     is_cooldown_passed = not last_time or (now - last_time >= timedelta(minutes=cd_minutes))
                     if is_cooldown_passed:
-                        score_text = f" | Score: {score:.1f}" if score is not None else ""
-                        c1_msg = f"   => 🔔 TÍN HIỆU: {signal}{score_text}"
+                        c1_msg = f"   => 🔔 TÍN HIỆU CỬA 1: {signal} | Score: {score:.1f}"
                         print(c1_msg); log_output_lines.append(c1_msg)
                         general_cooldowns[cd_key] = now
                         send_intervals_general.append(interval)
@@ -235,11 +303,11 @@ def main() -> None:
                 elif "WARNING" in alert_levels_general: highest = "WARNING"
                 elif "ALERT" in alert_levels_general: highest = "ALERT"
                 else: highest = "WATCHLIST"
-                icon = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀"}.get(highest, "ℹ️")
-                title = f"{icon} [{symbol.upper()}] **{highest}** từ khung {', '.join(send_intervals_general)}"
-                ids = "\n".join([f"🆔 ID: {now_str} | {symbol.upper()} | {iv}" for iv in send_intervals_general])
+
+                title = f"[{symbol.upper()}] **{highest}** từ khung {', '.join(send_intervals_general)}"
+                ids = "\n".join([f"🆔 ID: {now_str}  {symbol.upper()}  {iv}" for iv in send_intervals_general])
                 send_discord_alert(f"{title}\n{ids}\n\n{report_content}")
-                discord_msg = f"   => 📨 Đã gửi cảnh báo Discord."
+                discord_msg = f"   => 📨 Đã gửi cảnh báo Cửa 1 qua Discord."
                 print(discord_msg); log_output_lines.append(discord_msg)
                 time.sleep(3)
 
@@ -248,23 +316,25 @@ def main() -> None:
                 for interval in intervals:
                     decision_data = all_indicators.get(symbol, {}).get(interval, {}).get('advisor_decision')
                     if not decision_data or decision_data.get('decision_type') == "NEUTRAL": continue
+
                     final_score = decision_data.get('final_score', 5.0)
                     state_key = f"{symbol}-{interval}"
                     last_state = advisor_state.get(state_key, {})
                     last_score = last_state.get("last_alert_score", 5.0)
                     last_time_str = last_state.get("last_alert_timestamp")
-                    
+
                     c2_check_msg = f"   - Cửa 2 ({interval}): Đang check. Score hiện tại={final_score:.2f}, Score lần trước={last_score:.2f}"
                     print(c2_check_msg); log_output_lines.append(c2_check_msg)
-                    
+
                     is_significant_change = abs(final_score - last_score) > ADVISOR_CONFIG["SCORE_CHANGE_THRESHOLD"]
                     is_cooldown_passed = True
                     if last_time_str:
                         last_time = ensure_utc_aware(datetime.fromisoformat(last_time_str))
                         if (now - last_time).total_seconds() / 3600 < ADVISOR_CONFIG["COOLDOWN_HOURS"]:
                             is_cooldown_passed = False
+
                     if is_significant_change or is_cooldown_passed:
-                        c2_msg = f"   => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})" if is_significant_change else f"⏰ TÍN HIỆU CỬA 2: Hết cooldown"
+                        c2_msg = f"   => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})" if is_significant_change else f"   => ⏰ TÍN HIỆU CỬA 2: Hết cooldown"
                         print(c2_msg); log_output_lines.append(c2_msg)
                         send_opportunity_alert(decision_data)
                         log_to_csv(symbol=symbol, interval=interval, price=decision_data.get('full_indicators', {}).get('price', 0), timestamp=now_str, recommendation=decision_data)
@@ -279,8 +349,10 @@ def main() -> None:
 
     # --- Xử lý gửi báo cáo tóm tắt hàng ngày ---
     if force_daily:
-        summary_report = format_daily_summary(symbols, all_indicators, now_str)
-        send_discord_alert(summary_report)
+        summary_lines = format_daily_summary(symbols, all_indicators, now_str)
+        if summary_lines:
+            send_summary_report(summary_lines)
+
         general_cooldowns["last_general_report_timestamp"] = now.timestamp()
         log_output_lines.append("\nĐã gửi Báo cáo tóm tắt hàng ngày.")
 
@@ -289,13 +361,13 @@ def main() -> None:
     print(msg_save); log_output_lines.append(msg_save)
     save_cooldown(general_cooldowns)
     save_advisor_state(advisor_state)
-    
+
     now_vn = now.astimezone(timezone(timedelta(hours=7)))
     log_dir = os.path.join(BASE_DIR, "log", now_vn.strftime("%Y-%m-%d"))
     log_filename = now_vn.strftime("%H-%M") + ".txt"
     log_file_path = os.path.join(log_dir, log_filename)
     write_log_file(log_file_path, "\n".join(log_output_lines))
-    
+
     msg_log_done = f"✅ Đã ghi log vào file: {log_file_path}"
     print(msg_log_done)
 
