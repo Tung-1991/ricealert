@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 paper_trade.py - Quản lý Danh mục Mô phỏng Thông minh (Paper Trading)
-Version: 2.3 (The Adaptive Mind with Enhanced Market Insight & Reporting)
-Date: 2025-07-09
+Version: 2.9 (Concise Report & Winrate Added)
+Date: 2025-07-06
 
 Description:
 Hệ thống quản lý danh mục với bộ não thích ứng và khả năng nhận diện thị trường sâu hơn.
@@ -12,7 +12,7 @@ Hệ thống quản lý danh mục với bộ não thích ứng và khả năng 
 - Mỗi lối đánh có cấu hình rủi ro riêng (SL_PCT, RR). Tỷ lệ RR sẽ được điều chỉnh
   tăng lên nếu điểm giao dịch (final_score) của Trade Advisor cao.
 - Tích hợp 2 cơ chế báo cáo:
-  1. Báo cáo tổng quan định kỳ (8h, 20h) KÈM BIỂU ĐỒ EQUITY CURVE.
+  1. Báo cáo tổng quan định kỳ (8h, 20h).
   2. Cảnh báo biến động PnL mỗi 4 giờ nếu có thay đổi > 0.5%.
 - Tự động EXPORT lịch sử giao dịch ra file CSV mỗi phiên.
 """
@@ -25,8 +25,6 @@ import requests
 import pytz
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt # Import matplotlib để vẽ biểu đồ
-# import ta # KHÔNG CẦN IMPORT TA Ở ĐÂY, ĐÃ CÓ TRONG INDICATOR.PY
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple
@@ -57,7 +55,7 @@ TACTICS_LAB = {
 }
 
 # --- Cài đặt chung & Báo cáo ---
-INITIAL_CAPITAL = 10000.0
+INITIAL_CAPITAL = 10000.0 # Vốn ban đầu của danh mục
 SYMBOLS_TO_SCAN = ["ETHUSDT", "AVAXUSDT", "INJUSDT", "LINKUSDT", "SUIUSDT", "FETUSDT", "TAOUSDT"]
 INTERVALS_TO_SCAN = ["1h", "4h"] # Các interval để quét lệnh mới
 ALL_TIME_FRAMES = ["1h", "4h", "1d"] # Tất cả các interval để tính chỉ báo và snapshot thị trường
@@ -81,10 +79,14 @@ LOG_FILE = os.path.join(PAPER_DATA_DIR, "paper_trade_log.txt")
 STATE_FILE = os.path.join(PAPER_DATA_DIR, "paper_trade_state.json")
 TIMESTAMP_FILE = os.path.join(PAPER_DATA_DIR, "paper_trade_timestamps.json")
 TRADE_HISTORY_CSV_FILE = os.path.join(PAPER_DATA_DIR, "trade_history.csv") # File xuất lịch sử giao dịch
-EQUITY_CURVE_CSV_FILE = os.path.join(PAPER_DATA_DIR, "equity_curve.csv")    # File dữ liệu đường vốn
-EQUITY_CURVE_IMAGE_FILE = os.path.join(PAPER_DATA_DIR, "equity_curve.png") # File ảnh biểu đồ đường vốn
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_PAPER_WEBHOOK")
+
+# ==============================================================================
+# QUAN TRỌNG: KHAI BÁO BIẾN TOÀN CỤC CẦN THIẾT
+# all_indicators cần được truy cập và cập nhật bởi nhiều hàm
+# ==============================================================================
+all_indicators: Dict[str, Any] = {} 
 
 # ==============================================================================
 # ================= 🛠️ CÁC HÀM TIỆN ÍCH & QUẢN LÝ 🛠️ ======================
@@ -111,26 +113,6 @@ def send_discord_report(content: str):
             log_message(f"❌ Lỗi khi gửi báo cáo Discord: {e}")
             break
 
-def send_discord_image(image_path: str, caption: str = "📊 Biểu đồ"):
-    """Gửi ảnh lên Discord qua webhook."""
-    if not DISCORD_WEBHOOK_URL: return
-    if not os.path.exists(image_path):
-        log_message(f"❌ Không tìm thấy file ảnh để gửi: {image_path}")
-        return
-
-    log_message(f"📸 Đang gửi ảnh {os.path.basename(image_path)} đến Discord...")
-    try:
-        with open(image_path, "rb") as f:
-            files = {"file": (os.path.basename(image_path), f)}
-            payload = {"content": caption}
-            response = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=15)
-            response.raise_for_status()
-            log_message(f"✅ Đã gửi ảnh {os.path.basename(image_path)}.")
-    except requests.exceptions.RequestException as e:
-        log_message(f"❌ Lỗi khi gửi ảnh lên Discord: {e}")
-    except Exception as e:
-        log_message(f"❌ Lỗi không xác định khi gửi ảnh: {e}")
-
 def export_trade_history_to_csv(trade_history: List[Dict]):
     """Ghi lịch sử giao dịch vào file CSV."""
     if not trade_history:
@@ -141,7 +123,7 @@ def export_trade_history_to_csv(trade_history: List[Dict]):
     # Sắp xếp các cột theo thứ tự dễ đọc
     columns_order = [
         "trade_id", "symbol", "interval", "status", "opened_by_tactic", "trade_type",
-        "entry_price", "exit_price", "tp", "sl", "amount_usd",
+        "entry_price", "exit_price", "tp", "sl", "invested_usd", 
         "pnl_usd", "pnl_percent", "entry_time", "exit_time", "entry_score"
     ]
     # Chỉ giữ lại các cột có trong dữ liệu
@@ -157,47 +139,6 @@ def export_trade_history_to_csv(trade_history: List[Dict]):
         log_message(f"✅ Đã xuất lịch sử giao dịch vào {TRADE_HISTORY_CSV_FILE}")
     except Exception as e:
         log_message(f"❌ Lỗi khi xuất lịch sử giao dịch ra CSV: {e}")
-
-def log_equity_point(capital: float):
-    """Ghi một điểm vốn vào file equity_curve.csv."""
-    now_str = datetime.now(VIETNAM_TZ).strftime("%Y-%m-%d %H:%M:%S")
-
-    file_exists = os.path.exists(EQUITY_CURVE_CSV_FILE)
-    mode = 'a' if file_exists else 'w'
-    header = not file_exists # Ghi header chỉ lần đầu
-
-    try:
-        with open(EQUITY_CURVE_CSV_FILE, mode, encoding="utf-8") as f:
-            if header:
-                f.write("timestamp,capital\n")
-            f.write(f"{now_str},{capital:.2f}\n")
-        log_message(f"✅ Đã ghi điểm vốn: {capital:,.2f}")
-    except Exception as e:
-        log_message(f"❌ Lỗi khi ghi điểm vốn vào CSV: {e}")
-
-def plot_equity_curve(image_path: str = EQUITY_CURVE_IMAGE_FILE):
-    """Vẽ biểu đồ Equity Curve và lưu thành ảnh."""
-    try:
-        df_equity = pd.read_csv(EQUITY_CURVE_CSV_FILE, names=["timestamp", "capital"], header=0) # header=0 vì chúng ta ghi header ở log_equity_point
-        df_equity["timestamp"] = pd.to_datetime(df_equity["timestamp"])
-
-        plt.figure(figsize=(12, 6)) # Kích thước lớn hơn cho biểu đồ rõ ràng
-        plt.plot(df_equity["timestamp"], df_equity["capital"], linewidth=2, color='skyblue')
-        plt.title("📈 Đường Vốn Danh Mục (Equity Curve)", fontsize=16)
-        plt.xlabel("Thời gian", fontsize=12)
-        plt.ylabel("Vốn ($)", fontsize=12)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.xticks(rotation=45, ha='right') # Xoay nhãn trục x để dễ đọc
-        plt.tick_params(axis='x', labelsize=10)
-        plt.tick_params(axis='y', labelsize=10)
-        plt.tight_layout() # Đảm bảo mọi thứ vừa vặn trong figure
-        plt.savefig(image_path, dpi=100) # Lưu ảnh với DPI cao hơn để rõ nét
-        plt.close() # Đóng figure để giải phóng bộ nhớ
-        log_message(f"✅ Đã vẽ và lưu biểu đồ vốn tại {image_path}")
-    except FileNotFoundError:
-        log_message(f"⚠️ File dữ liệu vốn không tìm thấy: {EQUITY_CURVE_CSV_FILE}. Không thể vẽ biểu đồ.")
-    except Exception as e:
-        log_message(f"❌ Lỗi khi vẽ biểu đồ Equity Curve: {e}")
 
 # ==============================================================================
 # ============ 🧠 BỘ NÃO THÍCH ỨNG: CHỌN LỐI ĐÁNH 🧠 =============
@@ -296,8 +237,11 @@ def select_best_tactic(market_snapshot: Dict) -> str:
 
 def apply_portfolio_psychology(tactic_config: Dict, portfolio_state: Dict) -> Dict:
     """Điều chỉnh thông số của lối đánh dựa trên PnL tổng."""
+    # all_indicators là global
+    total_equity = calculate_total_equity(portfolio_state) 
+
     # Tránh chia cho 0 nếu INITIAL_CAPITAL là 0
-    pnl_percent = (portfolio_state['capital'] - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100 if INITIAL_CAPITAL > 0 else 0
+    pnl_percent = (total_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100 if INITIAL_CAPITAL > 0 else 0
 
     effective_config = tactic_config.copy()
 
@@ -308,40 +252,110 @@ def apply_portfolio_psychology(tactic_config: Dict, portfolio_state: Dict) -> Di
 
     return effective_config
 
+def calculate_total_equity(state: Dict) -> float:
+    """Tính tổng vốn (tiền mặt + giá trị các lệnh đang mở).
+    Sử dụng biến toàn cục all_indicators để lấy giá live."""
+    current_cash = state.get('cash', INITIAL_CAPITAL) # Lấy tiền mặt khả dụng
+    total_open_trade_value = 0.0
+
+    for trade in state.get('active_trades', []):
+        # Sử dụng .get() với giá trị mặc định để tránh KeyError cho các lệnh cũ
+        invested_amount = trade.get('invested_usd', trade.get('amount_usd', 0.0)) # Fallback cho các trạng thái cũ
+        
+        current_data = all_indicators.get(trade["symbol"], {}).get(trade["interval"])
+        if current_data and current_data.get('price', 0) != 0:
+            current_price = current_data['price']
+            # Giá trị hiện tại của lệnh = Số tiền đầu tư ban đầu * (Giá hiện tại / Giá vào lệnh)
+            # Đảm bảo entry_price không phải 0 để tránh chia cho 0
+            if trade.get('entry_price', 0) != 0:
+                trade_current_value = invested_amount * (current_price / trade['entry_price'])
+            else:
+                trade_current_value = invested_amount # Nếu entry_price là 0, coi giá trị bằng số tiền đầu tư
+        else:
+            # Nếu không có giá live cho symbol/interval này, coi giá trị hiện tại bằng số tiền đã đầu tư
+            total_open_trade_value += invested_amount
+            continue # Chuyển sang lệnh tiếp theo nếu không có dữ liệu live
+
+        total_open_trade_value += trade_current_value
+            
+    return current_cash + total_open_trade_value
+
+def calculate_winrate(trade_history: List[Dict]) -> Tuple[float, int, int]:
+    """Tính toán tỷ lệ thắng (winrate) và số lệnh thắng/thua."""
+    total_closed_trades = len(trade_history)
+    winning_trades = 0
+    
+    if total_closed_trades == 0:
+        return 0.0, 0, 0 # Winrate, số lệnh thắng, số lệnh thua
+
+    for trade in trade_history:
+        # Đảm bảo chỉ tính các lệnh đã đóng với PnL đã thực hiện
+        if trade.get('status') in ["TP_HIT", "SL_HIT"] and trade.get('pnl_usd', 0) > 0:
+            winning_trades += 1
+            
+    losing_trades = total_closed_trades - winning_trades
+    winrate = (winning_trades / total_closed_trades) * 100
+    return round(winrate, 2), winning_trades, losing_trades
+
+
 def run_paper_trade_session():
+    # Sử dụng biến toàn cục all_indicators
+    global all_indicators 
+
     # 1. Tải trạng thái danh mục & Lấy dữ liệu mới
     portfolio_state = load_json_file(STATE_FILE)
     if not portfolio_state:
-        portfolio_state = {"capital": INITIAL_CAPITAL, "active_trades": [], "trade_history": []}
-        # Đảm bảo last_capital cho volatility report được khởi tạo
+        # KHỞI TẠO VỐN BAN ĐẦU LÀ TIỀN MẶT
+        portfolio_state = {"cash": INITIAL_CAPITAL, "active_trades": [], "trade_history": []} 
+        # Khởi tạo capital_at_last_volatility_report với INITIAL_CAPITAL
         timestamps = load_json_file(TIMESTAMP_FILE, {})
         timestamps["capital_at_last_volatility_report"] = INITIAL_CAPITAL
         save_json_file(TIMESTAMP_FILE, timestamps)
+    else:
+        # NORMALIZE portfolio_state: Đảm bảo 'cash' và 'invested_usd' tồn tại và đúng định dạng
+        # Tính toán lại cash dựa trên lịch sử để đảm bảo chính xác nhất
+        if 'cash' not in portfolio_state:
+            portfolio_state['cash'] = INITIAL_CAPITAL
+            log_message("⚠️ Đã cập nhật trạng thái portfolio_state cũ để bao gồm trường 'cash'.")
+        
+        # Chuẩn hóa active_trades và trade_history:
+        # Đảm bảo 'invested_usd' tồn tại và loại bỏ 'amount_usd'
+        for trade_list_key in ['active_trades', 'trade_history']:
+            for trade in portfolio_state.get(trade_list_key, []):
+                if 'invested_usd' not in trade:
+                    trade['invested_usd'] = trade.pop('amount_usd', 0.0) # Chuyển đổi hoặc gán mặc định
+                    log_message(f"⚠️ Đã cập nhật lệnh cũ {trade.get('trade_id', '')} trong '{trade_list_key}' để sử dụng 'invested_usd'.")
+                # Đảm bảo invested_usd là float
+                trade['invested_usd'] = float(trade['invested_usd']) 
+                # Đảm bảo entry_price là float, tránh lỗi chia cho 0 sau này
+                trade['entry_price'] = float(trade.get('entry_price', 0.0))
+
+        # Sau khi chuẩn hóa, tính lại cash để phản ánh đúng số tiền mặt hiện có
+        # (INITIAL_CAPITAL + tổng PnL đã đóng - tổng tiền đang đầu tư vào lệnh mở)
+        realized_pnl_sum = sum(t.get('pnl_usd', 0) for t in portfolio_state.get('trade_history', []) if t.get('status') in ["TP_HIT", "SL_HIT"])
+        invested_in_active_trades = sum(t.get('invested_usd', 0) for t in portfolio_state.get('active_trades', []))
+        portfolio_state['cash'] = INITIAL_CAPITAL + realized_pnl_sum - invested_in_active_trades
+        log_message(f"✅ Đã tính toán lại tiền mặt khả dụng: ${portfolio_state['cash']:,.2f}")
 
 
-    all_indicators = {}
-    # Luôn lấy dữ liệu BTC trên 1D và 4H cho Market Snapshot
+    # ĐẶT LẠI all_indicators CHO MỖI PHIÊN CHẠY
+    all_indicators.clear() # Đảm bảo all_indicators trống trước khi populate lại
+
     all_symbols_to_fetch = SYMBOLS_TO_SCAN + ["BTCUSDT"]
-    # Luôn lấy 1h, 4h, 1d cho tất cả các symbol để đảm bảo đủ dữ liệu cho Trade Advisor và Market Snapshot
     
     for symbol in all_symbols_to_fetch:
         all_indicators[symbol] = {}
-        for interval in ALL_TIME_FRAMES: # Sử dụng ALL_TIME_FRAMES
+        for interval in ALL_TIME_FRAMES:
             try:
                 df = get_price_data(symbol, interval, limit=200)
-                # calculate_indicators đã tự xử lý trường hợp thiếu dữ liệu và trả về dict mặc định
                 calculated_data = calculate_indicators(df, symbol, interval)
                 all_indicators[symbol][interval] = calculated_data
-                if calculated_data.get("reason"): # Nếu có cảnh báo thiếu dữ liệu từ indicator
+                if calculated_data.get("reason"):
                     log_message(f"⚠️ {calculated_data['reason']} cho {symbol}-{interval}. Sử dụng dữ liệu mặc định.")
             except Exception as e:
                 log_message(f"❌ Lỗi khi tính chỉ báo cho {symbol}-{interval}: {e}")
-                # Đảm bảo vẫn có entry trống để tránh lỗi KeyError sau này
                 all_indicators[symbol][interval] = {"price": 0, "closed_candle_price": 0, "rsi_14": 50.0, "trend": "sideway", "adx": 20.0, "atr_percent": 1.5, "doji_type": "none", "candle_pattern": "none"}
 
-
-    # BỔ SUNG: Làm giàu dữ liệu chỉ báo với RSI đa khung thời gian cho tất cả các symbol
-    # Điều này cần được thực hiện SAU KHI TẤT CẢ all_indicators đã được populate từ get_price_data và calculate_indicators
     log_message("\nĐang làm giàu dữ liệu chỉ báo với RSI đa khung thời gian...")
     for sym_enrich in all_symbols_to_fetch:
         rsi_h1 = all_indicators.get(sym_enrich, {}).get("1h", {}).get("rsi_14", 50)
@@ -359,7 +373,6 @@ def run_paper_trade_session():
     trades_to_remove = []
     closed_this_session = False
     for trade in portfolio_state["active_trades"]:
-        # Kiểm tra dữ liệu hiện tại của symbol/interval của lệnh
         current_data = all_indicators.get(trade["symbol"], {}).get(trade["interval"])
         if not current_data or current_data.get('price', 0) == 0:
             log_message(f"⚠️ Không có dữ liệu hiện tại (live price) cho lệnh {trade['symbol']}-{trade['interval']}. Bỏ qua kiểm tra đóng lệnh.")
@@ -368,14 +381,13 @@ def run_paper_trade_session():
         current_price = current_data['price'] # Sử dụng live price để kiểm tra SL/TP
         status, exit_price = (None, None)
 
-        # Kiểm tra SL/TP
         if current_price <= trade["sl"]: status, exit_price = "SL_HIT", trade["sl"]
         elif current_price >= trade["tp"]: status, exit_price = "TP_HIT", trade["tp"]
 
         if status:
             pnl_percent = (exit_price - trade["entry_price"]) / trade["entry_price"]
-            pnl_usd = trade["amount_usd"] * pnl_percent
-            portfolio_state["capital"] += pnl_usd
+            pnl_usd = trade["invested_usd"] * pnl_percent # Tính PnL dựa trên invested_usd
+            portfolio_state["cash"] += (trade["invested_usd"] + pnl_usd) # Hoàn trả tiền đầu tư + PnL vào cash
             trade.update({"status": status, "exit_price": exit_price, "exit_time": datetime.now(VIETNAM_TZ).isoformat(), "pnl_percent": pnl_percent * 100, "pnl_usd": pnl_usd})
             portfolio_state["trade_history"].append(trade)
             trades_to_remove.append(trade)
@@ -384,7 +396,6 @@ def run_paper_trade_session():
 
     if trades_to_remove:
         portfolio_state["active_trades"] = [t for t in portfolio_state["active_trades"] if t not in trades_to_remove]
-        # Giới hạn lịch sử giao dịch để không làm file quá lớn (ví dụ: 1000 lệnh gần nhất)
         portfolio_state["trade_history"] = sorted(portfolio_state["trade_history"], key=lambda x: x.get('exit_time', ''), reverse=True)[:1000]
 
 
@@ -393,22 +404,11 @@ def run_paper_trade_session():
     market_context_path = os.path.join(PROJECT_ROOT, "ricenews/lognew/market_context.json")
     market_context = load_json_file(market_context_path)
 
-    # Lấy chỉ báo BTC trên 1D và 4H cho market snapshot
     btc_d1_indicators = all_indicators.get("BTCUSDT", {}).get("1d", {})
     btc_h4_indicators = all_indicators.get("BTCUSDT", {}).get("4h", {})
-
-    # Để lấy AI score của BTC, cần chạy Trade Advisor trên BTC H4
-    # indicators_for_advisor đã được làm giàu RSI đa khung thời gian ở trên
+    
     btc_h4_advisor_input = btc_h4_indicators.copy()
     btc_h4_advisor_input['price'] = btc_h4_indicators.get('closed_candle_price', btc_h4_indicators.get('price', 0))
-
-    # KHÔNG CẦN THÊM DÒNG NÀY NỮA VÌ ĐÃ LÀM GIÀU Ở TRÊN
-    # for tf in ["1h", "4h", "1d"]:
-    #     df_rsi = get_price_data("BTCUSDT", tf)
-    #     if not df_rsi.empty and len(df_rsi) >= 20:
-    #         btc_h4_advisor_input[f"rsi_{tf}"] = round(ta.momentum.rsi(df_rsi["close"], window=14).iloc[-2], 2)
-    #     else:
-    #         btc_h4_advisor_input[f"rsi_{tf}"] = 50.0
 
     btc_h4_advisor_decision = {}
     if btc_h4_advisor_input.get('price', 0) != 0 and not btc_h4_indicators.get('reason'):
@@ -429,6 +429,7 @@ def run_paper_trade_session():
     base_tactic_config = TACTICS_LAB[selected_tactic_name]
 
     # 3.3. Áp dụng tâm lý lên lối đánh đã chọn
+    # all_indicators là global nên không cần truyền vào apply_portfolio_psychology
     effective_tactic = apply_portfolio_psychology(base_tactic_config, portfolio_state)
 
     # 4. Quét lệnh mới với lối đánh đã chọn
@@ -438,33 +439,18 @@ def run_paper_trade_session():
         if any(t['symbol'] == symbol for t in portfolio_state['active_trades']): continue
 
         for interval in INTERVALS_TO_SCAN: # Chỉ quét các interval đã cấu hình để mở lệnh
-            # Lấy chỉ báo của nến ĐÃ ĐÓNG cho quyết định của Trade Advisor
-            # và giá live cho entry
             current_symbol_indicators = all_indicators.get(symbol, {}).get(interval)
 
-            # Nếu không có dữ liệu hoặc dữ liệu không đủ để Trade Advisor xử lý
             if not current_symbol_indicators or current_symbol_indicators.get('reason'):
                 log_message(f"⚠️ Bỏ qua {symbol}-{interval}. Dữ liệu chỉ báo không đủ hoặc không hợp lệ: {current_symbol_indicators.get('reason', 'Không rõ lý do')}.")
                 continue
 
-            # Trade Advisor cần các chỉ báo của nến ĐÃ ĐÓNG (closed_candle_price)
-            # Ta sẽ tạo một bản sao và điều chỉnh để phù hợp với Trade Advisor
             indicators_for_advisor = current_symbol_indicators.copy()
             indicators_for_advisor['price'] = current_symbol_indicators.get('closed_candle_price', current_symbol_indicators.get('price', 0))
             if indicators_for_advisor['price'] == 0: # Giá nến đóng không hợp lệ
                 log_message(f"⚠️ Bỏ qua {symbol}-{interval}. Giá nến đóng để tính advisor score là 0.")
                 continue
-
-
-            # KHÔNG CẦN THÊM DÒNG NÀY NỮA VÌ ĐÃ LÀM GIÀU Ở TRÊN
-            # Bổ sung RSI đa khung thời gian cho altcoin (rsi_1h, rsi_4h, rsi_1d)
-            # for tf_alt in ["1h", "4h", "1d"]:
-            #     df_rsi_alt = get_price_data(symbol, tf_alt)
-            #     if not df_rsi_alt.empty and len(df_rsi_alt) >= 20:
-            #         indicators_for_advisor[f"rsi_{tf_alt}"] = round(ta.momentum.rsi(df_rsi_alt["close"], window=14).iloc[-2], 2)
-            #     else:
-            #         indicators_for_advisor[f"rsi_{tf_alt}"] = 50.0
-
+            
             decision = get_advisor_decision(
                 symbol, interval, indicators_for_advisor, ADVISOR_BASE_CONFIG,
                 weights_override=effective_tactic["WEIGHTS"]
@@ -478,7 +464,6 @@ def run_paper_trade_session():
             elif effective_tactic.get("ENABLE_DIP", False):
                 score_min, score_max = effective_tactic["DIP_RANGE"]
                 if score_min <= final_score < score_max:
-                    # Tận dụng doji_type và candle_pattern đã có từ indicator.py (từ nến đã đóng)
                     if (indicators_for_advisor.get('rsi_divergence') == 'bullish' or
                         indicators_for_advisor.get('doji_type') == 'dragonfly' or
                         indicators_for_advisor.get('candle_pattern') == 'hammer' or
@@ -487,22 +472,20 @@ def run_paper_trade_session():
                         amount_percent = effective_tactic["DIP_PCT"]
 
             if trade_type:
-                # Giá vào lệnh phải là giá live hiện tại
                 entry_price = current_symbol_indicators['price']
-                amount_usd = portfolio_state['capital'] * amount_percent
-                if amount_usd > portfolio_state['capital'] or amount_usd < 10: # Đảm bảo không quá vốn và đủ lớn
-                    log_message(f"⚠️ Số tiền giao dịch quá nhỏ hoặc vượt vốn (${amount_usd:,.2f}). Bỏ qua lệnh cho {symbol}.")
+                invested_usd = portfolio_state['cash'] * amount_percent # SỐ TIỀN ĐẦU TƯ
+                
+                if invested_usd > portfolio_state['cash'] or invested_usd < 10: # Đảm bảo không quá vốn và đủ lớn
+                    log_message(f"⚠️ Số tiền giao dịch quá nhỏ hoặc vượt vốn (${invested_usd:,.2f}). Bỏ qua lệnh cho {symbol}.")
                     continue
                 if entry_price == 0: # Đảm bảo giá entry không phải 0
                     log_message(f"⚠️ Giá vào lệnh cho {symbol} là 0. Bỏ qua lệnh.")
                     continue
 
-
                 # === LOGIC TÍNH TP/SL DỰA TRÊN FINAL_SCORE & TACTIC'S BASE RR ===
                 base_rr = effective_tactic["RR"]
                 calculated_rr = base_rr
 
-                # Áp dụng multiplier nếu score đủ cao
                 if final_score >= TP_SL_SCALING_RULES["critical_score_threshold"]:
                     calculated_rr = base_rr * TP_SL_SCALING_RULES["critical_score_rr_multiplier"]
                     log_message(f"📈 Critical Score RR kích hoạt! ({final_score:.2f} >= {TP_SL_SCALING_RULES['critical_score_threshold']}) -> RR tăng lên {calculated_rr:.2f}")
@@ -513,11 +496,9 @@ def run_paper_trade_session():
                 sl_price = entry_price * (1 - effective_tactic["SL_PCT"])
                 tp_price = entry_price * (1 + effective_tactic["SL_PCT"] * calculated_rr)
 
-                # Làm tròn TP/SL để tránh số quá dài
                 tp_price = round(tp_price, 8)
                 sl_price = round(sl_price, 8)
 
-                # Đảm bảo TP > Entry > SL (cho lệnh mua)
                 if tp_price <= entry_price or sl_price >= entry_price:
                     log_message(f"⚠️ TP ({tp_price}) hoặc SL ({sl_price}) không hợp lệ so với Entry ({entry_price}). Bỏ qua lệnh cho {symbol}.")
                     continue
@@ -527,47 +508,45 @@ def run_paper_trade_session():
                     "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval,
                     "status": "ACTIVE", "opened_by_tactic": selected_tactic_name,
                     "trade_type": trade_type, "entry_price": entry_price,
-                    "tp": tp_price, "sl": sl_price, "amount_usd": amount_usd,
+                    "tp": tp_price, "sl": sl_price, "invested_usd": invested_usd, 
                     "entry_time": datetime.now(VIETNAM_TZ).isoformat(), "entry_score": final_score
                 }
-                portfolio_state["capital"] -= amount_usd # Trừ vốn khi mở lệnh
+                portfolio_state["cash"] -= invested_usd # TRỪ TIỀN MẶT KHI MỞ LỆNH
                 portfolio_state["active_trades"].append(new_trade)
                 opened_this_session = True
 
                 log_icon = "🔥" if trade_type == "TREND_FOLLOW" else "💡"
-                log_message(f"{log_icon} Lệnh Mới ({selected_tactic_name}/{trade_type}): {symbol} | Score: {final_score:.2f} | Entry: {entry_price:.4f} | TP: {tp_price:.4f} | SL: {sl_price:.4f} | Amount: ${amount_usd:,.2f}")
+                log_message(f"{log_icon} Lệnh Mới ({selected_tactic_name}/{trade_type}): {symbol} | Score: {final_score:.2f} | Entry: {entry_price:.4f} | TP: {tp_price:.4f} | SL: {sl_price:.4f} | Invested: ${invested_usd:,.2f}")
                 break # Chỉ mở 1 lệnh mới mỗi phiên quét
         if opened_this_session: break # Chỉ mở 1 lệnh mới mỗi phiên quét
 
     # 5. Lưu trạng thái, ghi log vốn và xuất lịch sử giao dịch
-    log_message(f"💰 Vốn Hiện Tại: ${portfolio_state['capital']:,.2f} | Lệnh Mở: {len(portfolio_state['active_trades'])}")
+    # TÍNH TOÁN TOTAL_EQUITY CHO LOG VÀ BIỂU ĐỒ
+    current_total_equity = calculate_total_equity(portfolio_state)
+    log_message(f"💰 Tiền Mặt Khả Dụng: ${portfolio_state['cash']:,.2f} | Tổng Tài Sản: ${current_total_equity:,.2f} | Lệnh Mở: {len(portfolio_state['active_trades'])}")
+    
     save_json_file(STATE_FILE, portfolio_state)
     export_trade_history_to_csv(portfolio_state['trade_history']) # Xuất lịch sử giao dịch
-    log_equity_point(portfolio_state['capital']) # Ghi điểm vốn hiện tại
 
     # 6. Logic gửi báo cáo (Cả 2 loại)
     # 6.1 Báo cáo tổng quan hàng ngày (8h, 20h)
     if should_send_daily_summary():
-        report_content = build_daily_summary_report(portfolio_state, all_indicators) # TRUYỀN all_indicators
+        report_content = build_daily_summary_report(portfolio_state) 
         send_discord_report(report_content)
 
-        # Vẽ và gửi biểu đồ Equity Curve kèm báo cáo hàng ngày
-        plot_equity_curve(EQUITY_CURVE_IMAGE_FILE)
-        send_discord_image(EQUITY_CURVE_IMAGE_FILE, "📊 **Cập nhật Đường Vốn (Equity Curve)**")
-
         timestamps = load_json_file(TIMESTAMP_FILE, {})
-        # Cập nhật timestamp theo mốc giờ đã gửi
         timestamps["last_daily_report_time_slot"] = datetime.now(VIETNAM_TZ).strftime("%Y-%m-%d-%H")
         save_json_file(TIMESTAMP_FILE, timestamps)
 
     # 6.2 Cảnh báo biến động (Mỗi 4h nếu PnL thay đổi > 0.5%)
     should_send, pnl_change_pct = should_send_volatility_report(portfolio_state)
     if should_send:
-        report_content = build_volatility_report(portfolio_state, pnl_change_pct, all_indicators) # TRUYỀN all_indicators
+        report_content = build_volatility_report(portfolio_state, pnl_change_pct) 
         send_discord_report(report_content)
         timestamps = load_json_file(TIMESTAMP_FILE, {})
         timestamps["last_volatility_report_sent"] = datetime.now().timestamp()
-        timestamps["capital_at_last_volatility_report"] = portfolio_state['capital']
+        # Cập nhật capital_at_last_volatility_report bằng total_equity
+        timestamps["capital_at_last_volatility_report"] = current_total_equity 
         save_json_file(TIMESTAMP_FILE, timestamps)
 
 # ==============================================================================
@@ -589,19 +568,28 @@ def should_send_daily_summary() -> bool:
         return True
     return False
 
-def build_daily_summary_report(state: Dict, all_indicators: Dict) -> str: # BỔ SUNG THAM SỐ all_indicators
+def build_daily_summary_report(state: Dict) -> str: 
     """Xây dựng báo cáo tóm tắt hàng ngày cho danh mục."""
     now_vn = datetime.now(VIETNAM_TZ)
     if not state: return "Chưa có dữ liệu danh mục để báo cáo."
 
-    capital = state.get('capital', INITIAL_CAPITAL)
-    pnl_usd = capital - INITIAL_CAPITAL
+    # TÍNH TOTAL_EQUITY VÀ PNL TỪ ĐÓ
+    current_total_equity = calculate_total_equity(state)
+    pnl_usd = current_total_equity - INITIAL_CAPITAL
     pnl_percent = (pnl_usd / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
     pnl_icon = "📈" if pnl_usd >= 0 else "📉"
 
+    # Tính Winrate
+    winrate_pct, wins, losses = calculate_winrate(state.get('trade_history', []))
+    winrate_str = f"Winrate: `{winrate_pct:.2f}%` ({wins}W/{losses}L)"
+
     report_lines = [f"📊 **Báo Cáo Tổng Quan - {now_vn.strftime('%H:%M %d-%m-%Y')}** 📊\n"]
     report_lines.append(f"--- **`Tổng Quan`** ---")
-    report_lines.append(f"{pnl_icon} **Vốn:** `${capital:,.2f}` | **PnL:** `${pnl_usd:,.2f}` (`{pnl_percent:+.2f}%`)")
+    # ĐỊNH DẠNG PNL MỚI
+    report_lines.append(f"{pnl_icon} **Total Money:** `${current_total_equity:,.2f}` (`{pnl_percent:+.2f}%`) | **PnL:** `${pnl_usd:,.2f}`")
+    report_lines.append(f"Base Capital: `${INITIAL_CAPITAL:,.2f}` | {winrate_str}") # Thêm Winrate
+    report_lines.append(f"💰 **Tiền Mặt Khả Dụng:** `${state.get('cash', INITIAL_CAPITAL):,.2f}`")
+
 
     active_trades = state.get('active_trades', [])
     report_lines.append(f"  **Lệnh đang mở ({len(active_trades)}):**")
@@ -610,20 +598,62 @@ def build_daily_summary_report(state: Dict, all_indicators: Dict) -> str: # BỔ
             entry_time = datetime.fromisoformat(trade['entry_time']).astimezone(VIETNAM_TZ)
             held_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
 
-            # Ước tính PnL hiện tại nếu có live price trong all_indicators
-            # SỬ DỤNG THAM SỐ all_indicators
             current_price_info = all_indicators.get(trade['symbol'], {}).get(trade['interval'])
             current_live_price = current_price_info.get('price') if current_price_info else None
 
             current_pnl_str = "N/A"
+            invested_amount = trade.get('invested_usd', 0.0) # Đảm bảo dùng invested_usd
             if current_live_price and trade['entry_price'] > 0:
                 current_pnl_pct = (current_live_price - trade['entry_price']) / trade['entry_price'] * 100
-                current_pnl_usd = trade['amount_usd'] * (current_live_price - trade['entry_price']) / trade['entry_price']
+                current_pnl_usd = invested_amount * (current_live_price - trade['entry_price']) / trade['entry_price']
                 current_pnl_str = f"PnL: `${current_pnl_usd:,.2f}` (`{current_pnl_pct:+.2f}%`)"
 
-            report_lines.append(f"  - `{trade['symbol']}` ({trade['trade_type']}) | Tactic: `{trade['opened_by_tactic']}` | Giữ: `{held_hours:.1f}h` | {current_pnl_str}")
+            report_lines.append(f"  - `{trade['symbol']}` ({trade['trade_type']}) | Tactic: `{trade['opened_by_tactic']}` | Giữ: `{held_hours:.1f}h` | Invested: `${invested_amount:,.2f}` | {current_pnl_str}")
     else:
         report_lines.append("  -> `Không có lệnh nào đang mở.`")
+    
+    # BỔ SUNG: Giới hạn số lượng symbols trong phần báo cáo tín hiệu
+    report_lines.append(f"\n--- **`Tín Hiệu Thị Trường (Top {5} Symbols)`** ---")
+    
+    symbols_for_signal_report = list(set(trade['symbol'] for trade in active_trades)) # Ưu tiên các symbol đang có lệnh mở
+    
+    # Thêm các symbol khác từ SYMBOLS_TO_SCAN cho đến khi đủ 5 hoặc hết danh sách
+    for sym in SYMBOLS_TO_SCAN:
+        if sym not in symbols_for_signal_report and len(symbols_for_signal_report) < 5:
+            symbols_for_signal_report.append(sym)
+        if len(symbols_for_signal_report) >= 5:
+            break # Đủ 5 symbols
+
+    if not symbols_for_signal_report:
+        report_lines.append("`Không có tín hiệu để báo cáo.`")
+    else:
+        for symbol in symbols_for_signal_report:
+            symbol_data = all_indicators.get(symbol, {})
+            if not symbol_data: continue
+
+            report_lines.append(f"\n**--- {symbol.upper()} ---**")
+
+            for interval in ALL_TIME_FRAMES: # Hiển thị tất cả intervals cho các symbol được chọn
+                ind = symbol_data.get(interval, {})
+                if not ind: continue
+
+                price = ind.get('price', 0)
+                signal_details = check_signal(ind)
+                level = signal_details.get("level", "HOLD")
+                tag = signal_details.get("tag", "")
+                score = ind.get("advisor_score")
+
+                level_icons = {"CRITICAL": "🚨", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "HOLD": "⏸️"}
+                icon = level_icons.get(level, "ℹ️")
+
+                id_str = f"**{now_vn.strftime('%Y-%m-%d %H:%M:%S')}  {symbol.upper()}  {interval}**"
+                price_str = f"{price:.4f}"
+                signal_str = f"**{level}**" + (f" ({tag})" if tag else "")
+                score_str = f"**{score:.1f}**" if score is not None else "N/A"
+
+                line = f"{icon} {id_str}\n G-Signal: {signal_str} | Giá: *{price_str}* | Score: {score_str}"
+                report_lines.append(line)
+
     return "\n".join(report_lines)
 
 def should_send_volatility_report(current_state: Dict) -> Tuple[bool, float]:
@@ -636,16 +666,17 @@ def should_send_volatility_report(current_state: Dict) -> Tuple[bool, float]:
         return False, 0
 
     last_check_capital = timestamps.get("capital_at_last_volatility_report", INITIAL_CAPITAL)
-    current_capital = current_state['capital']
+    # Lấy total_equity hiện tại để so sánh
+    current_total_equity = calculate_total_equity(current_state) # all_indicators là global
 
     # Nếu lần đầu chạy hoặc vốn không đủ để tính %
-    if last_check_capital == 0 or INITIAL_CAPITAL == 0:
+    if last_check_capital == 0 or INITIAL_CAPITAL == 0: # INITIAL_CAPITAL > 0 luôn
         # Đặt lại giá trị ban đầu nếu chưa có để bắt đầu theo dõi
-        timestamps["capital_at_last_volatility_report"] = current_capital
+        timestamps["capital_at_last_volatility_report"] = current_total_equity # Ghi total_equity
         save_json_file(TIMESTAMP_FILE, timestamps)
         return False, 0
 
-    pnl_change_percent = ((current_capital - last_check_capital) / last_check_capital) * 100
+    pnl_change_percent = ((current_total_equity - last_check_capital) / last_check_capital) * 100
 
     # Gửi nếu có biến động vốn đáng kể
     if abs(pnl_change_percent) >= VOLATILITY_REPORT_PNL_THRESHOLD:
@@ -653,13 +684,13 @@ def should_send_volatility_report(current_state: Dict) -> Tuple[bool, float]:
 
     return False, 0
 
-def build_volatility_report(state: Dict, pnl_change: float, all_indicators: Dict) -> str: # BỔ SUNG THAM SỐ all_indicators
+def build_volatility_report(state: Dict, pnl_change: float) -> str: 
     """Xây dựng báo cáo cảnh báo biến động."""
-    capital = state.get('capital', INITIAL_CAPITAL)
+    current_total_equity = calculate_total_equity(state)
     pnl_icon = "📈" if pnl_change >= 0 else "📉"
 
     report_lines = [f"⚡ **Cập nhật Biến động Danh mục ({VOLATILITY_REPORT_COOLDOWN_HOURS}H)** ⚡\n"]
-    report_lines.append(f"{pnl_icon} **PnL thay đổi:** `{pnl_change:+.2f}%` | **Vốn hiện tại:** `${capital:,.2f}`")
+    report_lines.append(f"{pnl_icon} **PnL thay đổi:** `{pnl_change:+.2f}%` | **Tổng Tài Sản hiện tại:** `${current_total_equity:,.2f}`")
 
     # 5 lệnh đóng gần nhất (sắp xếp theo thời gian đóng lệnh mới nhất)
     trade_history = sorted(state.get('trade_history', []), key=lambda x: x.get('exit_time', ''), reverse=True)
@@ -667,7 +698,8 @@ def build_volatility_report(state: Dict, pnl_change: float, all_indicators: Dict
         report_lines.append(f"\n**5 Lệnh đóng gần nhất:**")
         for trade in trade_history[:5]:
             icon = '✅' if trade['pnl_usd'] >= 0 else '❌'
-            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['trade_type']}) | PnL: `${trade['pnl_usd']:,.2f}` (`{trade['pnl_percent']:.2f}%`)")
+            invested_amount = trade.get('invested_usd', 0.0) # Đảm bảo dùng invested_usd
+            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['trade_type']}) | Invested: `${invested_amount:,.2f}` | PnL: `${trade['pnl_usd']:,.2f}` (`{trade['pnl_percent']:.2f}%`)")
     else:
         report_lines.append(f"\n`Không có lệnh nào được đóng gần đây.`")
 
@@ -684,12 +716,13 @@ def build_volatility_report(state: Dict, pnl_change: float, all_indicators: Dict
             current_live_price = current_price_info.get('price') if current_price_info else None
             
             current_pnl_str = "N/A"
+            invested_amount = trade.get('invested_usd', 0.0) # Đảm bảo dùng invested_usd
             if current_live_price and trade['entry_price'] > 0:
                 current_pnl_pct = (current_live_price - trade['entry_price']) / trade['entry_price'] * 100
-                current_pnl_usd = trade['amount_usd'] * (current_live_price - trade['entry_price']) / trade['entry_price']
+                current_pnl_usd = invested_amount * (current_live_price - trade['entry_price']) / trade['entry_price']
                 current_pnl_str = f"PnL: `${current_pnl_usd:,.2f}` (`{current_pnl_pct:+.2f}%`)"
             
-            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['opened_by_tactic']}/{trade['trade_type']}) | {current_pnl_str}")
+            report_lines.append(f"{icon} `{trade['symbol']}` ({trade['opened_by_tactic']}/{trade['trade_type']}) | Invested: `${invested_amount:,.2f}` | {current_pnl_str}")
     else:
         report_lines.append(f"\n`Không có lệnh nào được mở gần đây.`")
 
@@ -697,7 +730,6 @@ def build_volatility_report(state: Dict, pnl_change: float, all_indicators: Dict
 
 if __name__ == "__main__":
     log_message("====== 🚀 QUẢN LÝ DANH MỤC (PAPER TRADE) BẮT ĐẦU PHIÊN LÀM VIỆC 🚀 ======")
-    # all_indicators sẽ được populate trong run_paper_trade_session
-    # và được truyền vào các hàm báo cáo.
+    # all_indicators đã được khai báo ở phạm vi module (global)
     run_paper_trade_session()
     log_message("====== ✅ QUẢN LÝ DANH MỤC (PAPER TRADE) KẾT THÚC PHIÊN LÀM VIỆC ✅ ======")
