@@ -21,7 +21,7 @@ import requests
 from dotenv import load_dotenv
 
 # --- THAY ĐỔI 1: Thiết lập đường dẫn và Import ---
-# Giữ nguyên phần thiết lập sys.path để đảm bảo import hoạt động
+# Giữ nguyên phần thiết lập sys.path để đảm bảo import hoạt hoạt động
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, "ricenews"))
@@ -132,8 +132,12 @@ def main():
                     # Dùng hàm calculate_indicators gốc
                     indicators_data = calculate_indicators(df_raw, sym, itv)
                     all_indicators[sym][itv] = indicators_data
+                else:
+                    log_to_txt(f"DEBUG: Không đủ dữ liệu nến ({len(df_raw)} < 50) cho {sym}-{itv}.")
+                    all_indicators[sym][itv] = {} # Đảm bảo có entry nhưng rỗng
             except Exception as e:
-                log_to_txt(f"Error pre-calculating for {sym}-{itv}: {e}")
+                log_to_txt(f"ERROR: Lỗi khi tính toán chỉ báo cho {sym}-{itv}: {e}")
+                all_indicators[sym][itv] = {} # Đảm bảo có entry nhưng rỗng
     print("✅ Pre-calculation complete.")
 
     # Tải state và context một lần
@@ -146,19 +150,30 @@ def main():
     level_counter = Counter()
 
     print(f"\n[2/3] Analyzing {len(trades)} open positions...")
+    # Định nghĩa các ngưỡng alert mới
+    PNL_ALERT_THRESHOLD = 2.0 # %
+    SCORE_ALERT_THRESHOLD = 0.5 # điểm
+
     for trade in trades:
         try:
             trade_id, symbol, interval = trade["id"], trade["symbol"], trade["interval"]
+            print(f"\n--- Đang xử lý lệnh: {symbol} ({interval}) ---") # Dòng debug
+            print(f"Trade ID: {trade_id}, Symbol: {symbol}, Interval: {interval}") # Dòng debug
 
             # Lấy dữ liệu chỉ báo của khung thời gian chính
             indicators = all_indicators.get(symbol, {}).get(interval)
-            if not indicators:
-                log_to_txt(f"Skipping {trade_id} - {symbol}-{interval} due to missing indicator data.")
-                continue
+            
+            if not indicators or not indicators.get('price'): # Thêm kiểm tra 'price' để đảm bảo dữ liệu cơ bản
+                print(f"DEBUG: Dữ liệu chỉ báo hoặc giá cho {symbol}-{interval} bị thiếu hoặc rỗng. all_indicators[{symbol}][{interval}]: {all_indicators.get(symbol, {}).get(interval)}") # Dòng debug
+                log_to_txt(f"Skipping {trade_id} - {symbol}-{interval} due to missing or incomplete indicator data.")
+                continue # Lệnh bị bỏ qua ở đây
+            else:
+                print(f"DEBUG: Dữ liệu chỉ báo cho {symbol}-{interval} ĐÃ CÓ. Một phần dữ liệu: {list(indicators.keys())[:5]}") # Dòng debug
 
             # ### THAY ĐỔI 3: GỌI TRADE ADVISOR ĐỂ LẤY QUYẾT ĐỊNH TỔNG HỢP ###
             # Gắn các chỉ báo đa khung thời gian vào indicators để check_signal bên trong get_advisor_decision có thể sử dụng
             for tf_key in ["1h", "4h", "1d"]:
+                # Đảm bảo rsi_14 tồn tại trước khi gán
                 indicators[f"rsi_{tf_key}"] = all_indicators.get(symbol, {}).get(tf_key, {}).get("rsi_14", 50)
 
             # Đây là bước quan trọng nhất: gọi bộ não trung tâm
@@ -219,21 +234,41 @@ def main():
             overview_data.append(report_payload)
             level_counter[level_key] += 1
 
-            # Logic kiểm tra thay đổi và gửi alert (giữ nguyên)
+            # Logic kiểm tra thay đổi và gửi alert
             prev = advisor_map.get(trade_id, {})
-            pnl_change_significant = abs(prev.get("pnl_percent", 0) - pnl) > 3.0
-            # Sử dụng final_score (đã điều chỉnh) để so sánh
-            score_change_significant = abs(prev.get("final_score", 5.0) - final_score) > 0.8 # Tăng ngưỡng vì thang điểm 10
+            
+            # Tính toán thay đổi PnL và Score so với lần alert gần nhất
+            prev_pnl_percent = prev.get("pnl_percent", 0)
+            actual_pnl_change_value = abs(prev_pnl_percent - pnl)
+            
+            prev_final_score = prev.get("final_score", 5.0)
+            actual_score_change_value = abs(prev_final_score - final_score)
+
+            pnl_change_significant = actual_pnl_change_value > PNL_ALERT_THRESHOLD
+            score_change_significant = actual_score_change_value > SCORE_ALERT_THRESHOLD
 
             if pnl_change_significant or score_change_significant:
                 alert_msg = build_alert_message(report_payload)
                 send_discord_alert(alert_msg)
                 log_to_txt(f"SEND alert for {symbol} ({interval}) - Level: {level_key} | Score: {final_score:.1f} (Base: {base_score:.1f}, PnL Adj: {pnl_adjustment_score:+.2f})")
+            else: # Dòng debug mới để hiển thị lý do không gửi alert
+                reasons_not_sent = []
+                if not pnl_change_significant:
+                    reasons_not_sent.append(f"PnL: {actual_pnl_change_value:.2f}% < {PNL_ALERT_THRESHOLD:.1f}%")
+                if not score_change_significant:
+                    reasons_not_sent.append(f"Score: {actual_score_change_value:.2f} < {SCORE_ALERT_THRESHOLD:.1f}")
+                
+                reason_str = ", ".join(reasons_not_sent)
+                
+                print(f"DEBUG: Không gửi alert cho {symbol}. Lý do: [{reason_str}]")
+                log_to_txt(f"DEBUG: Không gửi alert cho {symbol}. Lý do: [{reason_str}]")
+
 
             # Cập nhật advisor_map với cả base_score và final_score
             advisor_map[trade_id] = {"id": trade_id, "pnl_percent": pnl, "final_score": final_score, "base_score": base_score}
 
         except Exception as e:
+            print(f"DEBUG: Lỗi nghiêm trọng khi xử lý lệnh {trade.get('id', 'N/A')} - {symbol}: {e}") # Dòng debug
             log_to_txt(f"[CRITICAL ERROR] Failed to process trade {trade.get('id', 'N/A')}: {e}")
             import traceback
             log_to_txt(traceback.format_exc())
@@ -244,6 +279,9 @@ def main():
         send_discord_alert(overview_msg)
         cooldown_state["last_overview_timestamp"] = now.timestamp()
         print("✅ Overview report sent.")
+    else: # Dòng debug
+        print("DEBUG: Không gửi báo cáo tổng quan. Điều kiện chưa phù hợp hoặc không có dữ liệu overview_data.")
+
 
     write_json(advisor_file, list(advisor_map.values()))
     write_json(COOLDOWN_STATE_PATH, cooldown_state)
@@ -284,7 +322,7 @@ def generate_indicator_text_block(ind: dict) -> str:
     doji_note = f"{ind['doji_type'].replace('_', ' ').title()} Doji" if ind.get("doji_type") else "No"
     trend = ind.get("trend", "unknown")
     cmf = ind.get("cmf", 'N/A')
-    
+
     # Lấy thông tin tín hiệu kỹ thuật đã được gắn vào
     signal_details = ind.get("signal_details", {})
     signal_reason = signal_details.get('reason', '...')
@@ -418,12 +456,15 @@ def build_alert_message(payload: dict) -> str:
 
     symbol, interval, trade_id = trade['symbol'], trade['interval'], trade['id']
     real_entry = payload["real_entry"]
+    initial_investment_usd = trade.get('amount', 1000) # Lấy số vốn ban đầu của lệnh
+    pnl_usd = round(initial_investment_usd * pnl / 100, 1)
+    current_value_usd = initial_investment_usd + pnl_usd # Giá trị hiện tại của khoản đầu tư
 
     title_block = f"{ICON.get(level_key, ' ')} [{level_key.replace('_', ' ')}] Đánh giá lệnh: {symbol} ({interval})"
 
     info_block = (f"📌 ID: {trade_id}  {symbol}  {interval}\n"
                   f"📆 In time: {trade.get('in_time')}  |  Đã giữ: {calc_held_hours(trade.get('in_time'))} h  |  RealEntry: {format_price(real_entry)}\n"
-                  f"💰 PnL: {round(trade.get('amount', 1000) * pnl / 100, 1):.1f} USD ({pnl:.2f}%)")
+                  f"💰 PnL: {pnl_usd:.1f} USD ({pnl:.2f}%) | $: {current_value_usd:,.1f} / {initial_investment_usd:,.1f}")
 
     # Lấy indicator của khung thời gian chính từ advisor_decision để hiển thị
     main_indicators = advisor_decision.get("full_indicators", {})
@@ -445,15 +486,15 @@ def build_alert_message(payload: dict) -> str:
     ]))
 
 def build_overview_report(overview_data: list, level_counter: Counter, now: datetime) -> str:
-    # Hàm này gần như không đổi, chỉ cần điều chỉnh cách lấy dữ liệu từ payload
     total_start = sum(t["trade"].get("amount", 1000) for t in overview_data)
     total_pnl_usd = sum(t["trade"].get("amount", 1000) * t["pnl"] / 100 for t in overview_data)
+    total_current_value_usd = total_start + total_pnl_usd # Tổng giá trị hiện tại của tất cả các lệnh mở
 
     lv_counts = ", ".join(f"{ICON[k]}{v}" for k, v in sorted(level_counter.items(), key=lambda item: list(ICON.keys()).index(item[0])))
     total_pnl_percent = (total_pnl_usd / total_start * 100) if total_start else 0.0
 
     header  = f"📊 **Tổng quan danh mục {now:%d-%m %H:%M}**\n"
-    header += f"Lệnh: {len(overview_data)} | PnL Tổng: {total_pnl_usd:+.1f}$ ({total_pnl_percent:+.2f}%)\n"
+    header += f"Lệnh: {len(overview_data)} | PnL Tổng: {total_pnl_usd:+.1f}$ ({total_pnl_percent:+.2f}%) | $: {total_current_value_usd:,.1f} / {total_start:,.1f}\n"
     header += f"Phân bổ cấp: {lv_counts}"
 
     overview_lines = []
@@ -461,13 +502,13 @@ def build_overview_report(overview_data: list, level_counter: Counter, now: date
     for t_payload in sorted(overview_data, key=lambda x: x["advisor_decision"].get('final_score', 0)):
         t = t_payload["trade"]
         advisor_decision = t_payload["advisor_decision"]
+        
+        initial_investment_usd_single_trade = t.get('amount', 1000)
+        pnl_usd_single_trade = round(initial_investment_usd_single_trade * t_payload['pnl'] / 100, 1)
+        current_value_usd_single_trade = initial_investment_usd_single_trade + pnl_usd_single_trade
 
         final_score = advisor_decision.get('final_score', 5.0)
-        # Lấy base_score từ advisor_map nếu có, nếu không thì dùng final_score đã điều chỉnh
-        # Điều này đảm bảo hiển thị đúng base_score ban đầu từ advisor
-        trade_id = t_payload["trade"]["id"]
-        base_score_from_log = load_json(os.path.join(ADVISOR_DIR, f"{now.strftime('%Y-%m-%d')}.json"), {})
-        base_score_for_display = next((item.get("base_score", 5.0) for item in base_score_from_log if item.get("id") == trade_id), 5.0)
+        base_score_for_display = t_payload["advisor_decision"].get("base_score", 5.0)
 
         tech_score = advisor_decision.get('tech_score', 5.0)
         ml_data = advisor_decision.get('ai_prediction', {})
@@ -478,6 +519,7 @@ def build_overview_report(overview_data: list, level_counter: Counter, now: date
 
         line = (f"📌 **{t['symbol']} ({t['interval']})** | "
                 f"PnL: {t_payload['pnl']:+.2f}% | "
+                f"$: {current_value_usd_single_trade:,.1f} / {initial_investment_usd_single_trade:,.1f} | "
                 f"Entry: {format_price(t_payload.get('real_entry', 0))}\n"
                 f"🧠 T:{tech_score:.1f} | AI:{ai_display_str} | **Score: {final_score:.1f}/10** (Base: {base_score_for_display:.1f}) {ICON.get(t_payload['level_key'], ' ')}")
         overview_lines.append(line)
