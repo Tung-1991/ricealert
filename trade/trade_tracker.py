@@ -3,12 +3,20 @@ import os
 import json
 import requests
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(dotenv_path="../.env")
+# Load .env an toàn bất kể script được chạy từ đâu
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
 WEBHOOK_URL = os.getenv("DISCORD_TRADE_WEBHOOK")
+if not WEBHOOK_URL:
+    raise RuntimeError(f"❌ Không tìm thấy DISCORD_TRADE_WEBHOOK trong {env_path}")
+
 TRADELOG_DIR = "/root/ricealert/trade/tradelog"
 os.makedirs(TRADELOG_DIR, exist_ok=True)
+
 def get_price(symbol):
     url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
     try:
