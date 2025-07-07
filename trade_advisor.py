@@ -9,7 +9,7 @@ from signal_logic import check_signal
 # ==============================================================================
 FULL_CONFIG = {
     "NOTES": "v6.1 - Flexible Weights",
-    "SCORE_RANGE": 7.0,
+    "SCORE_RANGE": 8.0,
     "WEIGHTS": { 'tech': 0.4, 'context': 0.2, 'ai': 0.4 },
     "DECISION_THRESHOLDS": { "buy": 6.0, "sell": 4.0 },
     "TRADE_PLAN_RULES": {
