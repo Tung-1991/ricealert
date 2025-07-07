@@ -221,7 +221,7 @@ def main():
             # Ngưỡng này có thể được tinh chỉnh cho phù hợp hơn
             level_key_map = [
                 (3.0, "PANIC_SELL"), (4.0, "SELL"), (4.8, "AVOID"),
-                (5.5, "HOLD"), (6.5, "WEAK_BUY"), (7.8, "BUY"), (10.1, "STRONG_BUY")
+                (5.8, "HOLD"), (6.5, "WEAK_BUY"), (7.8, "BUY"), (10.1, "STRONG_BUY")
             ]
             level_key = next((lvl for thr, lvl in level_key_map if final_score < thr), "AVOID")
 

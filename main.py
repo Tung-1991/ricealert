@@ -28,7 +28,7 @@ COOLDOWN_LEVEL_MAP = {
     "1d":   {"WATCHLIST": 1800, "ALERT": 1560, "WARNING": 1500, "CRITICAL": 1380},
 }
 SEND_LEVELS = ["WATCHLIST", "ALERT", "WARNING", "CRITICAL"]
-ADVISOR_CONFIG = { "SCORE_CHANGE_THRESHOLD": 1.0, "COOLDOWN_HOURS": 6.0 }
+ADVISOR_CONFIG = { "SCORE_CHANGE_THRESHOLD": 1.0, "COOLDOWN_HOURS": 4.0 }
 
 # --- Helper functions ---
 def load_json_helper(file_path: str) -> dict:
@@ -365,13 +365,29 @@ def main() -> None:
                         if (now - last_time).total_seconds() / 3600 < ADVISOR_CONFIG["COOLDOWN_HOURS"]:
                             is_cooldown_passed = False
 
-                    if is_significant_change or is_cooldown_passed:
-                        c2_msg = f"    => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})" if is_significant_change else f"    => ⏰ TÍN HIỆU CỬA 2: Hết cooldown"
-                        print(c2_msg); log_output_lines.append(c2_msg)
-                        send_opportunity_alert(decision_data)
-                        log_to_csv(symbol=symbol, interval=interval, price=decision_data.get('full_indicators', {}).get('price', 0), timestamp=now_str, recommendation=decision_data)
-                        advisor_state[state_key] = {"last_alert_score": final_score, "last_alert_timestamp": now.isoformat()}
+                    if is_significant_change and is_cooldown_passed:
+                        c2_msg = (
+                            f"    => 🔥 TÍN HIỆU CỬA 2: Thay đổi điểm ({last_score:.2f}→{final_score:.2f})"
+                            if is_significant_change
+                            else f"    => ⏰ TÍN HIỆU CỬA 2: Hết cooldown"
+                        )
+                        print(c2_msg)
+                        log_output_lines.append(c2_msg)
+                        shared_timestamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+                        send_opportunity_alert(decision_data, timestamp_str=shared_timestamp)
+                        log_to_csv(
+                            symbol=symbol,
+                            interval=interval,
+                            price=decision_data.get('full_indicators', {}).get('price', 0),
+                            timestamp=shared_timestamp,
+                            recommendation=decision_data
+                        )
+                        advisor_state[state_key] = {
+                            "last_alert_score": final_score,
+                            "last_alert_timestamp": now.isoformat()
+                        }
                         time.sleep(3)
+
 
         except Exception as exc:
             import traceback

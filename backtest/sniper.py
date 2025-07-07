@@ -28,31 +28,31 @@ STRATEGY_CONFIGS = {
     # ⚙️ MỚI: AI với rủi ro thực tế - SL 3%, RR 2
     "AI_ThucTe_3SL_2RR": {
         "NOTES": "AI Gốc - Thử nghiệm SL 3% và RR 2.0 để cân bằng Lợi nhuận/Rủi ro.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
+        "WEIGHTS_OVERRIDE": {'tech': 0.5, 'ai': 0.5, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 6.5,  # Ngưỡng vào lệnh hợp lý
-        "RR_RATIO": 2.0,               # Tỷ lệ RR tiêu chuẩn
-        "SL_PERCENT": 0.03,            # << SL 3%, một con số thực tế hơn nhiều
-        "SCORE_RANGE_OVERRIDE": 7
+        "RR_RATIO": 1.5,               # Tỷ lệ RR tiêu chuẩn
+        "SL_PERCENT": 0.05,            # << SL 3%, một con số thực tế hơn nhiều
+        "SCORE_RANGE_OVERRIDE": 8
     },
 
     # ⚙️ MỚI: AI với rủi ro vừa phải - SL 5%, RR 2
     "AI_ThucTe_5SL_2RR": {
         "NOTES": "AI Gốc - Cho phép biến động nhiều hơn với SL 5%.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
+        "WEIGHTS_OVERRIDE": {'tech': 0.5, 'ai': 0.5, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 6.5,
         "RR_RATIO": 2.0,
-        "SL_PERCENT": 0.05,            # << SL 5%, phù hợp cho swing trade ngắn
-        "SCORE_RANGE_OVERRIDE": 7
+        "SL_PERCENT": 0.08,            # << SL 5%, phù hợp cho swing trade ngắn
+        "SCORE_RANGE_OVERRIDE": 8
     },
 
     # ⚙️ MỚI: AI với rủi ro cao hơn - SL 8%, RR 1.8
     "AI_ThucTe_8SL_1.8RR": {
         "NOTES": "AI Gốc - SL rộng (8%) để bắt các con sóng lớn, RR giảm nhẹ.",
-        "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
-        "ENTRY_SCORE_THRESHOLD": 6.0, # Giảm ngưỡng để bắt nhiều tín hiệu hơn
-        "RR_RATIO": 1.8,
-        "SL_PERCENT": 0.08,            # << SL 8%, chấp nhận rủi ro cao hơn
-        "SCORE_RANGE_OVERRIDE": 7
+        "WEIGHTS_OVERRIDE": {'tech': 1.0, 'ai': 0.0, 'context': 0.0},
+        "ENTRY_SCORE_THRESHOLD": 7.0, # Giảm ngưỡng để bắt nhiều tín hiệu hơn
+        "RR_RATIO": 0.75,
+        "SL_PERCENT": 0.15,            # << SL 8%, chấp nhận rủi ro cao hơn
+        "SCORE_RANGE_OVERRIDE": 8
     },
     
     # Giữ lại chiến lược AI 20% SL để so sánh
@@ -60,8 +60,8 @@ STRATEGY_CONFIGS = {
         "NOTES": "Chiến lược AI gốc với SL 20% để làm cơ sở so sánh.",
         "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 7,
-        "RR_RATIO": 1,
-        "SL_PERCENT": 0.2,
+        "RR_RATIO": 0.75,
+        "SL_PERCENT": 0.15,
         "SCORE_RANGE_OVERRIDE": 8
     }
 }
