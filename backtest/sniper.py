@@ -50,8 +50,8 @@ STRATEGY_CONFIGS = {
         "NOTES": "AI Gốc - SL rộng (8%) để bắt các con sóng lớn, RR giảm nhẹ.",
         "WEIGHTS_OVERRIDE": {'tech': 1.0, 'ai': 0.0, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 7.0, # Giảm ngưỡng để bắt nhiều tín hiệu hơn
-        "RR_RATIO": 0.75,
-        "SL_PERCENT": 0.15,            # << SL 8%, chấp nhận rủi ro cao hơn
+        "RR_RATIO": 1.25,
+        "SL_PERCENT": 0.25,            # << SL 8%, chấp nhận rủi ro cao hơn
         "SCORE_RANGE_OVERRIDE": 8
     },
     
@@ -60,8 +60,8 @@ STRATEGY_CONFIGS = {
         "NOTES": "Chiến lược AI gốc với SL 20% để làm cơ sở so sánh.",
         "WEIGHTS_OVERRIDE": {'tech': 0.0, 'ai': 1.0, 'context': 0.0},
         "ENTRY_SCORE_THRESHOLD": 7,
-        "RR_RATIO": 0.75,
-        "SL_PERCENT": 0.15,
+        "RR_RATIO": 1.25,
+        "SL_PERCENT": 0.25,
         "SCORE_RANGE_OVERRIDE": 8
     }
 }
