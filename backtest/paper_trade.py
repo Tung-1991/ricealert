@@ -92,28 +92,55 @@ TACTICS_LAB = {
     "AI_Aggressor": {
         "NOTES": "Tin vào AI, tự động gồng lời với Trailing SL",
         "WEIGHTS": {'tech': 0.1, 'context': 0.1, 'ai': 0.8},
-        "ENTRY_SCORE": 6.3, "RR": 2.5, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 3.0,
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.8,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.5
+        "ENTRY_SCORE": 6.5,
+        "RR": 2.5,
+        "USE_ATR_SL": True,
+        "ATR_SL_MULTIPLIER": 3.0,
+        "USE_TRAILING_SL": True,
+        "TRAIL_ACTIVATION_RR": 1.0,
+        "TRAIL_DISTANCE_RR": 0.8,
+        "ENABLE_PARTIAL_TP": True,
+        "TP1_RR_RATIO": 0.8,
+        "TP1_PROFIT_PCT": 0.5
     },
     "Balanced_Trader": {
-        "NOTES": "Cân bằng...", "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
-        "ENTRY_SCORE": 6.0, "RR": 2.2, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.5,
-        "ENABLE_PARTIAL_TP": False
+        "NOTES": "Cân bằng, có chốt lời sớm",
+        "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
+        "ENTRY_SCORE": 6.0,
+        "RR": 2.2,
+        "USE_ATR_SL": True,
+        "ATR_SL_MULTIPLIER": 2.5,
+        "ENABLE_PARTIAL_TP": True,
+        "TP1_RR_RATIO": 0.8,
+        "TP1_PROFIT_PCT": 0.5
     },
     "Dip_Hunter": {
-        "NOTES": "Bắt đáy khi sợ hãi...", "WEIGHTS": {'tech': 0.5, 'context': 0.3, 'ai': 0.2},
-        "ENTRY_SCORE": 6.5, "RR": 3.0, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.0,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.4
+        "NOTES": "Bắt đáy khi sợ hãi...",
+        "WEIGHTS": {'tech': 0.5, 'context': 0.3, 'ai': 0.2},
+        "ENTRY_SCORE": 6.5,
+        "RR": 3.0,
+        "USE_ATR_SL": True,
+        "ATR_SL_MULTIPLIER": 2.0,
+        "ENABLE_PARTIAL_TP": True,
+        "TP1_RR_RATIO": 0.7,
+        "TP1_PROFIT_PCT": 0.4
     },
     "Breakout_Hunter": {
-        "NOTES": "Săn đột biến giá/volume", "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2},
-        "ENTRY_SCORE": 7.0, "RR": 2.8, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.0,
-        "ENABLE_PARTIAL_TP": False # Breakout thường không TP1
+        "NOTES": "Săn đột biến giá/volume, có Trailing SL",
+        "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2},
+        "ENTRY_SCORE": 7.0,
+        "RR": 2.8,
+        "USE_ATR_SL": True,
+        "ATR_SL_MULTIPLIER": 2.0,
+        "USE_TRAILING_SL": True,
+        "TRAIL_ACTIVATION_RR": 1.0,
+        "TRAIL_DISTANCE_RR": 0.8,
+        "ENABLE_PARTIAL_TP": False
     },
     "Cautious_Observer": {
-        "NOTES": "Bảo toàn vốn...", "WEIGHTS": {'tech': 0.5, 'context': 0.5, 'ai': 0.0},
-        "ENTRY_SCORE": 8.5, # Rất khó vào lệnh
+        "NOTES": "Bảo toàn vốn...",
+        "WEIGHTS": {'tech': 0.5, 'context': 0.5, 'ai': 0.0},
+        "ENTRY_SCORE": 8.5,
         "ENABLE_PARTIAL_TP": False
     },
 }
@@ -711,7 +738,7 @@ def build_trade_details_for_report(trade: Dict, current_price: float) -> str:
 
     # Gói gọn tất cả thông tin quan trọng vào một dòng
     details_line = (
-        f"  {icon} **{trade['symbol']}** ({trade.get('opened_by_tactic', 'N/A')} | Score:{trade.get('entry_score', 0.0):.1f}) "
+        f"  {icon} **{trade['symbol']}-{trade.get('interval', 'N/A')}** ({trade.get('opened_by_tactic', 'N/A')} | Score:{trade.get('entry_score', 0.0):.1f}) "
         f"PnL: ${pnl_usd:,.2f} ({pnl_pct:+.2f}%) | Giữ:{holding_h:.1f}h{dca_info}\n"
         f"    Entry:{trade['entry_price']:.4f} Cur:{current_price:.4f} SL:{trade['sl']:.4f} TP:{trade['tp']:.4f} {tsl_info} "
         f"Vốn:${trade.get('total_invested_usd', 0.0):,.2f}"

@@ -335,13 +335,17 @@ def main() -> None:
                 elif "WARNING" in alert_levels_general: highest = "WARNING"
                 elif "ALERT" in alert_levels_general: highest = "ALERT"
                 else: highest = "WATCHLIST"
-
-                title = f"[{symbol.upper()}] **{highest}** từ khung {', '.join(send_intervals_general)}"
+                
+                # --- LOGIC THÊM VÀO ---
+                all_tags = [check_signal(indic_map_general[iv]).get("tag", "") for iv in send_intervals_general]
+                unique_tags = {tag for tag in all_tags if tag} # Lấy các tag duy nhất và khác rỗng
+                tags_str = f" - {', '.join(unique_tags)}" if unique_tags else ""
+                
+                # --- DÒNG TITLE ĐÃ SỬA ---
+                title = f"[{symbol.upper()}] **{highest}**{tags_str} từ khung {', '.join(send_intervals_general)}"
+                
                 ids = "\n".join([f"🆔 ID: {now_str}  {symbol.upper()}  {iv}" for iv in send_intervals_general])
                 send_discord_alert(f"{title}\n{ids}\n\n{report_content}")
-                discord_msg = f"    => 📨 Đã gửi cảnh báo Cửa 1 qua Discord."
-                print(discord_msg); log_output_lines.append(discord_msg)
-                time.sleep(3)
 
             # --- CỬA 2: SỬ DỤNG LOGIC HYBRID ---
             if not force_daily:
