@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 paper_trade.py - Quản lý Danh mục & Rủi ro Thông minh
-Version: 2.2 - "Tướng Mưu Lược" - FINAL VERSION
+Version: 2.3 - "Tướng Mưu Lược" - HOÀN THIỆN BÁO CÁO (TINH GỌN)
 Date: 2025-07-08
 
 Description:
@@ -9,6 +9,7 @@ Phiên bản hoàn thiện nhất, tích hợp cơ chế chọn Tactic "đa giá
 kết hợp với toàn bộ các tính năng phòng thủ và tấn công đã được phát triển.
 Bot giờ đây sẽ hoạt động như một vị tướng, biết phân tích thời thế (Macro)
 và thực lực của từng binh sĩ (Micro) để chọn ra chiến thuật phù hợp nhất.
+Đặc biệt cải thiện báo cáo Discord để cung cấp thông tin chi tiết, minh bạch nhưng TINH GỌN hơn.
 """
 import os
 import sys
@@ -38,7 +39,7 @@ except ImportError:
     sys.exit("Lỗi: Thiếu module 'indicator' hoặc 'trade_advisor'. Hãy chắc chắn chúng ở đúng vị trí.")
 
 # ==============================================================================
-# ================= ⚙️ TRUNG TÂM CẤU HÌNH (v2.2) ⚙️ =================
+# ================= ⚙️ TRUNG TÂM CẤU HÌNH (v2.3) ⚙️ =================
 # ==============================================================================
 
 INITIAL_CAPITAL = 10000.0
@@ -67,8 +68,8 @@ RISK_RULES_CONFIG = {
 CAPITAL_MANAGEMENT_CONFIG = {
     "TACTIC_TO_TIER_MAP": {
         "AI_Aggressor": "LOW_RISK", "Breakout_Hunter": "LOW_RISK",
-        "Balanced_Trader": "MEDIUM_RISK", "Market_Mirror": "MEDIUM_RISK", # 'Market_Mirror' không có trong TACTICS_LAB nhưng vẫn được giữ ở đây cho tính mở rộng
-        "Dip_Hunter": "HIGH_RISK", "Range_Trader": "HIGH_RISK", "Cautious_Observer": "HIGH_RISK", # Tương tự
+        "Balanced_Trader": "MEDIUM_RISK", "Market_Mirror": "MEDIUM_RISK",
+        "Dip_Hunter": "HIGH_RISK", "Range_Trader": "HIGH_RISK", "Cautious_Observer": "HIGH_RISK",
     },
     "MAX_TOTAL_EXPOSURE_PCT": 0.60
 }
@@ -156,29 +157,40 @@ def save_json_file(path: str, data: Any):
 def send_discord_message_chunks(full_content: str):
     """Gửi tin nhắn dài đến Discord bằng cách chia thành các chunk nhỏ."""
     webhook_url = ALERT_CONFIG.get("DISCORD_WEBHOOK_URL")
-    if not webhook_url: return
+    if not webhook_url:
+        log_message("⚠️ Không có Discord Webhook URL. Bỏ qua gửi tin nhắn Discord.")
+        return
 
-    max_len = 1900
+    max_len = 1900 # Giữ an toàn dưới giới hạn 2000 ký tự của Discord
     lines = full_content.split('\n')
     chunks, current_chunk = [], ""
+    
     for line in lines:
+        # Nếu thêm dòng này vượt quá max_len, tạo chunk mới
         if len(current_chunk) + len(line) + 1 > max_len:
-            if current_chunk: chunks.append(current_chunk)
-            current_chunk = line
+            if current_chunk: # Chỉ thêm chunk nếu nó không rỗng
+                chunks.append(current_chunk)
+            current_chunk = line # Bắt đầu chunk mới với dòng hiện tại
         else:
+            # Thêm dòng vào chunk hiện tại, đảm bảo có newline nếu chunk không rỗng
             current_chunk += ("\n" + line) if current_chunk else line
-    if current_chunk: chunks.append(current_chunk)
+    
+    # Thêm chunk cuối cùng nếu có
+    if current_chunk:
+        chunks.append(current_chunk)
 
     total_chunks = len(chunks)
     for i, chunk in enumerate(chunks):
+        # Thêm chỉ số phần nếu có nhiều chunk
         content_to_send = f"*(Phần {i+1}/{total_chunks})*\n{chunk}" if total_chunks > 1 else chunk
         try:
             requests.post(webhook_url, json={"content": content_to_send}, timeout=15).raise_for_status()
+            # Tránh Rate Limit nếu có nhiều chunk
             if i < total_chunks - 1:
                 time.sleep(ALERT_CONFIG["DISCORD_CHUNK_DELAY_SECONDS"])
         except requests.exceptions.RequestException as e:
             log_message(f"❌ Lỗi gửi chunk Discord {i+1}/{total_chunks}: {e}")
-            break
+            break # Dừng nếu có lỗi gửi một chunk
 
 def get_current_pnl(trade: Dict) -> Tuple[float, float]:
     """Tính toán PnL (Profit and Loss) hiện tại của một lệnh."""
@@ -430,8 +442,8 @@ def handle_dca_opportunities(state: Dict, equity: float):
 
         # Kiểm tra giới hạn tổng exposure
         potential_exposure_usd = current_exposure_usd + dca_investment
-        if potential_exposure_usd / equity > CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]: # Fix: Use potential_exposure_usd / equity
-            log_message(f"⚠️ Muốn DCA cho {trade['symbol']} nhưng sẽ vượt ngưỡng exposure tối đa ({potential_exposure_pct/equity:.2%} > {CAPITAL_MANAGEMENT_CONFIG['MAX_TOTAL_EXPOSURE_PCT']:.2%}). Bỏ qua.")
+        if potential_exposure_usd / equity > CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]:
+            log_message(f"⚠️ Muốn DCA cho {trade['symbol']} nhưng sẽ vượt ngưỡng exposure tối đa ({potential_exposure_usd/equity:.2%} > {CAPITAL_MANAGEMENT_CONFIG['MAX_TOTAL_EXPOSURE_PCT']:.2%}). Bỏ qua.")
             continue
 
         if dca_investment > state['cash']:
@@ -678,50 +690,112 @@ def build_report_header(state: Dict) -> List[str]:
     total_equity = calculate_total_equity(state)
     cash = state.get('cash', INITIAL_CAPITAL)
     
-    header_lines.append(f"💰 Vốn ban đầu: ${INITIAL_CAPITAL:,.2f}")
-    header_lines.append(f"💵 Tiền mặt hiện có: ${cash:,.2f}")
-    header_lines.append(f"📊 Tổng tài sản (Equity): ${total_equity:,.2f}")
+    header_lines.append(f"💰 Vốn ban đầu: **${INITIAL_CAPITAL:,.2f}**")
+    header_lines.append(f"💵 Tiền mặt hiện có: **${cash:,.2f}**")
+    header_lines.append(f"📊 Tổng tài sản (Equity): **${total_equity:,.2f}**")
     
     pnl_since_start = total_equity - INITIAL_CAPITAL
     pnl_percent_since_start = (pnl_since_start / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
-    header_lines.append(f"📈 PnL Tổng cộng: ${pnl_since_start:,.2f} ({pnl_percent_since_start:+.2f}%)")
+    pnl_icon = "🟢" if pnl_since_start >= 0 else "🔴"
+    header_lines.append(f"📈 PnL Tổng cộng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent_since_start:+.2f}%)**")
     
     return header_lines
+
+def build_trade_details_for_report(trade: Dict, current_price: float) -> str:
+    """Tạo chuỗi chi tiết cho một lệnh đang mở để báo cáo, gói gọn vào một dòng."""
+    pnl_usd, pnl_pct = get_current_pnl(trade)
+    icon = "🟢" if pnl_usd >= 0 else "🔴"
+    holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
+    dca_info = f" (DCA: {len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
+    tsl_info = f" TSL:{trade['trailing_sl']:.4f}" if TACTICS_LAB.get(trade.get('opened_by_tactic'), {}).get("USE_TRAILING_SL") and 'trailing_sl' in trade else ""
+
+    # Gói gọn tất cả thông tin quan trọng vào một dòng
+    details_line = (
+        f"  {icon} **{trade['symbol']}** ({trade.get('opened_by_tactic', 'N/A')} | Score:{trade.get('entry_score', 0.0):.1f}) "
+        f"PnL: ${pnl_usd:,.2f} ({pnl_pct:+.2f}%) | Giữ:{holding_h:.1f}h{dca_info}\n"
+        f"    Entry:{trade['entry_price']:.4f} Cur:{current_price:.4f} SL:{trade['sl']:.4f} TP:{trade['tp']:.4f} {tsl_info} "
+        f"Vốn:${trade.get('total_invested_usd', 0.0):,.2f}"
+    )
+    return details_line
+
 
 def build_daily_summary_text(state: Dict) -> str:
     """Tạo nội dung báo cáo tổng kết hàng ngày."""
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
-    lines = [f"📊 BÁO CÁO HÀNG NGÀY - {now_vn_str}", "===================================="]
+    lines = [f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY** - `{now_vn_str}` 📊", ""]
     lines.extend(build_report_header(state))
-    lines.append("---")
+    lines.append("\n--- **Chi tiết trong phiên** ---")
     
     if state.get('temp_newly_opened_trades'):
-        lines.append("✨ Lệnh mới mở:")
+        lines.append("✨ **Lệnh mới mở:**")
         lines.extend([f"    - {msg}" for msg in state['temp_newly_opened_trades']])
-        del state['temp_newly_opened_trades']
-        lines.append("---")
+    else:
+        lines.append("✨ Lệnh mới mở: (Không có)")
 
     if state.get('temp_newly_closed_trades'):
-        lines.append("⛔ Lệnh đã đóng:")
+        lines.append("\n⛔ **Lệnh đã đóng:**")
         lines.extend([f"    - {msg}" for msg in state['temp_newly_closed_trades']])
-        del state['temp_newly_closed_trades']
-        lines.append("---")
+    else:
+        lines.append("\n⛔ Lệnh đã đóng: (Không có)")
 
+    lines.append("\n--- **Vị thế đang mở** ---")
     active_trades = state.get('active_trades', [])
-    lines.append(f"💼 Vị thế đang mở ({len(active_trades)}):")
+    lines.append(f"💼 Tổng vị thế đang mở: **{len(active_trades)}**")
     if not active_trades: lines.append("    (Không có vị thế nào)")
     else:
         for trade in active_trades:
-            pnl_usd, pnl_pct = get_current_pnl(trade)
-            icon = "🟢" if pnl_usd >= 0 else "🔴"
-            holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
-            dca_info = f" (DCA: {len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-            entry_score = trade.get('entry_score', 0.0)
-            # HIỂN THỊ TACTIC TẠI ĐÂY
-            lines.append(f"    {icon} {trade['symbol']} ({trade.get('opened_by_tactic', 'N/A')} | Score: {entry_score:.1f}) | PnL: ${pnl_usd:,.2f} ({pnl_pct:+.2f}%) | Giữ: {holding_h:.1f}h{dca_info}")
-            if TACTICS_LAB.get(trade['opened_by_tactic'], {}).get("USE_TRAILING_SL") and 'trailing_sl' in trade:
-                 lines.append(f"        (TSL: {trade['trailing_sl']:.4f})")
-    lines.append("====================================")
+            current_data = all_indicators.get(trade["symbol"], {}).get(trade["interval"], {})
+            current_price = current_data.get('price', 0)
+            if current_price > 0:
+                lines.append(build_trade_details_for_report(trade, current_price))
+            else:
+                lines.append(f"⚠️ {trade['symbol']} - Không có dữ liệu giá hiện tại để báo cáo chi tiết.")
+
+    # Báo cáo tổng kết lịch sử giao dịch
+    lines.append("\n--- **Tổng kết lịch sử giao dịch** ---")
+    trade_history = state.get('trade_history', [])
+    if trade_history:
+        df_history = pd.DataFrame(trade_history)
+        df_history['pnl_usd'] = df_history['pnl_usd'].astype(float)
+        
+        total_trades = len(df_history)
+        # Lệnh hòa vốn thường được tính vào lệnh thua để khuyến khích lợi nhuận dương
+        winning_trades = df_history[df_history['pnl_usd'] > 0]
+        losing_trades = df_history[df_history['pnl_usd'] <= 0] 
+
+        win_rate = (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0
+        
+        total_pnl_history = df_history['pnl_usd'].sum()
+        avg_win_pnl = winning_trades['pnl_usd'].mean() if len(winning_trades) > 0 else 0
+        avg_loss_pnl = losing_trades['pnl_usd'].mean() if len(losing_trades) > 0 else 0
+
+        lines.append(f"📊 Tổng lệnh đã đóng: {total_trades}")
+        lines.append(f"✅ Lệnh thắng: {len(winning_trades)} | ❌ Lệnh thua: {len(losing_trades)}")
+        lines.append(f"🏆 Win Rate: **{win_rate:.2f}%**")
+        lines.append(f"💰 Tổng PnL lịch sử: **${total_pnl_history:,.2f}**")
+        lines.append(f"Avg PnL thắng: ${avg_win_pnl:,.2f} | Avg PnL thua: ${avg_loss_pnl:,.2f}")
+        
+        # 5 lệnh lãi/lỗ gần nhất
+        lines.append("\n--- Top 5 lệnh lãi gần nhất ---")
+        top_5_wins = winning_trades.nlargest(5, 'pnl_usd')
+        if not top_5_wins.empty:
+            for idx, trade_data in top_5_wins.iterrows():
+                lines.append(f"  - {trade_data['symbol']} ({trade_data.get('opened_by_tactic', 'N/A')}) | PnL: ${trade_data['pnl_usd']:,.2f} ({trade_data['pnl_percent']:+.2f}%)")
+        else:
+            lines.append("  (Chưa có lệnh lãi)")
+
+        lines.append("\n--- Top 5 lệnh lỗ gần nhất ---")
+        top_5_losses = losing_trades.nsmallest(5, 'pnl_usd')
+        if not top_5_losses.empty:
+            for idx, trade_data in top_5_losses.iterrows():
+                lines.append(f"  - {trade_data['symbol']} ({trade_data.get('opened_by_tactic', 'N/A')}) | PnL: ${trade_data['pnl_usd']:,.2f} ({trade_data['pnl_percent']:+.2f}%)")
+        else:
+            lines.append("  (Chưa có lệnh lỗ)")
+            
+    else:
+        lines.append("    (Chưa có lịch sử giao dịch)")
+
+    lines.append("\n====================================")
     return "\n".join(lines)
 
 def should_send_dynamic_alert(state: Dict) -> bool:
@@ -757,28 +831,28 @@ def should_send_dynamic_alert(state: Dict) -> bool:
 def build_dynamic_alert_text(state: Dict) -> str:
     """Tạo nội dung cảnh báo động."""
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
-    lines = [f"💡 CẬP NHẬT ĐỘNG - {now_vn_str}", "===================================="]
+    lines = [f"💡 **CẬP NHẬT ĐỘNG** - `{now_vn_str}` 💡", ""]
     lines.extend(build_report_header(state))
-    lines.append("---")
+    lines.append("\n--- **Vị thế đang mở** ---")
     
     active_trades = state.get('active_trades', [])
-    lines.append(f"💼 Vị thế đang mở ({len(active_trades)}):")
+    lines.append(f"💼 Tổng vị thế đang mở: **{len(active_trades)}**")
     if not active_trades: lines.append("    (Không có vị thế nào)")
     else:
         for trade in active_trades:
-            pnl_usd, pnl_pct = get_current_pnl(trade)
-            entry_score = trade.get('entry_score', 0.0)
-            # HIỂN THỊ TACTIC TẠI ĐÂY
-            lines.append(f"    {'🟢' if pnl_usd >= 0 else '🔴'} {trade['symbol']} ({trade.get('opened_by_tactic', 'N/A')} | Score: {entry_score:.1f}): ${pnl_usd:,.2f} ({pnl_pct:+.2f}%)")
-            if TACTICS_LAB.get(trade['opened_by_tactic'], {}).get("USE_TRAILING_SL") and 'trailing_sl' in trade:
-                 lines.append(f"        (TSL: {trade['trailing_sl']:.4f})")
-    lines.append("====================================")
+            current_data = all_indicators.get(trade["symbol"], {}).get(trade["interval"], {})
+            current_price = current_data.get('price', 0)
+            if current_price > 0:
+                lines.append(build_trade_details_for_report(trade, current_price))
+            else:
+                lines.append(f"⚠️ {trade['symbol']} - Không có dữ liệu giá hiện tại để báo cáo chi tiết.")
+    lines.append("\n====================================")
     return "\n".join(lines)
 
 def run_session():
     """Chạy một phiên giao dịch chính của bot."""
     session_id = datetime.now(VIETNAM_TZ).strftime('%Y%m%d_%H%M%S')
-    log_message(f"====== 🚀 BẮT ĐẦU PHIÊN (v2.2 - Tướng Mưu Lược) (ID: {session_id}) 🚀 ======")
+    log_message(f"====== 🚀 BẮT ĐẦU PHIÊN (v2.3 - Hoàn thiện Báo cáo Tinh gọn) (ID: {session_id}) 🚀 ======")
     try:
         # Tải trạng thái hoặc khởi tạo mới nếu không tồn tại
         state = load_json_file(STATE_FILE, {
@@ -845,7 +919,7 @@ def run_session():
             if now_vn.hour == daily_hour and now_vn.minute >= daily_minute and \
                (not last_daily_report_day_dt or last_daily_report_day_dt != now_vn.date()):
                 summary_text = build_daily_summary_text(state)
-                send_discord_message_chunks(summary_text)
+                send_discord_message_chunks(summary_text) # Luôn dùng chunk
                 state['last_daily_report_day'] = now_vn.date().isoformat()
                 log_message(f"🔔 Đã gửi báo cáo tổng kết hàng ngày.")
                 break # Chỉ gửi một báo cáo hàng ngày mỗi khi điều kiện được đáp ứng
@@ -853,7 +927,7 @@ def run_session():
         # Gửi cảnh báo động nếu có sự thay đổi PnL đáng kể hoặc đã đến lúc cập nhật bắt buộc
         if should_send_dynamic_alert(state):
             alert_text = build_dynamic_alert_text(state)
-            send_discord_message_chunks(alert_text)
+            send_discord_message_chunks(alert_text) # Luôn dùng chunk
             # Cập nhật trạng thái alert cuối cùng
             current_total_equity = calculate_total_equity(state)
             current_total_pnl_percent = ((current_total_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
