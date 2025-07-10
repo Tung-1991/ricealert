@@ -508,7 +508,7 @@ def handle_dca_opportunities(state: Dict, equity: float):
                 trade['trailing_sl'] = new_avg_price - original_tsl_dist_from_entry
                 trade['sl'] = trade['trailing_sl'] # Đồng bộ SL gốc với TSL
             else:
-                 trade['trailing_sl'] = trade['sl'] # Nếu chưa kích hoạt hoặc không có initial_entry, TSL = SL mới
+                trade['trailing_sl'] = trade['sl'] # Nếu chưa kích hoạt hoặc không có initial_entry, TSL = SL mới
 
             trade['tp1_taken'] = False # Cho phép chốt lời TP1 lại sau DCA
 
@@ -887,7 +887,7 @@ def run_session():
             "active_trades": [],
             "trade_history": [],
             "last_dynamic_alert": {"timestamp": None, "total_pnl_percent": 0.0},
-            "last_daily_report_day": None
+            "last_daily_reports_sent": {} # **THAY ĐỔI QUAN TRỌNG**
         })
 
         # Xóa các thông báo tạm thời từ phiên trước để tránh lặp lại
@@ -935,21 +935,38 @@ def run_session():
         # 6. Xử lý báo cáo và alerts Discord
         now_vn = datetime.now(VIETNAM_TZ)
 
+        # ===== BẮT ĐẦU KHỐI LOGIC ĐƯỢC THAY ĐỔI =====
+        # Khởi tạo state cho báo cáo nếu chưa có để tương thích ngược
+        if 'last_daily_reports_sent' not in state:
+            state['last_daily_reports_sent'] = {}
+
         # Gửi báo cáo tổng kết hàng ngày vào các khung giờ cấu hình
         for daily_time in GENERAL_CONFIG["DAILY_SUMMARY_TIMES"]:
             daily_hour, daily_minute = map(int, daily_time.split(':'))
             
-            last_daily_report_day_dt = None
-            if state.get('last_daily_report_day'):
-                last_daily_report_day_dt = datetime.fromisoformat(state['last_daily_report_day']).date()
+            last_sent_iso = state['last_daily_reports_sent'].get(daily_time)
+            has_sent_today = False
+            if last_sent_iso:
+                # So sánh ngày của lần gửi cuối với ngày hiện tại
+                last_sent_date = datetime.fromisoformat(last_sent_iso).date()
+                if last_sent_date == now_vn.date():
+                    has_sent_today = True
 
-            if now_vn.hour == daily_hour and now_vn.minute >= daily_minute and \
-               (not last_daily_report_day_dt or last_daily_report_day_dt != now_vn.date()):
+            # Điều kiện: Đúng giờ VÀ chưa gửi cho khung giờ này trong ngày hôm nay
+            if now_vn.hour == daily_hour and now_vn.minute >= daily_minute and not has_sent_today:
+                log_message(f"🔔 Điều kiện báo cáo hàng ngày cho {daily_time} được đáp ứng.")
                 summary_text = build_daily_summary_text(state)
-                send_discord_message_chunks(summary_text) # Luôn dùng chunk
-                state['last_daily_report_day'] = now_vn.date().isoformat()
-                log_message(f"🔔 Đã gửi báo cáo tổng kết hàng ngày.")
-                break # Chỉ gửi một báo cáo hàng ngày mỗi khi điều kiện được đáp ứng
+                send_discord_message_chunks(summary_text)
+                
+                # Cập nhật trạng thái cho khung giờ CỤ THỂ này
+                state['last_daily_reports_sent'][daily_time] = now_vn.isoformat()
+                log_message(f"✅ Đã gửi báo cáo tổng kết hàng ngày cho khung giờ {daily_time}.")
+                # Quan trọng: Đã bỏ `break` để bot có thể kiểm tra các khung giờ khác
+        
+        # Xóa key cũ `last_daily_report_day` nếu nó còn tồn tại để dọn dẹp state
+        if 'last_daily_report_day' in state:
+            del state['last_daily_report_day']
+        # ===== KẾT THÚC KHỐI LOGIC ĐƯỢC THAY ĐỔI =====
 
         # Gửi cảnh báo động nếu có sự thay đổi PnL đáng kể hoặc đã đến lúc cập nhật bắt buộc
         if should_send_dynamic_alert(state):
