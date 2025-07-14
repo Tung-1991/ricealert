@@ -594,7 +594,7 @@ def build_trade_details_for_report(trade: Dict, current_price: float) -> str:
     )
 
 def build_daily_summary_text(state: Dict) -> str:
-    """Tạo nội dung báo cáo tổng kết hàng ngày (v2.4.1)."""
+    """Tạo nội dung báo cáo tổng kết hàng ngày với hệ thống phân loại 3 cấp độ (v2.5)."""
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
     lines = [f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY** - `{now_vn_str}` 📊", ""]
     lines.extend(build_report_header(state))
@@ -624,14 +624,20 @@ def build_daily_summary_text(state: Dict) -> str:
         df_history = pd.DataFrame(trade_history)
         df_history['pnl_usd'] = df_history['pnl_usd'].astype(float)
         
+        ### THAY ĐỔI LOGIC TÍNH TOÁN ###
         total_trades = len(df_history)
         winning_trades = df_history[df_history['pnl_usd'] > 0]
+        losing_trades = df_history[df_history['pnl_usd'] < 0] # Chỉ tính các lệnh lỗ thực sự
+        breakeven_trades = df_history[df_history['pnl_usd'] == 0] # Tách riêng lệnh hòa vốn
+
+        # Win Rate giờ đây có thể được hiểu theo nhiều cách, nhưng cách phổ biến nhất vẫn là (thắng / tổng)
         win_rate = (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0
         total_pnl_history = df_history['pnl_usd'].sum()
         avg_win_pnl = winning_trades['pnl_usd'].mean() if not winning_trades.empty else 0
-        avg_loss_pnl = df_history[df_history['pnl_usd'] <= 0]['pnl_usd'].mean() if total_trades > len(winning_trades) else 0
+        avg_loss_pnl = losing_trades['pnl_usd'].mean() if not losing_trades.empty else 0
 
-        lines.append(f"📊 Tổng lệnh: {total_trades} | ✅ Thắng: {len(winning_trades)} | ❌ Thua: {total_trades - len(winning_trades)}")
+        ### THAY ĐỔI HIỂN THỊ ###
+        lines.append(f"📊 Tổng lệnh: {total_trades} | ✅ Thắng: {len(winning_trades)} | 🤝 Hòa vốn: {len(breakeven_trades)} | ❌ Thua: {len(losing_trades)}")
         lines.append(f"🏆 Win Rate: **{win_rate:.2f}%** | 💰 Tổng PnL: **${total_pnl_history:,.2f}**")
         lines.append(f"Avg Win: ${avg_win_pnl:,.2f} | Avg Loss: ${avg_loss_pnl:,.2f}")
         
@@ -641,11 +647,7 @@ def build_daily_summary_text(state: Dict) -> str:
             hold_duration_h = (exit_time - entry_time).total_seconds() / 3600
             info_str = f"{trade_data.get('total_invested_usd', 0):.0f}/{trade_data.get('entry_price', 0)}/{trade_data.get('exit_price', 0)}/${trade_data.get('pnl_usd', 0):.2f}, {trade_data.get('pnl_percent', 0):+.2f}%"
             time_str = exit_time.astimezone(VIETNAM_TZ).strftime('%H:%M %d-%m')
-            
-            ### CẢI TIẾN (v2.4.1) ###
-            # Thêm khung thời gian vào symbol để phân tích hiệu quả hơn
             symbol_with_interval = f"{trade_data['symbol']}-{trade_data.get('interval', 'N/A')}"
-            
             return f"  • **{symbol_with_interval}** | Info: `{info_str}` | Score: {trade_data.get('entry_score', 0):.1f} | Hold: {hold_duration_h:.1f}h | Time: {time_str}"
 
         lines.append("\n--- Top 5 lệnh lãi gần nhất ---")
@@ -655,19 +657,20 @@ def build_daily_summary_text(state: Dict) -> str:
                 except Exception as e: lines.append(f"  • {trade.get('symbol')} - Lỗi báo cáo: {e}")
         else: lines.append("  (Chưa có lệnh lãi)")
 
+        ### THAY ĐỔI HIỂN THỊ ###
         lines.append("\n--- Top 5 lệnh lỗ gần nhất ---")
-        losing_trades = df_history[df_history['pnl_usd'] <= 0]
-        if not losing_trades.empty:
+        if not losing_trades.empty: # Chỉ hiển thị nếu có lệnh lỗ thực sự
             for _, trade in losing_trades.nsmallest(5, 'pnl_usd').iterrows():
                 try: lines.append(format_closed_trade_line(trade))
                 except Exception as e: lines.append(f"  • {trade.get('symbol')} - Lỗi báo cáo: {e}")
-        else: lines.append("  (Chưa có lệnh lỗ)")
+        else:
+            lines.append("  (Chưa có lệnh lỗ thực sự)")
     else:
         lines.append("    (Chưa có lịch sử giao dịch)")
 
     lines.append("\n====================================")
     return "\n".join(lines)
-
+    
 def build_dynamic_alert_text(state: Dict) -> str:
     """Tạo nội dung cảnh báo động."""
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
