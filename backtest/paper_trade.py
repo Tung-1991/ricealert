@@ -24,10 +24,15 @@ from dotenv import load_dotenv
 import traceback
 
 # --- Tải và Thiết lập ---
-load_dotenv()
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
-sys.path.append(PROJECT_ROOT)
+# --- Tải và Thiết lập ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # /root/ricealert/backtest
+PROJECT_ROOT = os.path.dirname(BASE_DIR) # /root/ricealert
+
+# Load .env file explicitly from PROJECT_ROOT
+dotenv_path = os.path.join(PROJECT_ROOT, '.env')
+load_dotenv(dotenv_path=dotenv_path) # <--- Dòng này được cập nhật để trỏ đúng file .env
+
+sys.path.append(PROJECT_ROOT) # Giữ nguyên để import các module khác
 PAPER_DATA_DIR = os.path.join(BASE_DIR, "paper_data")
 os.makedirs(PAPER_DATA_DIR, exist_ok=True)
 
@@ -122,7 +127,8 @@ TACTICS_LAB = {
     },
 }
 
-SYMBOLS_TO_SCAN = ["ETHUSDT", "AVAXUSDT", "INJUSDT", "LINKUSDT", "SUIUSDT", "FETUSDT", "TAOUSDT"]
+SYMBOLS_TO_SCAN_STRING = os.getenv("SYMBOLS_TO_SCAN", "ETHUSDT,BTCUSDT")
+SYMBOLS_TO_SCAN = [symbol.strip() for symbol in SYMBOLS_TO_SCAN_STRING.split(',')]
 INTERVALS_TO_SCAN = ["1h", "4h", "1d"]
 ALL_TIME_FRAMES = ["1h", "4h", "1d"]
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
