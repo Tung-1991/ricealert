@@ -141,6 +141,8 @@ LEADING_ZONE = "LEADING"         # Tín hiệu sớm, rủi ro cao, tiềm năng
 COINCIDENT_ZONE = "COINCIDENT"   # Tín hiệu đồng thời, "điểm ngọt" (Breakout + Vol, MACD Cross)
 LAGGING_ZONE = "LAGGING"         # Tín hiệu trễ, an toàn, theo trend đã rõ (ADX > 25, MA stacking)
 NOISE_ZONE = "NOISE"             # Vùng nhiễu, không có xu hướng (ADX < 20, giá đi ngang)
+# Thêm dòng này
+ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 
 # --- Chính sách Vốn & Rủi ro theo từng Vùng ---
 ZONE_BASED_POLICIES = {
@@ -801,8 +803,12 @@ def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
     # --- KẾT THÚC PHẦN THAY ĐỔI ---
 
+    invested_usd = trade.get('total_invested_usd', 0.0)
+    current_value = invested_usd + pnl_usd # Tính giá trị hiện tại của vị thế
+
     return (f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}\n"
-            f"    Vốn:${trade.get('total_invested_usd', 0.0):,.2f} | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}")
+            f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}")
+
 
 def build_report_text(state: Dict, total_usdt: float, available_usdt: float, realtime_prices: Dict[str, float], report_type: str) -> str:
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')

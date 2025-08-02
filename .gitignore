@@ -24,7 +24,7 @@ ricenews/log/
 ricenews/__pycache__/
 advisor_state.json
 ml_state.json
-
+/root/ricealert/livetrade/__pycache__
 # === Cooldown & Temp Cache ===
 cooldown_tracker.json
 cooldown_tracker_ml.json

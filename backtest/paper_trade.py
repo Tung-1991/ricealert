@@ -1,15 +1,28 @@
+# paper_trade.py
 # -*- coding: utf-8 -*-
 """
-paper_trade.py - Quản lý Danh mục & Rủi ro Thông minh
-Version: 4.5.1 - "Nhà Quản lý Rủi ro Đa khung thời gian & Báo cáo Real-time"
-Date: 2025-07-31
+Paper Trade - The 4-Zone Strategy
+Version: 8.0.0 - Major Upgrade (Logic sync with live_trade v8.0.0)
+Date: 2025-08-07
 
 Description:
-Phiên bản 4.5.1 sửa một lỗi nghiêm trọng trong việc báo cáo PnL.
-- FIX: Các báo cáo gửi lên Discord (hàng ngày và động) giờ đây sẽ sử dụng
-  giá thị trường real-time để tính toán PnL, đảm bảo dữ liệu luôn chính xác
-  và khớp với bảng điều khiển. Logic giao dịch cốt lõi vẫn hoạt động dựa
-  trên giá của nến đã đóng để đảm bảo tính nhất quán của chiến lược.
+Phiên bản 8.0.0 là một bản nâng cấp lớn, đồng bộ hoàn toàn triết lý giao dịch
+cốt lõi với phiên bản live_trade, chuyển sang mô hình "4 Vùng Phản Ứng"
+(4-Zone Strategy). Bot mô phỏng giờ đây có khả năng phân tích bối cảnh thị trường,
+chọn chiến thuật chuyên dụng, và phân bổ vốn một cách linh hoạt, thông minh,
+phản ánh chính xác logic đang chạy trên môi trường thật.
+
+CHANGELOG (v8.0.0 Sync):
+- STRATEGY CORE: Triển khai "4-Zone Strategy" (LEADING, COINCIDENT, LAGGING, NOISE).
+    - Thêm hàm `determine_market_zone_with_scoring` từ live_trade.
+    - Loại bỏ hoàn toàn `STATE_TO_TACTICS_MAP` và hàm `determine_market_state` cũ.
+- TACTICS LAB: Đồng bộ `TACTICS_LAB`. Mỗi chiến thuật giờ đây có `OPTIMAL_ZONE`.
+- CAPITAL MANAGEMENT: Triển khai chính sách vốn động theo Vùng (`ZONE_BASED_POLICIES`).
+    - Loại bỏ hàm `determine_dynamic_capital_pct` cũ.
+- TRADE MANAGEMENT: Tái cấu trúc logic quản lý lệnh thành một hàm `check_and_manage_open_positions`
+  toàn diện, mô phỏng chính xác logic của live_trade.
+- DATA & REPORTING: Cập nhật cấu trúc đối tượng `trade` và các hàm báo cáo để
+  hiển thị thông tin về Vùng và Điểm số, đảm bảo báo cáo paper và live là một.
 """
 import os
 import sys
@@ -20,210 +33,205 @@ import requests
 import pytz
 import pandas as pd
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional, Literal
 from dotenv import load_dotenv
 import traceback
 import numpy as np
+import ta
 
 # --- Tải và Thiết lập ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 dotenv_path = os.path.join(PROJECT_ROOT, '.env')
 load_dotenv(dotenv_path=dotenv_path)
-
 sys.path.append(PROJECT_ROOT)
+
 PAPER_DATA_DIR = os.path.join(BASE_DIR, "paper_data")
 os.makedirs(PAPER_DATA_DIR, exist_ok=True)
-
-### --- CÀI ĐẶT THƯ VIỆN CHO CACHE --- ###
-# Để sử dụng cơ chế cache mới, bạn cần cài đặt thư viện pyarrow:
-# pip install pyarrow
-# ----------------------------------------
-
-### START: Nâng cấp v4.4.0 ###
-# Tạo thư mục con để lưu trữ các file cache dữ liệu giá
 CACHE_DIR = os.path.join(PAPER_DATA_DIR, "indicator_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
-### END: Nâng cấp v4.4.0 ###
 
 try:
-    ### START: Sửa lỗi v4.4.1 ###
-    # Xóa import hàm không tồn tại từ module của người dùng
     from indicator import get_price_data, calculate_indicators
-    ### END: Sửa lỗi v4.4.1 ###
     from trade_advisor import get_advisor_decision, FULL_CONFIG as ADVISOR_BASE_CONFIG
-except ImportError:
-    sys.exit("Lỗi: Thiếu module 'indicator' hoặc 'trade_advisor'. Hãy chắc chắn chúng ở đúng vị trí.")
+except ImportError as e:
+    sys.exit(f"Lỗi: Không thể import module cần thiết: {e}.")
+
 
 # ==============================================================================
-# ================== ⚙️ TRUNG TÂM CẤU HÌNH (v4.5.0) ⚙️ ==================
+# ================== ⚙️ TRUNG TÂM CẤU HÌNH (Đồng bộ v8.0.0) ⚙️ ===================
 # ==============================================================================
+INITIAL_CAPITAL = 10000.0
 
-# --- VỐN & CẤU HÌNH CHUNG ---
-INITIAL_CAPITAL = 10000.0 # Vốn khởi điểm để mô phỏng.
-
-GENERAL_CONFIG = { # Các thiết lập vận hành chung của bot.
-    "DATA_FETCH_LIMIT": 300, # Số nến tối đa để tính toán chỉ báo (đã giảm từ 500 để hỗ trợ coin mới).
-    "DAILY_SUMMARY_TIMES": ["08:05", "20:05"], # Các thời điểm trong ngày để gửi báo cáo tổng kết.
-    "TRADE_COOLDOWN_HOURS": 1, # Số giờ "nghỉ" không mở lệnh mới cho một coin sau khi vừa đóng lệnh.
-    "CRON_JOB_INTERVAL_MINUTES": 15 # Tần suất chạy bot (phút).
+GENERAL_CONFIG = {
+    "DATA_FETCH_LIMIT": 300,
+    "DAILY_SUMMARY_TIMES": ["08:05", "20:05"],
+    "TRADE_COOLDOWN_HOURS": 1,
+    "CRON_JOB_INTERVAL_MINUTES": 15, # Giữ nguyên tần suất chạy mô phỏng
+    "HEAVY_REFRESH_MINUTES": 15 # Đồng bộ với live_trade
 }
 
-# --- PHÂN TÍCH ĐA KHUNG THỜI GIAN (MTF) ---
-MTF_ANALYSIS_CONFIG = { # Logic "nhìn" các khung thời gian lớn hơn để cộng/trừ điểm tín hiệu.
-    "ENABLED": True, # Bật/tắt tính năng này.
-    "BONUS_COEFFICIENT": 1.15, # Nhân điểm với 1.15 (thưởng 15%) nếu xu hướng khung lớn đồng thuận.
-    "PENALTY_COEFFICIENT": 0.85, # Nhân điểm với 0.85 (phạt 15%) nếu xu hướng khung lớn ngược chiều.
-    "SEVERE_PENALTY_COEFFICIENT": 0.70, # Phạt nặng 30% nếu các khung lớn hơn đều ngược chiều.
-    "SIDEWAYS_PENALTY_COEFFICIENT": 0.90 # Phạt nhẹ 10% nếu khung lớn đang đi ngang.
-}
-
-# --- QUẢN LÝ LỆNH ĐANG CHẠY ---
-ACTIVE_TRADE_MANAGEMENT_CONFIG = { # Các quy tắc để quản lý các lệnh đang mở.
-    "EARLY_CLOSE_SCORE_THRESHOLD": 4.2, # Nếu điểm tín hiệu của một lệnh đang chạy giảm xuống dưới ngưỡng này, đóng lệnh ngay lập tức.
-    "PROFIT_PROTECTION": { # Cơ chế bảo vệ lợi nhuận khi giá đảo chiều.
-        "ENABLED": True,
-        "MIN_PEAK_PNL_TRIGGER": 3.5, # Lợi nhuận phải đạt đỉnh ít nhất 4% thì cơ chế này mới được kích hoạt.
-        "PNL_DROP_TRIGGER_PCT": 2.0, # Nếu PnL giảm 2.0% từ đỉnh, thực hiện chốt lời một phần.
-        "PARTIAL_CLOSE_PCT": 0.7 # Chốt 60% khối lượng lệnh khi bảo vệ lợi nhuận được kích hoạt.
-    }
-}
-
-# --- CẢNH BÁO ĐỘNG ---
-DYNAMIC_ALERT_CONFIG = { # Cấu hình cho các thông báo cập nhật trạng thái ra Discord.
+MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,
-    "COOLDOWN_HOURS": 4.5, # Gửi thông báo tối đa 4 giờ một lần.
-    "FORCE_UPDATE_HOURS": 10, # Bắt buộc gửi thông báo sau mỗi 10 giờ dù không có thay đổi lớn.
-    "PNL_CHANGE_THRESHOLD_PCT": 2 # Gửi thông báo nếu tổng PnL của tài khoản thay đổi lớn hơn 1.5%.
+    "BONUS_COEFFICIENT": 1.15,
+    "PENALTY_COEFFICIENT": 0.85,
+    "SEVERE_PENALTY_COEFFICIENT": 0.70,
+    "SIDEWAYS_PENALTY_COEFFICIENT": 0.90
 }
 
-# --- QUY TẮC QUẢN LÝ RỦI RO ---
-RISK_RULES_CONFIG = {
-    "MAX_ACTIVE_TRADES": 12, # Số lượng lệnh được phép mở cùng một lúc.
-
-    # === THÊM MỚI v4.5.0: Giới hạn SL tối đa theo từng khung thời gian ===
-    "MAX_SL_PERCENT_BY_TIMEFRAME": {
-        "1h": 0.06,  # Trần an toàn 6% cho các lệnh lướt sóng ngắn
-        "4h": 0.08,  # Trần an toàn 8% cho các lệnh trung hạn
-        "1d": 0.10   # Trần an toàn 10% cho các lệnh dài hạn
-    },
-        "MAX_TP_PERCENT_BY_TIMEFRAME": {
-        "1h": 0.12,  # Lợi nhuận tối đa 12% cho lệnh 1h
-        "4h": 0.20,  # Lợi nhuận tối đa 20% cho lệnh 4h
-        "1d": 0.35   # Lợi nhuận tối đa 35% cho lệnh 1d
-    },
-    # =================================================================
-
-    "STALE_TRADE_RULES": { # Quy tắc xử lý các lệnh bị "ì" (giữ quá lâu mà không có tiến triển).
-        # Cấu hình cho từng khung thời gian:
-        "1h": {"HOURS": 48,  "PROGRESS_THRESHOLD_PCT": 25.0, "MIN_RISK_BUFFER_PCT": 0.2}, # Sau 48h, lệnh 1h phải có PnL > 25% RR hoặc cách SL 0.2% entry.
-        "4h": {"HOURS": 72,  "PROGRESS_THRESHOLD_PCT": 25.0, "MIN_RISK_BUFFER_PCT": 0.2}, # Tương tự cho 4h.
-        "1d": {"HOURS": 168, "PROGRESS_THRESHOLD_PCT": 20.0, "MIN_RISK_BUFFER_PCT": 0.1}, # Tương tự cho 1d.
-        "STAY_OF_EXECUTION_SCORE": 6.8 # Điểm "ân xá": Nếu lệnh bị "ì" nhưng tín hiệu mới > 6.8, lệnh sẽ được giữ lại.
+ACTIVE_TRADE_MANAGEMENT_CONFIG = {
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.27,
+    "PARTIAL_EARLY_CLOSE_PCT": 0.5,
+    "PROFIT_PROTECTION": {
+        "ENABLED": True,
+        "MIN_PEAK_PNL_TRIGGER": 3.5,
+        "PNL_DROP_TRIGGER_PCT": 2.0,
+        "PARTIAL_CLOSE_PCT": 0.7
     }
 }
 
-# --- QUẢN LÝ VỐN TỔNG ---
-CAPITAL_MANAGEMENT_CONFIG = {
-    "MAX_TOTAL_EXPOSURE_PCT": 0.75 # Tổng số vốn đang dùng cho các lệnh không được vượt quá 75% tổng tài sản.
+DYNAMIC_ALERT_CONFIG = {
+    "ENABLED": True,
+    "COOLDOWN_HOURS": 3,
+    "FORCE_UPDATE_HOURS": 10,
+    "PNL_CHANGE_THRESHOLD_PCT": 2.0
 }
 
-# --- TRUNG BÌNH GIÁ (DCA) ---
+RISK_RULES_CONFIG = {
+    "MAX_ACTIVE_TRADES": 12,
+    "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.06, "4h": 0.08, "1d": 0.10},
+    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.12, "4h": 0.20, "1d": 0.35},
+    "STALE_TRADE_RULES": {
+        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 25.0},
+        "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 25.0},
+        "1d": {"HOURS": 168, "PROGRESS_THRESHOLD_PCT": 20.0},
+        "STAY_OF_EXECUTION_SCORE": 6.8
+    }
+}
+
+CAPITAL_MANAGEMENT_CONFIG = {
+    "MAX_TOTAL_EXPOSURE_PCT": 0.75
+}
+
 DCA_CONFIG = {
     "ENABLED": True,
-    "MAX_DCA_ENTRIES": 2, # Số lần DCA tối đa cho một lệnh.
-    "TRIGGER_DROP_PCT": -5.0, # Kích hoạt DCA khi giá giảm 5% so với lần vào lệnh cuối cùng.
-    "SCORE_MIN_THRESHOLD": 6.5, # Điểm tín hiệu phải lớn hơn 6.5 thì mới được phép DCA.
-    "CAPITAL_MULTIPLIER": 0.75, # Lần DCA sau sẽ dùng số vốn gấp 1.5 lần lần trước.
-    "DCA_COOLDOWN_HOURS": 8, # Phải cách lần DCA trước ít nhất 8 giờ.
-    "DCA_REINVEST_RATIO": 0.5 # Tỷ lệ vốn tái đầu tư (so với vốn gốc) khi DCA bằng lợi nhuận đã chốt.
+    "MAX_DCA_ENTRIES": 2,
+    "TRIGGER_DROP_PCT": -5.0,
+    "SCORE_MIN_THRESHOLD": 6.5,
+    "CAPITAL_MULTIPLIER": 0.75,
+    "DCA_COOLDOWN_HOURS": 8
 }
 
-# --- CẤU HÌNH THÔNG BÁO ---
 ALERT_CONFIG = {
-    "DISCORD_WEBHOOK_URL": os.getenv("DISCORD_PAPER_WEBHOOK"), # Lấy link webhook từ file .env.
-    "DISCORD_CHUNK_DELAY_SECONDS": 2, # Thời gian chờ giữa các phần của tin nhắn dài.
+    "DISCORD_WEBHOOK_URL": os.getenv("DISCORD_PAPER_WEBHOOK"),
+    "DISCORD_CHUNK_DELAY_SECONDS": 2
 }
 
-# --- PHÒNG THÍ NGHIỆM CHIẾN THUẬT (TACTICS LAB) ---
-TACTICS_LAB = { # Nơi định nghĩa chi tiết các chiến lược giao dịch.
-    "AI_Aggressor": {
-        "NOTES": "Tin vào AI, nhưng vẫn cần sự xác nhận mạnh từ kỹ thuật.",
-        "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6}, # Trọng số điểm: AI chiếm 60%.
-        "ENTRY_SCORE": 6.8, # Điểm tối thiểu để vào lệnh.
-        "RR": 2.0, # Tỷ lệ Rủi ro:Lợi nhuận (Risk:Reward).
-        "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.8, # Dùng ATR để đặt SL, khoảng cách bằng 2.8 lần ATR.
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2, "TRAIL_DISTANCE_RR": 0.8, # Kích hoạt Trailing Stop khi đạt 1.2R, giữ khoảng cách 0.8R.
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.4 # Chốt lời 40% vốn khi đạt 1R.
+# ==============================================================================
+# ================= 🚀 CORE STRATEGY v8.0.0: 4-ZONE MODEL 🚀 =================
+# ==============================================================================
+
+# ### <<< THAY ĐỔI LỚN >>> ###
+# Thêm định nghĩa và chính sách của 4 Vùng, thay thế hoàn toàn mô hình State cũ
+
+# --- Định nghĩa 4 Vùng Phản Ứng ---
+LEADING_ZONE = "LEADING"
+COINCIDENT_ZONE = "COINCIDENT"
+LAGGING_ZONE = "LAGGING"
+NOISE_ZONE = "NOISE"
+
+# --- Chính sách Vốn & Rủi ro theo từng Vùng ---
+ZONE_BASED_POLICIES = {
+    LEADING_ZONE: {
+        "NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng, chốt lời sớm để bảo toàn vốn.",
+        "CAPITAL_PCT": 0.04
     },
-    "Balanced_Trader": {
-        "NOTES": "Chiến binh chủ lực, cân bằng giữa kỹ thuật và AI.",
-        "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
-        "ENTRY_SCORE": 6.2, "RR": 1.8, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.2,
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2, "TRAIL_DISTANCE_RR": 1.0,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.6
+    COINCIDENT_ZONE: {
+        "NOTES": "Vùng tốt nhất, quyết đoán vào lệnh với lượng vốn vừa phải.",
+        "CAPITAL_PCT": 0.07
+    },
+    LAGGING_ZONE: {
+        "NOTES": "An toàn, đi theo trend đã rõ, tối ưu hóa lợi nhuận trên con sóng.",
+        "CAPITAL_PCT": 0.06
+    },
+    NOISE_ZONE: {
+        "NOTES": "Cực kỳ nguy hiểm, chỉ vào lệnh với vốn siêu nhỏ khi có tín hiệu VÀNG.",
+        "CAPITAL_PCT": 0.03
+    }
+}
+
+# --- Phòng thí nghiệm Chiến thuật (Tactics Lab), tái cấu trúc theo 4 Vùng ---
+TACTICS_LAB = {
+    "Breakout_Hunter": {
+        "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
+        "NOTES": "Săn đột phá từ nền giá siết chặt. SL chặt, chốt lời TP1 sớm.",
+        "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2}, "ENTRY_SCORE": 7.0, "RR": 2.5,
+        "ATR_SL_MULTIPLIER": 1.8, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0,
+        "TRAIL_DISTANCE_RR": 0.8, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5
     },
     "Dip_Hunter": {
-        "NOTES": "Bắt đáy/bắt sóng hồi, dựa nhiều vào tín hiệu kỹ thuật và bối cảnh.",
-        "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
-        "ENTRY_SCORE": 6.5, "RR": 1.8, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 2.0,
-        "USE_TRAILING_SL": False, "TRAIL_ACTIVATION_RR": None, # Không dùng Trailing Stop.
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.7
+        "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
+        "NOTES": "Bắt đáy/sóng hồi trong trend lớn. Không dùng TSL để tránh bị quét.",
+        "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2}, "ENTRY_SCORE": 6.8, "RR": 2.2,
+        "ATR_SL_MULTIPLIER": 2.0, "USE_TRAILING_SL": False, "TRAIL_ACTIVATION_RR": None,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.6
     },
-    "Breakout_Hunter": {
-        "NOTES": "Săn đột phá, ưu tiên tuyệt đối tín hiệu kỹ thuật.",
-        "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2},
-        "ENTRY_SCORE": 7.0, "RR": 2.0, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 1.8,
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.8,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.2, "TP1_PROFIT_PCT": 0.5
+    "AI_Aggressor": {
+        "OPTIMAL_ZONE": COINCIDENT_ZONE,
+        "NOTES": "Tin vào AI khi có xác nhận mạnh mẽ từ hành động giá và volume.",
+        "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6}, "ENTRY_SCORE": 7.2, "RR": 2.2,
+        "ATR_SL_MULTIPLIER": 2.5, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2,
+        "TRAIL_DISTANCE_RR": 0.8, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5
+    },
+    "Balanced_Trader": {
+        "OPTIMAL_ZONE": LAGGING_ZONE,
+        "NOTES": "Chiến binh chủ lực, đi theo xu hướng đã rõ ràng, ưu tiên gồng lời.",
+        "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, "ENTRY_SCORE": 6.5, "RR": 1.8,
+        "ATR_SL_MULTIPLIER": 2.8, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2,
+        "TRAIL_DISTANCE_RR": 1.0, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.2, "TP1_PROFIT_PCT": 0.5
     },
     "Cautious_Observer": {
-        "NOTES": "Chỉ đánh khi có cơ hội VÀNG, siêu an toàn, dựa chủ yếu vào kỹ thuật và bối cảnh.",
-        "WEIGHTS": {'tech': 0.7, 'context': 0.2, 'ai': 0.1},
-        "ENTRY_SCORE": 8.0, "RR": 1.5, "USE_ATR_SL": True, "ATR_SL_MULTIPLIER": 1.5,
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 0.7, "TRAIL_DISTANCE_RR": 0.5,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.5
+        "OPTIMAL_ZONE": NOISE_ZONE,
+        "NOTES": "Chỉ đánh khi có cơ hội VÀNG trong vùng nhiễu, siêu an toàn.",
+        "WEIGHTS": {'tech': 0.7, 'context': 0.2, 'ai': 0.1}, "ENTRY_SCORE": 8.0, "RR": 1.5,
+        "ATR_SL_MULTIPLIER": 1.5, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 0.7,
+        "TRAIL_DISTANCE_RR": 0.5, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.5
     },
 }
 
-# --- BỘ LỌC CHIẾN THUẬT ---
-STATE_TO_TACTICS_MAP = { # Ánh xạ "Bối cảnh thị trường" với các Tactic được phép sử dụng.
-    "STATE_DIP_HUNTING": ["Dip_Hunter", "Balanced_Trader", "Cautious_Observer"], # Khi thị trường điều chỉnh giảm, chỉ dùng các Tactic này.
-    "STATE_BREAKOUT_WAITING": ["Breakout_Hunter", "AI_Aggressor"], # Khi thị trường tích lũy hẹp, sẵn sàng cho đột phá.
-    "STATE_STRONG_TREND": ["Breakout_Hunter", "AI_Aggressor", "Balanced_Trader"], # Khi có xu hướng mạnh.
-    "STATE_CHOPPY": ["Cautious_Observer"], # Khi thị trường đi ngang, chỉ cho phép Tactic an toàn nhất.
-    "STATE_UNCERTAIN": [] # Khi không xác định, không vào lệnh.
-}
+# ### <<< XÓA BỎ >>> ###
+# STATE_TO_TACTICS_MAP không còn được sử dụng trong chiến lược mới.
+# STATE_TO_TACTICS_MAP = { ... }
 
-
+# ==============================================================================
+# BIẾN TOÀN CỤC & HẰNG SỐ
+# ==============================================================================
 SYMBOLS_TO_SCAN_STRING = os.getenv("SYMBOLS_TO_SCAN", "ETHUSDT,BTCUSDT")
 SYMBOLS_TO_SCAN = [symbol.strip() for symbol in SYMBOLS_TO_SCAN_STRING.split(',')]
 INTERVALS_TO_SCAN = ["1h", "4h", "1d"]
 ALL_TIME_FRAMES = ["1h", "4h", "1d"]
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
-
 LOG_FILE = os.path.join(PAPER_DATA_DIR, "paper_trade_log.txt")
 STATE_FILE = os.path.join(PAPER_DATA_DIR, "paper_trade_state.json")
 TRADE_HISTORY_CSV_FILE = os.path.join(PAPER_DATA_DIR, "trade_history.csv")
-
 indicator_results: Dict[str, Any] = {}
 price_dataframes: Dict[str, Any] = {}
+SESSION_TEMP_KEYS = ['temp_newly_opened_trades', 'temp_newly_closed_trades']
 
 # ==============================================================================
-# CÁC HÀM TIỆN ÍCH & QUẢN LÝ VỊ THẾ
+# HÀM TIỆN ÍCH
 # ==============================================================================
-
 def log_message(message: str):
     timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] {message}"
+    log_entry = f"[{timestamp}] (PaperTrade) {message}"
     print(log_entry)
     with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
 
 def load_json_file(path: str, default: Any = None) -> Any:
     if not os.path.exists(path): return default if default is not None else {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(path, "r", encoding="utf-8") as f: return json.load(f)
     except json.JSONDecodeError:
         log_message(f"⚠️ Cảnh báo: File {path} bị hỏng. Sử dụng giá trị mặc định.")
         return default if default is not None else {}
@@ -231,78 +239,65 @@ def load_json_file(path: str, default: Any = None) -> Any:
 def save_json_file(path: str, data: Any):
     temp_path = path + ".tmp"
     data_to_save = data.copy()
-    data_to_save.pop('temp_newly_opened_trades', None)
-    data_to_save.pop('temp_newly_closed_trades', None)
+    for key in SESSION_TEMP_KEYS:
+        data_to_save.pop(key, None)
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(data_to_save, f, indent=4, ensure_ascii=False)
     os.replace(temp_path, path)
 
+_last_discord_send_time = None
+def can_send_discord_now(force: bool = False) -> bool:
+    global _last_discord_send_time
+    if force: return True
+    now = datetime.now()
+    if _last_discord_send_time is None or (now - _last_discord_send_time).total_seconds() > (GENERAL_CONFIG["HEAVY_REFRESH_MINUTES"] * 60):
+        _last_discord_send_time = now
+        return True
+    return False
 
-def send_discord_message_chunks(full_content: str):
-    webhook_url = ALERT_CONFIG.get("DISCORD_WEBHOOK_URL")
-    if not webhook_url:
-        log_message("⚠️ Không có Discord Webhook URL. Bỏ qua gửi tin nhắn Discord.")
+def send_discord_message_chunks(full_content: str, force: bool = False):
+    if not can_send_discord_now(force):
+        log_message("🤫 Bỏ qua gửi Discord do đang trong thời gian cooldown.")
         return
-    max_len = 1900
-    lines = full_content.split('\n')
-    chunks, current_chunk = [], ""
+    webhook_url = ALERT_CONFIG.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url: return
+    max_len = 1900; lines = full_content.split('\n'); chunks, current_chunk = [], ""
     for line in lines:
         if len(current_chunk) + len(line) + 1 > max_len:
             if current_chunk: chunks.append(current_chunk)
             current_chunk = line
-        else:
-            current_chunk += ("\n" + line) if current_chunk else line
+        else: current_chunk += ("\n" + line) if current_chunk else line
     if current_chunk: chunks.append(current_chunk)
-    total_chunks = len(chunks)
     for i, chunk in enumerate(chunks):
-        content_to_send = f"*(Phần {i+1}/{total_chunks})*\n{chunk}" if total_chunks > 1 else chunk
+        content_to_send = f"*(Phần {i+1}/{len(chunks)})*\n{chunk}" if len(chunks) > 1 else chunk
         try:
             requests.post(webhook_url, json={"content": content_to_send}, timeout=15).raise_for_status()
-            if i < total_chunks - 1:
-                time.sleep(ALERT_CONFIG["DISCORD_CHUNK_DELAY_SECONDS"])
+            if i < len(chunks) - 1: time.sleep(ALERT_CONFIG["DISCORD_CHUNK_DELAY_SECONDS"])
         except requests.exceptions.RequestException as e:
-            log_message(f"❌ Lỗi gửi chunk Discord {i+1}/{total_chunks}: {e}")
-            break
+            log_message(f"❌ Lỗi gửi chunk Discord {i+1}/{len(chunks)}: {e}"); break
 
-# <<< SỬA LỖI BÁO CÁO >>>: Thêm hàm lấy giá real-time
-def get_realtime_price(symbol: str) -> float | None:
-    """Lấy giá thị trường hiện tại cho một symbol từ API Binance Spot."""
+def get_realtime_price(symbol: str) -> Optional[float]:
+    if symbol == "USDT": return 1.0
     url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         response.raise_for_status()
-        data = response.json()
-        return float(data['price'])
-    except Exception as e:
-        log_message(f"⚠️ Không thể lấy giá real-time cho {symbol}: {e}")
-        return None
+        return float(response.json()['price'])
+    except Exception: return None
 
-def get_current_pnl(trade: Dict, realtime_price: float | None = None) -> Tuple[float, float]:
-    """
-    Tính toán PnL.
-    - Nếu `realtime_price` được cung cấp, nó sẽ được sử dụng.
-    - Nếu không, sẽ sử dụng giá từ `indicator_results` (giá đóng nến).
-    """
-    if not (trade and trade.get('entry_price', 0) > 0):
-        return 0.0, 0.0
-
+def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tuple[float, float]:
     current_price = 0.0
     if realtime_price is not None:
         current_price = realtime_price
-    else:
-        # Fallback to indicator price if no realtime price is given
-        current_data = indicator_results.get(trade["symbol"], {}).get(trade["interval"])
-        if current_data and current_data.get('price', 0) > 0:
-            current_price = current_data['price']
+    else: # Fallback to indicator price (closed price) for logic checks
+        indicators = indicator_results.get(trade['symbol'], {}).get(trade['interval'], {})
+        current_price = indicators.get('price', 0.0)
 
-    if current_price <= 0:
-        return 0.0, 0.0
-
+    if not (trade and trade.get('entry_price', 0) > 0 and current_price > 0): return 0.0, 0.0
     pnl_multiplier = 1.0 if trade.get('trade_type', 'LONG') == 'LONG' else -1.0
     pnl_percent = (current_price - trade['entry_price']) / trade['entry_price'] * 100 * pnl_multiplier
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
     return pnl_usd, pnl_percent
-
 
 def export_trade_history_to_csv(closed_trades: List[Dict]):
     if not closed_trades: return
@@ -312,884 +307,612 @@ def export_trade_history_to_csv(closed_trades: List[Dict]):
         if 'exit_time' in df.columns:
             df['exit_time'] = pd.to_datetime(df['exit_time']).dt.tz_convert(VIETNAM_TZ)
             df['holding_duration_hours'] = round((df['exit_time'] - df['entry_time']).dt.total_seconds() / 3600, 2)
-        else:
-            df['holding_duration_hours'] = None
-
-        cols = ["trade_id", "symbol", "interval", "status", "opened_by_tactic", "tactic_used",
-                "trade_type", "entry_price", "exit_price", "tp", "sl", "total_invested_usd",
-                "pnl_usd", "pnl_percent", "entry_time", "exit_time", "holding_duration_hours",
-                "entry_score", "dca_entries"]
+        cols = ["trade_id", "symbol", "interval", "status", "opened_by_tactic", "tactic_used", "trade_type", "entry_price", "exit_price", "tp", "sl", "total_invested_usd", "pnl_usd", "pnl_percent", "entry_time", "exit_time", "holding_duration_hours", "entry_score", "dca_entries"]
         df = df[[c for c in cols if c in df.columns]]
-
-        if 'dca_entries' in df.columns: df['dca_entries'] = df['dca_entries'].apply(lambda x: json.dumps(x) if isinstance(x, list) else '[]')
-        if 'tactic_used' in df.columns: df['tactic_used'] = df['tactic_used'].apply(lambda x: json.dumps(x) if isinstance(x, list) else str(x))
-
         header_mismatch = False
         if os.path.exists(TRADE_HISTORY_CSV_FILE):
             try:
-                existing_df_headers = pd.read_csv(TRADE_HISTORY_CSV_FILE, nrows=0).columns.tolist()
-                if set(existing_df_headers) != set(df.columns.tolist()): header_mismatch = True
+                if set(pd.read_csv(TRADE_HISTORY_CSV_FILE, nrows=0).columns.tolist()) != set(df.columns.tolist()): header_mismatch = True
             except Exception: header_mismatch = True
-        if header_mismatch: log_message("⚠️ CẢNH BÁO: Header của trade_history.csv không khớp. File sẽ được ghi đè.")
-
-        df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a' if os.path.exists(TRADE_HISTORY_CSV_FILE) and not header_mismatch else 'w',
-                  header=not os.path.exists(TRADE_HISTORY_CSV_FILE) or header_mismatch, index=False, encoding="utf-8")
+        df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a' if os.path.exists(TRADE_HISTORY_CSV_FILE) and not header_mismatch else 'w', header=not os.path.exists(TRADE_HISTORY_CSV_FILE) or header_mismatch, index=False, encoding="utf-8")
         log_message(f"✅ Đã xuất {len(df)} lệnh đã đóng vào {TRADE_HISTORY_CSV_FILE}")
-    except Exception as e:
-        log_message(f"❌ Lỗi khi xuất lịch sử giao dịch ra CSV: {e}")
+    except Exception as e: log_message(f"❌ Lỗi khi xuất lịch sử giao dịch ra CSV: {e}")
 
-### START: Sửa lỗi v4.4.1 - Tích hợp hàm bị thiếu vào file ###
-def get_interval_in_milliseconds(interval: str) -> int | None:
-    """Chuyển đổi chuỗi interval (ví dụ: '1h', '4h', '1d') sang milliseconds."""
-    unit = interval[-1]
+def get_interval_in_milliseconds(interval: str) -> Optional[int]:
     try:
-        value = int(interval[:-1])
-    except (ValueError, IndexError):
-        return None
+        unit = interval[-1]; value = int(interval[:-1])
+        if unit == 'm': return value * 60 * 1000
+        if unit == 'h': return value * 3600 * 1000
+        if unit == 'd': return value * 86400 * 1000
+    except (ValueError, IndexError): return None
+    return None
 
-    if unit == 'm':
-        return value * 60 * 1000
-    elif unit == 'h':
-        return value * 60 * 60 * 1000
-    elif unit == 'd':
-        return value * 24 * 60 * 60 * 1000
-    else:
-        return None
-### END: Sửa lỗi v4.4.1 ###
-# Đây là hàm duy nhất bạn cần thay thế trong file backtest/paper_trade.py
-
-def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> pd.DataFrame | None:
-    """
-    Lấy dữ liệu giá với cơ chế cache để giảm thiểu số lần gọi API.
-    - SỬA LỖI: Thêm .copy() để tắt hoàn toàn cảnh báo SettingWithCopyWarning.
-    """
-    cache_filename = f"{symbol}-{interval}.parquet"
-    cache_filepath = os.path.join(CACHE_DIR, cache_filename)
-
+def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+    cache_filepath = os.path.join(CACHE_DIR, f"{symbol}-{interval}.parquet")
     existing_df = None
     if os.path.exists(cache_filepath):
-        try:
-            existing_df = pd.read_parquet(cache_filepath)
-        except Exception as e:
-            log_message(f"⚠️ Lỗi đọc file cache {cache_filepath}: {e}. Sẽ tải lại từ đầu.")
-            existing_df = None
-
+        try: existing_df = pd.read_parquet(cache_filepath)
+        except Exception as e: log_message(f"⚠️ Lỗi đọc file cache {cache_filepath}: {e}. Sẽ tải lại.")
     if existing_df is not None and not existing_df.empty:
-        last_timestamp_ms = int(existing_df.index[-1].timestamp() * 1000)
+        last_ts = int(existing_df.index[-1].timestamp() * 1000)
         interval_ms = get_interval_in_milliseconds(interval)
-        if not interval_ms:
-                 log_message(f"⚠️ Khung thời gian không hợp lệ: {interval}")
-                 return existing_df
-        start_time_ms = last_timestamp_ms + interval_ms
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-        if now_ms > start_time_ms:
-            # Gọi hàm get_price_data từ module indicator đã được sửa lỗi
-            new_data_df = get_price_data(symbol, interval, limit=limit, startTime=start_time_ms)
-
-            if new_data_df is not None and not new_data_df.empty:
-                combined_df = pd.concat([existing_df, new_data_df])
-                combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
-                # log_message(f"       => Tải thành công {len(new_data_df)} nến mới.")
-            else:
-                # log_message(f"       => Không có nến mới nào cho {symbol}-{interval}.")
-                combined_df = existing_df
-        else:
-            combined_df = existing_df
-
-        # <<< SỬA LỖI CHÍNH >>>: Thêm .copy() vào đây để tạo một DataFrame mới hoàn toàn
-        final_df = combined_df.tail(limit).copy()
-    else:
-        log_message(f"  -> {symbol}-{interval}: Không có cache. Tải toàn bộ {limit} nến...")
-        # Gọi hàm get_price_data từ module indicator
-        final_df = get_price_data(symbol, interval, limit=limit)
-
+        if not interval_ms: return existing_df
+        start_time = last_ts + interval_ms
+        if int(datetime.now(timezone.utc).timestamp() * 1000) > start_time:
+            new_data = get_price_data(symbol, interval, limit=limit, startTime=start_time)
+            if new_data is not None and not new_data.empty:
+                combined = pd.concat([existing_df, new_data])
+                combined = combined[~combined.index.duplicated(keep='last')]
+            else: combined = existing_df
+        else: combined = existing_df
+        final_df = combined.tail(limit).copy()
+    else: final_df = get_price_data(symbol, interval, limit=limit)
     if final_df is not None and not final_df.empty:
         try:
             for col in final_df.select_dtypes(include=['float64']).columns:
-                if col != 'close':
-                    final_df[col] = final_df[col].astype('float32')
+                if col != 'close': final_df[col] = final_df[col].astype('float32')
             final_df.to_parquet(cache_filepath)
-        except Exception as e:
-            log_message(f"❌ Lỗi lưu file cache {cache_filepath}: {e}")
+        except Exception as e: log_message(f"❌ Lỗi lưu file cache {cache_filepath}: {e}")
         return final_df
-    elif existing_df is not None:
-         log_message(f"⚠️ Không thể tải dữ liệu mới cho {symbol}-{interval}, sử dụng dữ liệu cache cũ.")
-         return existing_df
-    else:
-        log_message(f"❌ Không thể tải dữ liệu cho {symbol}-{interval} và cũng không có cache.")
-        return None
-
-
-def calculate_total_equity(state: Dict, realtime_prices: Dict[str, float] | None = None) -> float:
-    # <<< SỬA LỖI BÁO CÁO >>>: Tính tổng tài sản với giá real-time nếu có
-    cash = state.get('cash', INITIAL_CAPITAL)
-    invested_capital = 0
-    for t in state.get('active_trades', []):
-        price = realtime_prices.get(t['symbol']) if realtime_prices else None
-        pnl_usd, _ = get_current_pnl(t, realtime_price=price)
-        invested_capital += t.get('total_invested_usd', 0.0) + pnl_usd
-    return cash + invested_capital
-
-
-def determine_dynamic_capital_pct(atr_percent: float) -> float:
-    if pd.isna(atr_percent):
-        log_message("⚠️ Cảnh báo: atr_percent là NaN. Sử dụng mức phân bổ vốn tối thiểu (3%) cho an toàn.")
-        return 0.03
-
-    if atr_percent <= 1.5: base = 0.10
-    elif atr_percent <= 3: base = 0.07
-    elif atr_percent <= 5: base = 0.05
-    else: base = 0.03
-    return max(0.03, min(base, 0.12))
-
-def calculate_average_price(trade: Dict) -> float:
-    entries = [trade['initial_entry']] + trade.get('dca_entries', [])
-    total_cost = sum(e.get('invested_usd', 0.0) * e.get('price', e.get('entry_price', 0.0)) for e in entries)
-    total_invested = sum(e.get('invested_usd', 0.0) for e in entries)
-    return total_cost / total_invested if total_invested > 0 else 0
+    return existing_df if existing_df is not None else None
 
 # ==============================================================================
-# QUẢN LÝ VỊ THẾ CHỦ ĐỘNG
+# LOGIC GIAO DỊCH CỐT LÕI (MÔ PHỎNG)
 # ==============================================================================
 
-def manage_active_trades(portfolio_state: Dict):
-    log_message("🧠 Bắt đầu chu trình Quản lý Lệnh Chủ động...")
-    newly_managed_details = []
+def close_trade_simulated(trade: Dict, reason: str, state: Dict, close_price: float, close_pct: float = 1.0) -> bool:
+    """Hàm mô phỏng việc đóng lệnh, tương tự close_trade_on_binance."""
+    log_message(f"🎬 (Sim) Đóng {close_pct*100:.0f}% lệnh {trade['symbol']} vì: {reason}")
+    pnl_multiplier = 1.0 if trade['trade_type'] == 'LONG' else -1.0
+    pnl_usd_per_unit = (close_price - trade['entry_price']) * pnl_multiplier
+    
+    # Tính PnL cho phần được đóng
+    invested_to_close = trade['total_invested_usd'] * close_pct
+    pnl_on_closed_part = (pnl_usd_per_unit / trade['entry_price']) * invested_to_close
 
-    for trade in portfolio_state.get("active_trades", [])[:]:
-        # QUAN TRỌNG: Logic quản lý lệnh vẫn dùng giá đóng nến từ indicator_results
-        indicators = indicator_results.get(trade['symbol'], {}).get(trade['interval'])
-        if not (indicators and indicators.get('price')):
-            continue
+    if close_pct >= 0.999: # Đóng toàn bộ
+        trade.update({
+            'status': f'Closed ({reason})',
+            'exit_price': close_price,
+            'exit_time': datetime.now(VIETNAM_TZ).isoformat(),
+            'pnl_usd': trade.get('realized_pnl_usd', 0.0) + pnl_on_closed_part,
+            'pnl_percent': ((close_price - trade['entry_price']) / trade['entry_price']) * 100 * pnl_multiplier
+        })
+        state['cash'] += trade['total_invested_usd'] + pnl_on_closed_part
+        state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
+        state['trade_history'].append(trade)
+        cooldown_end = datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])
+        state.setdefault('cooldown_until', {})[trade['symbol']] = cooldown_end.isoformat()
+        export_trade_history_to_csv([trade])
+        icon = '✅' if pnl_on_closed_part >= 0 else '❌'
+        msg = f"{icon} {trade['symbol']} (Đóng toàn bộ - {reason}): PnL ${trade['pnl_usd']:,.2f}"
+        state.setdefault('temp_newly_closed_trades', []).append(msg)
+        log_message(f" -> ✅ (Sim) Đóng toàn bộ {trade['symbol']} thành công. PnL: ${pnl_on_closed_part:,.2f}")
+    else: # Đóng một phần
+        trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_on_closed_part
+        trade['total_invested_usd'] *= (1 - close_pct)
+        state['cash'] += invested_to_close + pnl_on_closed_part
+        trade.setdefault('tactic_used', []).append(f"Partial_Close_{reason}")
+        icon = '💰'
+        msg = f"{icon} {trade['symbol']} (Đóng {close_pct*100:.0f}% - {reason}): PnL ${pnl_on_closed_part:,.2f}"
+        state.setdefault('temp_newly_closed_trades', []).append(msg)
+        log_message(f" -> ✅ (Sim) Đóng {close_pct*100:.0f}% lệnh {trade['symbol']} thành công. PnL đã chốt: ${pnl_on_closed_part:,.2f}")
+    return True
 
-        evaluations = []
-        for tactic_name, tactic_cfg in TACTICS_LAB.items():
-            if not tactic_cfg.get("WEIGHTS"): continue
-            decision = get_advisor_decision(trade['symbol'], trade['interval'], indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
-            evaluations.append({"tactic": tactic_name, "score": decision.get("final_score", 0.0)})
+# ### <<< THAY ĐỔI LỚN >>> ###
+# Hàm quản lý lệnh được tái cấu trúc hoàn toàn để giống live_trade
+def check_and_manage_open_positions(state: Dict):
+    active_trades = state.get("active_trades", [])[:]
+    if not active_trades: return
+    log_message(f"🧠 Quản lý {len(active_trades)} vị thế mở...")
+    for trade in active_trades:
+        symbol, tactic_name = trade['symbol'], trade.get('opened_by_tactic')
+        tactic_cfg = TACTICS_LAB.get(tactic_name, {})
+        
+        # Logic quản lý luôn dùng giá đóng nến (giá từ indicator)
+        indicators = indicator_results.get(symbol, {}).get(trade['interval'], {})
+        current_price = indicators.get('price')
+        if not current_price: continue
 
-        if not evaluations: continue
-
-        best_eval = max(evaluations, key=lambda x: x['score'])
-        controlling_tactic_name = best_eval['tactic']
-        new_score = best_eval['score']
-
-        trade['last_score'] = new_score
-        trade['controlling_tactic'] = controlling_tactic_name
-
-        # PnL ở đây cũng dùng giá đóng nến để check logic bảo vệ lợi nhuận
-        pnl_usd, pnl_percent = get_current_pnl(trade)
+        if (trade['trade_type'] == 'LONG' and current_price <= trade['sl']) or (trade['trade_type'] == 'SHORT' and current_price >= trade['sl']):
+            if close_trade_simulated(trade, "SL", state, trade['sl']): continue
+        if (trade['trade_type'] == 'LONG' and current_price >= trade['tp']) or (trade['trade_type'] == 'SHORT' and current_price <= trade['tp']):
+            if close_trade_simulated(trade, "TP", state, trade['tp']): continue
+        
+        last_score, entry_score = trade.get('last_score', 5.0), trade.get('entry_score', 5.0)
+        
+        if last_score < ACTIVE_TRADE_MANAGEMENT_CONFIG['EARLY_CLOSE_ABSOLUTE_THRESHOLD']:
+            if close_trade_simulated(trade, f"EC_Abs_{last_score:.1f}", state, current_price): continue
+        
+        if last_score < entry_score and not trade.get('is_in_warning_zone', False):
+            trade['is_in_warning_zone'] = True
+            
+        if trade.get('is_in_warning_zone', False) and not trade.get('partial_closed_by_score', False):
+            drop_pct_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get('EARLY_CLOSE_RELATIVE_DROP_PCT', 0.35)
+            if last_score < entry_score * (1 - drop_pct_config):
+                close_pct = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)
+                if close_trade_simulated(trade, f"EC_Rel_{last_score:.1f}", state, current_price, close_pct=close_pct):
+                    trade['partial_closed_by_score'] = True
+                    trade['sl'] = trade['entry_price'] # Move SL to entry after partial close
+        
+        _, pnl_percent = get_current_pnl(trade) # Dùng giá đóng nến cho logic
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
+        
+        initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
+        if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get("tp1_hit", False) and initial_risk_dist > 0:
+            pnl_multiplier = 1 if trade['trade_type'] == 'LONG' else -1
+            pnl_ratio = (current_price - trade['entry_price']) / initial_risk_dist * pnl_multiplier
+            tp1_rr_ratio = tactic_cfg.get("TP1_RR_RATIO", 1.0)
+            if pnl_ratio >= tp1_rr_ratio:
+                close_pct = tactic_cfg.get("TP1_PROFIT_PCT", 0.5)
+                # Tính giá chính xác tại TP1 để mô phỏng
+                tp1_price = trade['initial_entry']['price'] + (initial_risk_dist * tp1_rr_ratio * pnl_multiplier)
+                if close_trade_simulated(trade, f"TP1_{tp1_rr_ratio:.1f}R", state, tp1_price, close_pct=close_pct):
+                    trade['tp1_hit'] = True
+                    trade['sl'] = trade['entry_price']
 
         pp_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PROFIT_PROTECTION", {})
-        if (pp_config.get("ENABLED", False) and not trade.get('profit_taken', False) and
-            trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.0)):
-
-            pnl_drop = trade['peak_pnl_percent'] - pnl_percent
-            score_drop = trade.get('entry_score', 5.0) - new_score
-
-            if pnl_drop >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.5) and score_drop > 0.5:
-                log_message(f"🛡️ BẢO VỆ LỢI NHUẬN cho {trade['symbol']}. PnL giảm {pnl_drop:.2f}% từ đỉnh.")
-                close_pct = pp_config.get("PARTIAL_CLOSE_PCT", 0.6)
-                invested_to_close = trade.get('total_invested_usd', 0.0) * close_pct
-                partial_pnl_usd = (pnl_percent / 100) * invested_to_close
-
-                portfolio_state['cash'] += (invested_to_close + partial_pnl_usd)
-                trade['total_invested_usd'] -= invested_to_close
-                trade['sl'] = trade['entry_price']
-                trade['trailing_sl'] = max(trade.get('trailing_sl', 0), trade['entry_price'])
-                trade.setdefault('tactic_used', []).append(f"Profit_Protect")
-
-                # === CẢI TIẾN: LƯU LẠI LỢI NHUẬN ĐÃ CHỐT ===
-                trade.setdefault('realized_pnl_usd', 0.0)
-                trade['realized_pnl_usd'] += partial_pnl_usd
-                trade['profit_taken'] = True
-                # ============================================
-
-                newly_managed_details.append(f"🛡️ {trade['symbol']} (Bảo vệ LN): PnL ${partial_pnl_usd:,.2f}")
-                continue
-
-        if new_score < ACTIVE_TRADE_MANAGEMENT_CONFIG['EARLY_CLOSE_SCORE_THRESHOLD']:
-            log_message(f"🚨 CẮT LỖ SỚM cho {trade['symbol']}. Điểm số mới ({new_score:.2f}) quá thấp.")
-            exit_price = indicators.get('price')
-
-            pnl_usd_final, pnl_ratio_final = get_current_pnl(trade)
-
-            portfolio_state['cash'] += (trade.get('total_invested_usd', 0.0) + pnl_usd_final)
-            trade.setdefault('tactic_used', []).append(f"Early_Close_@{new_score:.1f}")
-            trade.update({
-                'status': 'Closed (Early)', 'exit_price': exit_price, 'exit_time': datetime.now(VIETNAM_TZ).isoformat(),
-                'pnl_usd': pnl_usd_final, 'pnl_percent': pnl_ratio_final
-            })
-            portfolio_state['active_trades'].remove(trade)
-            portfolio_state['trade_history'].append(trade)
-            newly_managed_details.append(f"🚨 {trade['symbol']} (Cắt sớm): PnL ${pnl_usd_final:,.2f}")
-            continue
-
-    if newly_managed_details:
-        portfolio_state.setdefault('temp_newly_closed_trades', []).extend(newly_managed_details)
-
-# ==============================================================================
-# CÁC HÀM XỬ LÝ GỐC
-# ==============================================================================
-
-def handle_trade_closure(portfolio_state: Dict) -> List[Dict]:
-    closed_trades, newly_closed_details = [], []
-    now_vn = datetime.now(VIETNAM_TZ)
-
-    for trade in portfolio_state["active_trades"][:]:
-        # QUAN TRỌNG: Logic đóng lệnh vẫn dùng giá đóng nến từ indicator_results
-        data = indicator_results.get(trade['symbol'], {}).get(trade['interval'], {})
-        current_price = data.get('price', 0)
-        if not current_price > 0:
-            continue
-
-        controlling_tactic = trade.get('controlling_tactic', trade['opened_by_tactic'])
-        tactic_cfg = TACTICS_LAB.get(controlling_tactic, {})
-        trade_type = trade.get('trade_type', 'LONG')
-        pnl_multiplier = 1.0 if trade_type == 'LONG' else -1.0
-
-        status, exit_p = None, None
-
-        if 'initial_risk_dist' not in trade or trade['initial_risk_dist'] <= 0:
-            trade['initial_risk_dist'] = abs(trade['entry_price'] - trade['initial_sl'])
-
-        initial_risk_dist = trade.get('initial_risk_dist', 0)
-        if initial_risk_dist <= 0: continue
-
-        pnl_ratio_from_entry = pnl_multiplier * (current_price - trade['entry_price']) / initial_risk_dist
-
-        if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get('profit_taken', False):
-            tp1_rr_ratio = tactic_cfg.get("TP1_RR_RATIO", 1.0)
-            if pnl_ratio_from_entry >= tp1_rr_ratio:
-                profit_taken_pct = tactic_cfg.get("TP1_PROFIT_PCT", 0.5)
-                invested_to_close = trade.get('total_invested_usd', 0.0) * profit_taken_pct
-
-                tp1_price = trade['entry_price'] + (initial_risk_dist * tp1_rr_ratio * pnl_multiplier)
-                partial_pnl_usd = ((tp1_price - trade['entry_price']) / trade['entry_price']) * invested_to_close * pnl_multiplier
-
-                portfolio_state['cash'] += (invested_to_close + partial_pnl_usd)
-                trade['total_invested_usd'] -= invested_to_close
-                trade['sl'] = trade['entry_price']
-                trade['trailing_sl'] = max(trade.get('trailing_sl', 0), trade['entry_price']) if trade_type == 'LONG' else min(trade.get('trailing_sl', float('inf')), trade['entry_price'])
-
-                if "Partial_TP_Taken" not in trade.get('tactic_used', []):
-                    trade.setdefault('tactic_used', []).append(f"Partial_TP_{tp1_rr_ratio}RR")
-
-                # === CẢI TIẾN: LƯU LẠI LỢI NHUẬN ĐÃ CHỐT ===
-                trade.setdefault('realized_pnl_usd', 0.0)
-                trade['realized_pnl_usd'] += partial_pnl_usd
-                trade['profit_taken'] = True
-                # ============================================
-
-                log_message(f"💰 Đã chốt lời TP1 cho {trade['symbol']} (${invested_to_close:,.2f}) | PnL TP1: ${partial_pnl_usd:,.2f}. SL dời về hòa vốn.")
-                newly_closed_details.append(f"💰 {trade['symbol']} (TP1): PnL ${partial_pnl_usd:,.2f}")
-
-        trail_activation_rr = tactic_cfg.get("TRAIL_ACTIVATION_RR")
-        if tactic_cfg.get("USE_TRAILING_SL", False) and trail_activation_rr is not None:
-            if pnl_ratio_from_entry >= trail_activation_rr:
+        if pp_config.get("ENABLED", False) and not trade.get('profit_taken', False) and trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.5):
+            if (trade['peak_pnl_percent'] - pnl_percent) >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.0):
+                close_pct = pp_config.get("PARTIAL_CLOSE_PCT", 0.7)
+                if close_trade_simulated(trade, "Protect_Profit", state, current_price, close_pct=close_pct):
+                    trade['profit_taken'] = True
+                    trade['sl'] = trade['entry_price']
+                    
+        if tactic_cfg.get("USE_TRAILING_SL", False) and initial_risk_dist > 0:
+            pnl_multiplier = 1 if trade['trade_type'] == 'LONG' else -1
+            pnl_ratio_from_entry = (current_price - trade['entry_price']) / initial_risk_dist * pnl_multiplier
+            trail_activation_rr = tactic_cfg.get("TRAIL_ACTIVATION_RR")
+            if trail_activation_rr is not None and pnl_ratio_from_entry >= trail_activation_rr:
                 trail_dist_rr = tactic_cfg.get("TRAIL_DISTANCE_RR", 0.8)
-                new_trailing_sl = current_price - (initial_risk_dist * trail_dist_rr * pnl_multiplier)
-
-                is_better_tsl = (new_trailing_sl > trade.get('trailing_sl', trade['sl'])) if trade_type == 'LONG' else (new_trailing_sl < trade.get('trailing_sl', trade['sl']))
-                if is_better_tsl:
+                new_sl = current_price - (initial_risk_dist * trail_dist_rr * pnl_multiplier)
+                if (new_sl > trade['sl']) if trade['trade_type'] == 'LONG' else (new_sl < trade['sl']):
+                    log_message(f"📈 TRAILING SL cho {symbol}: SL mới: {new_sl:.4f} (cũ: {trade['sl']:.4f})")
+                    trade['sl'] = new_sl
                     if "Trailing_SL_Active" not in trade.get('tactic_used', []):
                         trade.setdefault('tactic_used', []).append("Trailing_SL_Active")
-                    trade['trailing_sl'] = new_trailing_sl
-                    trade['sl'] = new_trailing_sl
 
-        final_sl = trade.get('trailing_sl', trade['sl'])
-        if (trade_type == 'LONG' and current_price <= final_sl) or \
-           (trade_type == 'SHORT' and current_price >= final_sl):
-            status, exit_p = "SL", final_sl
-        elif (trade_type == 'LONG' and current_price >= trade['tp']) or \
-             (trade_type == 'SHORT' and current_price <= trade['tp']):
-            status, exit_p = "TP", trade['tp']
 
-        if status:
-            pnl_usd_final = (exit_p - trade['entry_price']) / trade['entry_price'] * trade.get('total_invested_usd', 0.0) * pnl_multiplier
-            pnl_percent_final = (exit_p - trade['entry_price']) / trade['entry_price'] * 100 * pnl_multiplier
-
-            portfolio_state['cash'] += (trade.get('total_invested_usd', 0.0) + pnl_usd_final)
-            trade.update({
-                'status': f'Closed ({status})', 'exit_price': exit_p, 'exit_time': now_vn.isoformat(),
-                'pnl_usd': pnl_usd_final, 'pnl_percent': pnl_percent_final
-            })
-            cooldown_duration = timedelta(hours=GENERAL_CONFIG.get("TRADE_COOLDOWN_HOURS", 1))
-            cooldown_end_time = now_vn + cooldown_duration
-            portfolio_state.setdefault('cooldown_until', {})[trade['symbol']] = cooldown_end_time.isoformat()
-
-            portfolio_state['active_trades'].remove(trade)
-            portfolio_state['trade_history'].append(trade)
-            closed_trades.append(trade)
-            icon = '✅' if status == 'TP' else ('❌' if pnl_usd_final < 0 else '🤝')
-            log_message(f"{icon} Đã đóng lệnh {status}: {trade['symbol']} | PnL: ${pnl_usd_final:,.2f}")
-            newly_closed_details.append(f"{icon} {trade['symbol']} ({status}): PnL ${pnl_usd_final:,.2f}")
-
-    if newly_closed_details:
-        portfolio_state.setdefault('temp_newly_closed_trades', []).extend(newly_closed_details)
-
-    return closed_trades
-
-def handle_stale_trades(portfolio_state: Dict) -> List[Dict]:
-    closed_trades, newly_closed_details = [], []
+def handle_stale_trades(state: Dict):
     now_aware = datetime.now(VIETNAM_TZ)
-    for trade in portfolio_state.get("active_trades", [])[:]:
-        override_until = trade.get("stale_override_until")
-        if override_until:
-            try:
-                override_time = datetime.fromisoformat(override_until)
-                if now_aware < override_time:
-                    log_message(f"⏳ Lệnh {trade['symbol']} đang được gia hạn stale đến {override_time}. Bỏ qua.")
-                    continue
-            except Exception as e:
-                log_message(f"⚠️ Lỗi khi đọc stale_override_until của {trade['symbol']}: {e}")
+    for trade in state.get("active_trades", [])[:]:
         rules = RISK_RULES_CONFIG["STALE_TRADE_RULES"].get(trade.get("interval"))
         if not rules: continue
         entry_time = datetime.fromisoformat(trade['entry_time'])
-        holding_duration_hours = (now_aware - entry_time).total_seconds() / 3600
-
-        if holding_duration_hours > rules["HOURS"]:
-            # Logic stale trade cũng dùng giá đóng nến
-            _, pnl_pct = get_current_pnl(trade)
-            current_price = indicator_results.get(trade['symbol'], {}).get(trade['interval'], {}).get('price', 0)
-            if not current_price > 0: continue
-
-            progress_made = pnl_pct >= rules["PROGRESS_THRESHOLD_PCT"]
-
-            current_sl_buffer_pct = (abs(current_price - trade['sl']) / trade['entry_price']) * 100
-            if current_sl_buffer_pct >= rules["MIN_RISK_BUFFER_PCT"]:
-                progress_made = True
-
+        holding_hours = (now_aware - entry_time).total_seconds() / 3600
+        if holding_hours > rules["HOURS"]:
+            _, pnl_pct = get_current_pnl(trade) # Dùng giá đóng nến
             latest_score = trade.get('last_score', 5.0)
-            stay_of_execution_score = RISK_RULES_CONFIG["STALE_TRADE_RULES"].get("STAY_OF_EXECUTION_SCORE", 6.8)
+            if pnl_pct < rules["PROGRESS_THRESHOLD_PCT"] and latest_score < RISK_RULES_CONFIG["STALE_TRADE_RULES"]["STAY_OF_EXECUTION_SCORE"]:
+                log_message(f"🐌 Phát hiện lệnh 'ì': {trade['symbol']} ({trade['interval']}) giữ {holding_hours:.1f}h không có tiến triển.")
+                current_price = indicator_results.get(trade['symbol'], {}).get(trade['interval'], {}).get('price')
+                if current_price:
+                    close_trade_simulated(trade, "Stale", state, current_price)
+            elif pnl_pct < rules["PROGRESS_THRESHOLD_PCT"]:
+                log_message(f"⏳ Lệnh {trade['symbol']} đã quá hạn nhưng được GIA HẠN do tín hiệu mới tốt (Điểm: {latest_score:.2f})")
 
-            if not progress_made and latest_score < stay_of_execution_score:
-                exit_price = current_price
-                pnl_usd_final, pnl_percent_final = get_current_pnl(trade)
-
-                portfolio_state['cash'] += (trade.get('total_invested_usd', 0.0) + pnl_usd_final)
-                trade.setdefault('tactic_used', []).append("Stale_Closure")
-                trade.update({
-                    'status': 'Closed (Stale)', 'exit_price': exit_price, 'exit_time': now_aware.isoformat(),
-                    'pnl_usd': pnl_usd_final, 'pnl_percent': pnl_percent_final
-                })
-                portfolio_state['active_trades'].remove(trade)
-                portfolio_state['trade_history'].append(trade)
-                closed_trades.append(trade)
-                log_message(f"🐌 Đã đóng lệnh ì (Stale): {trade['symbol']} ({trade['interval']}) sau {holding_duration_hours:.1f}h | PnL: ${pnl_usd_final:,.2f}")
-                newly_closed_details.append(f"🐌 {trade['symbol']} (Stale): PnL ${pnl_usd_final:,.2f}")
-            elif not progress_made and latest_score >= stay_of_execution_score:
-                log_message(f"⏳ Lệnh {trade['symbol']} đã quá hạn nhưng được GIA HẠN do tín hiệu mới rất tốt (Điểm: {latest_score:.2f})")
-
-    if newly_closed_details:
-        portfolio_state.setdefault('temp_newly_closed_trades', []).extend(newly_closed_details)
-    return closed_trades
 
 def handle_dca_opportunities(state: Dict, equity: float):
     if not DCA_CONFIG["ENABLED"]: return
-
-    if DCA_CONFIG["TRIGGER_DROP_PCT"] >= 0:
-        log_message(f"⚠️ CẢNH BÁO: DCA_CONFIG['TRIGGER_DROP_PCT'] được đặt là {DCA_CONFIG['TRIGGER_DROP_PCT']}. "
-                    f"Đây là một giá trị không an toàn. Tạm dừng chức năng DCA.")
-        return
-
-    current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get('active_trades', []))
-    for trade in state.get("active_trades", []):
-        if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]:
-            continue
-
-        # Logic DCA cũng dùng giá đóng nến
+    log_message("🎯 Quét cơ hội DCA...")
+    current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
+    now = datetime.now(VIETNAM_TZ)
+    for trade in state.get("active_trades", [])[:]:
+        if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]: continue
+        if trade.get('last_dca_time'):
+            if (now - datetime.fromisoformat(trade.get('last_dca_time'))).total_seconds() / 3600 < DCA_CONFIG['DCA_COOLDOWN_HOURS']: continue
+            
         current_data = indicator_results.get(trade["symbol"], {}).get(trade["interval"], {})
-        current_price = current_data.get('price', 0)
-        if not current_price > 0:
-            continue
-
-        pnl_multiplier = 1.0 if trade.get('trade_type', 'LONG') == 'LONG' else -1.0
-
-        # === LOGIC KIỂM TRA ĐIỀU KIỆN DCA CHUNG ===
-        last_entry_price = trade['dca_entries'][-1]['entry_price'] if trade.get('dca_entries') else trade['initial_entry']['price']
-        price_drop_pct = ((current_price - last_entry_price) / last_entry_price) * 100 * pnl_multiplier
-        if price_drop_pct > DCA_CONFIG["TRIGGER_DROP_PCT"]:
-            continue
-
-        if trade.get('dca_entries'):
-            last_dca_time = datetime.fromisoformat(trade['dca_entries'][-1]["timestamp"])
-            if (datetime.now(VIETNAM_TZ) - last_dca_time).total_seconds() / 3600 < DCA_CONFIG["DCA_COOLDOWN_HOURS"]:
-                continue
-
-        original_tactic_cfg = TACTICS_LAB.get(trade['opened_by_tactic'], {})
-        if not original_tactic_cfg.get("WEIGHTS"): continue
-        decision = get_advisor_decision(trade['symbol'], trade['interval'], current_data, ADVISOR_BASE_CONFIG, weights_override=original_tactic_cfg.get("WEIGHTS"))
-        if decision.get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]:
-            log_message(f"⚠️ Muốn DCA cho {trade['symbol']} nhưng điểm theo Tactic gốc ({decision.get('final_score', 0.0):.2f}) quá thấp.")
-            continue
-        # ===============================================
-
-        # === PHÂN LUỒNG LOGIC DCA MỚI ===
-        if trade.get('profit_taken', False):
-            # --- LOGIC DCA BẰNG LỢI NHUẬN ĐÃ CHỐT ---
-            realized_pnl = trade.get('realized_pnl_usd', 0.0)
-            if realized_pnl <= 0:
-                continue
-
-            reinvest_ratio = DCA_CONFIG.get("DCA_REINVEST_RATIO", 0.5)
-            dca_investment = min(realized_pnl, trade['initial_entry']['invested_usd'] * reinvest_ratio)
-
-            if (current_exposure_usd + dca_investment) / equity > CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"] or dca_investment > state['cash']:
-                log_message(f"⚠️ Muốn DCA tái đầu tư cho {trade['symbol']} nhưng vượt ngưỡng rủi ro hoặc không đủ tiền. Bỏ qua.")
-                continue
-
-            log_message(f"🎯 THỰC HIỆN DCA TÁI ĐẦU TƯ LỢI NHUẬN Lần {len(trade.get('dca_entries', [])) + 1} cho {trade['symbol']}...")
-            trade['realized_pnl_usd'] -= dca_investment
-
-        else:
-            # --- LOGIC DCA GỐC (KHI CHƯA CHỐT LỜI) ---
-            last_investment = trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']
-            dca_investment = last_investment * DCA_CONFIG["CAPITAL_MULTIPLIER"]
-
-            if (current_exposure_usd + dca_investment) / equity > CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"] or dca_investment > state['cash']:
-                log_message(f"⚠️ Muốn DCA cho {trade['symbol']} nhưng vượt ngưỡng rủi ro hoặc không đủ tiền. Bỏ qua.")
-                continue
-
-            log_message(f"🎯 THỰC HIỆN DCA Lần {len(trade.get('dca_entries', [])) + 1} cho {trade['symbol']}...")
-
-        # --- THỰC HIỆN DCA (LOGIC CHUNG) ---
+        current_price = current_data.get('price')
+        if not current_price or current_price <= 0: continue
+            
+        last_entry_price = trade['dca_entries'][-1]['price'] if trade.get('dca_entries') else trade['initial_entry']['price']
+        price_drop_pct = ((current_price - last_entry_price) / last_entry_price) * 100
+        if price_drop_pct > DCA_CONFIG["TRIGGER_DROP_PCT"]: continue # Áp dụng cho LONG, cần điều chỉnh cho SHORT nếu có
+            
+        decision = get_advisor_decision(trade['symbol'], trade['interval'], current_data, ADVISOR_BASE_CONFIG)
+        if decision.get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
+            
+        dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * DCA_CONFIG["CAPITAL_MULTIPLIER"]
+        if dca_investment <= 0 or dca_investment > state['cash'] or (current_exposure_usd + dca_investment) > (equity * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]): continue
+        
+        log_message(f"🎯 (Sim) THỰC HIỆN DCA cho {trade['symbol']} với ${dca_investment:,.2f}...")
         state['cash'] -= dca_investment
-        trade.setdefault('dca_entries', []).append({
-            "entry_price": current_price, "invested_usd": dca_investment, "timestamp": datetime.now(VIETNAM_TZ).isoformat()
-        })
+        
+        # Mô phỏng lệnh DCA
+        dca_entry = {"price": current_price, "invested_usd": dca_investment, "timestamp": now.isoformat()}
+        trade.setdefault('dca_entries', []).append(dca_entry)
 
-        trade['total_invested_usd'] += dca_investment
-        new_avg_price = calculate_average_price(trade)
-        trade['entry_price'] = new_avg_price
-
+        # Cập nhật lại vị thế
+        all_entries = [trade['initial_entry']] + trade['dca_entries']
+        new_total_cost = sum(e['invested_usd'] for e in all_entries)
+        new_avg_price = sum(e['price'] * e['invested_usd'] for e in all_entries) / new_total_cost
+        
         initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
-        trade['sl'] = new_avg_price - (initial_risk_dist * pnl_multiplier)
-        trade['tp'] = new_avg_price + (initial_risk_dist * original_tactic_cfg.get('RR', 2.0) * pnl_multiplier)
-        trade['trailing_sl'] = trade['sl']
-        trade['profit_taken'] = False # Reset cờ profit_taken để có thể chốt lời lại sau DCA
-        trade['peak_pnl_percent'] = 0.0 # Reset đỉnh PnL
-
+        new_sl = new_avg_price - initial_risk_dist
+        new_tp = new_avg_price + (initial_risk_dist * TACTICS_LAB[trade['opened_by_tactic']]['RR'])
+        
+        trade.update({
+            'entry_price': new_avg_price, 'total_invested_usd': new_total_cost, 'sl': new_sl, 'tp': new_tp,
+            'profit_taken': False, 'peak_pnl_percent': 0.0, 'tp1_hit': False, 'is_in_warning_zone': False, 'partial_closed_by_score': False
+        })
         trade.setdefault('tactic_used', []).append(f"DCA_{len(trade.get('dca_entries', []))}")
-
-        log_message(f"✅ DCA thành công. Vốn mới cho {trade['symbol']}: ${trade['total_invested_usd']:,.2f}. Giá TB mới: {new_avg_price:.4f}")
+        trade['last_dca_time'] = now.isoformat()
+        log_message(f"✅ (Sim) DCA thành công. Vị thế mới của {trade['symbol']}: Vốn=${new_total_cost:.2f}, Giá TB={new_avg_price:.4f}")
 
 # ==============================================================================
-# BỘ NÃO & RA QUYẾT ĐỊNH
+# ================= 🚀 CORE LOGIC v8.0.0: 4-ZONE FUNCTIONS 🚀 =================
 # ==============================================================================
 
-def determine_market_state(symbol: str, interval: str, df: pd.DataFrame) -> str:
+# ### <<< THÊM MỚI >>> ###
+# Hàm xác định Vùng thị trường, copy từ live_trade
+def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
+    """Xác định Vùng thị trường bằng hệ thống chấm điểm đa chỉ báo."""
     indicators = indicator_results.get(symbol, {}).get(interval, {})
-    if not indicators or df.empty:
-        return "STATE_UNCERTAIN"
+    df = price_dataframes.get(symbol, {}).get(interval)
+    if not indicators or df is None or df.empty: return NOISE_ZONE
 
-    if 'bb_width' in indicators and pd.notna(indicators['bb_width']):
-        bb_width = indicators['bb_width']
-        if 'bb_width' in df.columns:
-            recent_bbw = df['bb_width'].dropna().tail(100)
-            if not recent_bbw.empty:
-                squeeze_threshold = recent_bbw.quantile(0.25)
-                if bb_width < squeeze_threshold:
-                    return "STATE_BREAKOUT_WAITING"
+    scores = {LEADING_ZONE: 0, COINCIDENT_ZONE: 0, LAGGING_ZONE: 0, NOISE_ZONE: 0}
+    
+    adx = indicators.get('adx', 20)
+    bb_width = indicators.get('bb_width', 0)
+    rsi_14 = indicators.get('rsi_14', 50)
+    macd_cross = indicators.get('macd_cross', "neutral")
+    trend = indicators.get('trend', "sideway")
+    breakout_signal = indicators.get('breakout_signal', "none")
+    volume = indicators.get('volume', 0)
+    vol_ma20 = indicators.get('vol_ma20', 1)
 
-    trend = indicators.get('trend')
-    adx = indicators.get('adx', 0)
-    if trend in ["uptrend", "downtrend"] and adx > 25:
-        return "STATE_STRONG_TREND"
+    if adx < 20: scores[NOISE_ZONE] += 3
+    if 'ema_50' in df.columns and not df['ema_50'].isna().all():
+        crossings = np.sign(df['close'].iloc[-30:] - df['ema_50'].iloc[-30:]).diff().ne(0).sum()
+        if crossings > 4: scores[NOISE_ZONE] += 2
 
-    rsi = indicators.get('rsi_14', 50)
-    higher_tf = '1d' if interval != '1d' else '1d'
-    higher_tf_trend = indicator_results.get(symbol, {}).get(higher_tf, {}).get('trend')
-    if higher_tf_trend == "uptrend" and rsi < 40:
-        return "STATE_DIP_HUNTING"
+    if adx > 25: scores[LAGGING_ZONE] += 2.5
+    if trend in ["uptrend", "downtrend"]: scores[LAGGING_ZONE] += 2
+    if 'ema_20' in df.columns and 'ema_50' in df.columns and not df['ema_20'].isna().all() and not df['ema_50'].isna().all():
+        if trend == "uptrend" and df['ema_20'].iloc[-1] > df['ema_50'].iloc[-1] and df['ema_20'].iloc[-10] > df['ema_50'].iloc[-10]:
+            scores[LAGGING_ZONE] += 1.5
+        elif trend == "downtrend" and df['ema_20'].iloc[-1] < df['ema_50'].iloc[-1] and df['ema_20'].iloc[-10] < df['ema_50'].iloc[-10]:
+            scores[LAGGING_ZONE] += 1.5
+    
+    if 'bb_width' in df.columns and not df['bb_width'].isna().all():
+        if bb_width < df['bb_width'].iloc[-100:].quantile(0.20): scores[LEADING_ZONE] += 2.5
+    
+    htf_interval = '4h' if interval == '1h' else '1d'
+    htf_trend = indicator_results.get(symbol, {}).get(htf_interval, {}).get('trend', 'sideway')
+    if htf_trend == 'uptrend' and rsi_14 < 45: scores[LEADING_ZONE] += 2
+    if htf_trend == 'downtrend' and rsi_14 > 55: scores[LEADING_ZONE] += 2
 
-    if adx < 20:
-        return "STATE_CHOPPY"
+    if breakout_signal != "none": scores[COINCIDENT_ZONE] += 3
+    if macd_cross not in ["neutral"]: scores[COINCIDENT_ZONE] += 2
+    if vol_ma20 > 0 and volume > vol_ma20 * 2: scores[COINCIDENT_ZONE] += 1.5
 
-    return "STATE_UNCERTAIN"
+    if adx > 28: scores[LEADING_ZONE] -= 2
 
-def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
-    if not MTF_ANALYSIS_CONFIG["ENABLED"]:
-        return 1.0
+    if not scores or all(v == 0 for v in scores.values()): return NOISE_ZONE
+    return max(scores, key=scores.get)
 
-    trends = {
-        tf: indicator_results.get(symbol, {}).get(tf, {}).get("trend", "sideways")
-        for tf in ALL_TIME_FRAMES
-    }
-    cfg = MTF_ANALYSIS_CONFIG
-
-    favorable_trend = "uptrend" if trade_type == "LONG" else "downtrend"
-    unfavorable_trend = "downtrend" if trade_type == "LONG" else "uptrend"
-
-    if target_interval == "1h":
-        htf1, htf2 = trends["4h"], trends["1d"]
-        if htf1 == unfavorable_trend and htf2 == unfavorable_trend: return cfg["SEVERE_PENALTY_COEFFICIENT"]
-        if htf1 == unfavorable_trend or htf2 == unfavorable_trend: return cfg["PENALTY_COEFFICIENT"]
-        if htf1 == favorable_trend and htf2 == favorable_trend: return cfg["BONUS_COEFFICIENT"]
-        if htf1 == "sideways" or htf2 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
-
-    elif target_interval == "4h":
-        htf1 = trends["1d"]
-        if htf1 == unfavorable_trend: return cfg["PENALTY_COEFFICIENT"]
-        if htf1 == favorable_trend: return cfg["BONUS_COEFFICIENT"]
-        if htf1 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
-
-    return 1.0
-
-
+# ### <<< THÊM MỚI >>> ###
+# Hàm lấy % vốn theo Vùng
+def get_capital_allocation_for_zone(zone: str) -> float:
+    """Lấy tỷ lệ phân bổ vốn dựa trên Vùng thị trường."""
+    return ZONE_BASED_POLICIES.get(zone, {"CAPITAL_PCT": 0.03})["CAPITAL_PCT"]
+    
+# ### <<< THAY ĐỔI LỚN >>> ###
+# Hàm tìm lệnh mới được viết lại hoàn toàn theo logic 4 Vùng
 def find_and_open_new_trades(state: Dict, equity: float):
-    """
-    Tìm và mở lệnh mới. Ép SL/TP về đúng trần an toàn nếu ATR quá lớn.
-    (Phiên bản cho paper_trade)
-    """
-    active_trades = state.get('active_trades', [])
-    if len(active_trades) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]:
-        log_message(f"ℹ️ Đã đạt giới hạn {len(active_trades)}/{RISK_RULES_CONFIG['MAX_ACTIVE_TRADES']} lệnh. Không tìm lệnh mới.")
-        return
-
+    if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]: return
+    
     potential_opportunities = []
     now_vn = datetime.now(VIETNAM_TZ)
-
-    trade_type_to_scan = "LONG"
-    log_message(f"🔎 Bắt đầu quét cơ hội lệnh {trade_type_to_scan}...")
+    log_message("🔎 Bắt đầu quét cơ hội lệnh mới theo mô hình 4 Vùng...")
 
     for symbol in SYMBOLS_TO_SCAN:
-        if any(t['symbol'] == symbol for t in active_trades): continue
+        if any(t['symbol'] == symbol for t in state.get("active_trades", [])): continue
         cooldown_map = state.get('cooldown_until', {})
         if symbol in cooldown_map and now_vn < datetime.fromisoformat(cooldown_map[symbol]): continue
 
         for interval in INTERVALS_TO_SCAN:
-            indicators = indicator_results.get(symbol, {}).get(interval)
-            df_data = price_dataframes.get(symbol, {}).get(interval)
-            if not (indicators and indicators.get('price', 0) > 0 and df_data is not None): continue
+            market_zone = determine_market_zone_with_scoring(symbol, interval)
+            # log_message(f"  -> {symbol}-{interval}: Vùng xác định = {market_zone}") # Bỏ comment nếu muốn debug
 
-            market_state = determine_market_state(symbol, interval, df_data)
-            allowed_tactics = STATE_TO_TACTICS_MAP.get(market_state, [])
-            if not allowed_tactics: continue
-            
-            for tactic_name in allowed_tactics:
-                tactic_cfg = TACTICS_LAB[tactic_name]
-                if not tactic_cfg.get("WEIGHTS"): continue
+            for tactic_name, tactic_cfg in TACTICS_LAB.items():
+                optimal_zones = tactic_cfg.get("OPTIMAL_ZONE", [])
+                # Đảm bảo OPTIMAL_ZONE là một list để xử lý
+                if not isinstance(optimal_zones, list):
+                    optimal_zones = [optimal_zones]
 
-                decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
-                adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval, trade_type_to_scan)
+                if market_zone in optimal_zones:
+                    indicators = indicator_results.get(symbol, {}).get(interval)
+                    if not (indicators and indicators.get('price', 0) > 0): continue
+                    
+                    decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
+                    adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval)
+                    
+                    if adjusted_score >= tactic_cfg.get("ENTRY_SCORE", 9.9):
+                        potential_opportunities.append({
+                            "decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg,
+                            "score": adjusted_score, "symbol": symbol, "interval": interval, "zone": market_zone
+                        })
 
-                if adjusted_score >= tactic_cfg.get("ENTRY_SCORE", 9.9):
-                    potential_opportunities.append({
-                        "decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg,
-                        "score": adjusted_score, "symbol": symbol, "interval": interval,
-                        "trade_type": trade_type_to_scan
-                    })
-
-    if not potential_opportunities:
-        log_message("ℹ️ Phiên này không tìm thấy cơ hội nào đủ điều kiện sau khi quét.")
-        return
-
+    if not potential_opportunities: return
+        
     best_opportunity = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)[0]
     decision_data, tactic_name, tactic_cfg = best_opportunity['decision'], best_opportunity['tactic_name'], best_opportunity['tactic_cfg']
-    symbol, interval, score, trade_type = best_opportunity['symbol'], best_opportunity['interval'], best_opportunity['score'], best_opportunity['trade_type']
-
-    log_message(f"🏆 CƠ HỘI TỐT NHẤT PHIÊN: {symbol}-{interval} | Tactic: {tactic_name} | Điểm (đã điều chỉnh): {score:.2f}")
+    symbol, interval, score, zone = best_opportunity['symbol'], best_opportunity['interval'], best_opportunity['score'], best_opportunity['zone']
+    
+    log_message(f"🏆 Cơ hội tốt nhất: {symbol}-{interval} | Vùng: {zone} | Tactic: {tactic_name} | Điểm: {score:.2f}")
 
     full_indicators = decision_data.get('full_indicators', {})
-    entry_p = full_indicators.get('price')
-    if not entry_p or entry_p <= 0: return
+    entry_price = full_indicators.get('price')
+    if not entry_price or entry_price <= 0: return
 
-    # ========= 🔥 ĐOẠN SỬA LỖI TRỰC TIẾP & NGẮN GỌN (Tương tự live_trade) 🔥 =========
-    # 1. Tính risk_dist dựa trên ATR như bình thường
     risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
-
-    # 2. Tính risk_dist tối đa cho phép theo %
     max_sl_pct = RISK_RULES_CONFIG["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval)
-    if max_sl_pct is None:
-        log_message(f"⚠️ Không có cấu hình MAX_SL_PERCENT cho {interval}. Bỏ qua.")
-        return
-    max_risk_dist_allowed = entry_p * max_sl_pct
+    if max_sl_pct is None: return
     
-    # 3. Chọn risk_dist cuối cùng: Lấy cái NHỎ HƠN giữa 2 cái trên
-    final_risk_dist = min(risk_dist_from_atr, max_risk_dist_allowed)
-    
-    if final_risk_dist == max_risk_dist_allowed and risk_dist_from_atr > max_risk_dist_allowed:
-        log_message(f"  -> 🛡️ ATR quá lớn! Ép rủi ro về mức trần an toàn ({max_sl_pct:.2%}).")
+    final_risk_dist = min(risk_dist_from_atr, entry_price * max_sl_pct)
+    if final_risk_dist <= 0: return
 
-    if final_risk_dist <= 0:
-        log_message(f"⚠️ Khoảng cách rủi ro cuối cùng không hợp lệ ({final_risk_dist:.4f}). Bỏ qua.")
-        return
-    # =================================================================================
-
-    capital_pct = determine_dynamic_capital_pct(full_indicators.get('atr_percent', 3.0))
+    current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
+    capital_pct = get_capital_allocation_for_zone(zone)
     invested_amount = equity * capital_pct
-
-    current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in active_trades)
-    if (current_exposure_usd + invested_amount) / equity > CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"] or invested_amount > state['cash']:
+    
+    if (current_exposure_usd + invested_amount) > (equity * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]) or invested_amount > state['cash']:
         log_message(f"⚠️ Mở lệnh {symbol} sẽ vượt ngưỡng rủi ro hoặc không đủ tiền. Bỏ qua.")
         return
-
-    # Dùng final_risk_dist đã được "ép" để tính SL/TP
-    # ========= BƯỚC 1: TÍNH TOÁN SL VÀ TP VỚI LOGIC ÁP TRẦN =========
-    pnl_multiplier = 1.0 if trade_type == "LONG" else -1.0
-    
-    # Tính SL cuối cùng từ final_risk_dist đã được áp trần
-    sl_p = entry_p - (final_risk_dist * pnl_multiplier)
-    
-    # --- Logic áp trần TP ---
-    # 1. Tính TP theo Tỷ lệ R:R (Risk:Reward)
-    tp_by_rr = entry_p + (final_risk_dist * tactic_cfg.get("RR", 2.0) * pnl_multiplier)
-    
-    # 2. Lấy cấu hình trần TP
-    max_tp_pct = RISK_RULES_CONFIG.get("MAX_TP_PERCENT_BY_TIMEFRAME", {}).get(interval)
-    
-    # 3. Mặc định TP cuối cùng bằng TP tính theo RR
-    tp_p = tp_by_rr 
-
-    if max_tp_pct is not None:
-        # Tính giá trị TP trần
-        tp_capped = entry_p * (1 + (max_tp_pct * pnl_multiplier))
         
-        # 4. So sánh và chọn TP cuối cùng
-        if trade_type == "LONG":
-            if tp_by_rr > tp_capped:
-                log_message(f"  -> 🛡️ TP: RR quá cao! Ép lợi nhuận về mức trần an toàn ({max_tp_pct:.2%}).")
-                tp_p = tp_capped
-        else: # SHORT
-            if tp_by_rr < tp_capped:
-                log_message(f"  -> 🛡️ TP: RR quá cao! Ép lợi nhuận về mức trần an toàn ({max_tp_pct:.2%}).")
-                tp_p = tp_capped
-    
-    # --- Kiểm tra tính hợp lệ cuối cùng của SL/TP ---
-    if (trade_type == "LONG" and (tp_p <= entry_p or sl_p >= entry_p or sl_p <= 0)) or \
-       (trade_type == "SHORT" and (tp_p >= entry_p or sl_p <= entry_p)):
-        log_message(f"⚠️ SL/TP không hợp lệ sau khi tính toán. SL: {sl_p:.4f}, TP: {tp_p:.4f}. Bỏ qua.")
+    if invested_amount < 10:
+        log_message(f"⚠️ {symbol}: Bỏ qua do giá trị lệnh (${invested_amount:,.2f}) quá nhỏ.")
         return
+
+    log_message(f"🔥 (Sim) Thực thi lệnh LONG {symbol} với ${invested_amount:,.2f} (Vùng: {zone}, Vốn: {capital_pct*100}%)")
+    
+    sl_p = entry_price - final_risk_dist
+    tp_by_rr = entry_price + (final_risk_dist * tactic_cfg.get("RR", 2.0))
+    max_tp_pct_cfg = RISK_RULES_CONFIG.get("MAX_TP_PERCENT_BY_TIMEFRAME", {}).get(interval)
+    tp_p = tp_by_rr
+    if max_tp_pct_cfg is not None and tp_by_rr > entry_price * (1 + max_tp_pct_cfg):
+        tp_p = entry_price * (1 + max_tp_pct_cfg)
+        log_message(f"  -> 🛡️ TP: RR quá cao! Ép lợi nhuận về trần an toàn ({max_tp_pct_cfg:.2%}).")
+
+    if tp_p <= entry_price or sl_p >= entry_price or sl_p <= 0:
+        log_message(f"SL/TP không hợp lệ. SL:{sl_p:.4f}, TP:{tp_p:.4f}. Bỏ qua.")
+        return
+
+    log_message(f"  -> ✅ (Sim) Lệnh đã được ghi nhận. Entry:{entry_price:.4f}")
+    log_message(f"  -> 📝 (Sim) Lưu vào state: TP:{tp_p:.4f}, SL:{sl_p:.4f}")
 
     new_trade = {
         "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
-        "opened_by_tactic": tactic_name, "trade_type": trade_type, "entry_price": entry_p,
-        "tp": round(tp_p, 8), "sl": round(sl_p, 8), "initial_sl": round(sl_p, 8),
-        "initial_risk_dist": final_risk_dist, # Lưu lại risk_dist cuối cùng
+        "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": entry_price,
+        "quantity": invested_amount / entry_price, # Mô phỏng quantity
+        "tp": tp_p, "sl": sl_p, "initial_sl": sl_p,
+        "initial_entry": {"price": entry_price, "invested_usd": invested_amount},
         "total_invested_usd": invested_amount,
-        "initial_entry": {"price": entry_p, "invested_usd": invested_amount},
         "entry_time": now_vn.isoformat(), "entry_score": score,
-        "dca_entries": [], "profit_taken": False, "trailing_sl": round(sl_p, 8),
-        "tactic_used": [tactic_name],
-        "peak_pnl_percent": 0.0,
-        "realized_pnl_usd": 0.0
+        # ### <<< CẬP NHẬT CẤU TRÚC LỆNH >>> ###
+        "entry_zone": zone,
+        "last_zone": zone,
+        # ---
+        "dca_entries": [], "profit_taken": False, "realized_pnl_usd": 0.0, "last_score": score,
+        "peak_pnl_percent": 0.0, "tp1_hit": False, "is_in_warning_zone": False, "partial_closed_by_score": False
     }
-    state["cash"] -= invested_amount
-    state["active_trades"].append(new_trade)
-    log_message(f"🔥 Lệnh Mới ({trade_type}): {symbol}-{interval} | Vốn: ${invested_amount:,.2f} | SL: {sl_p:.4f} | TP: {tp_p:.4f}")
-    state.setdefault('temp_newly_opened_trades', []).append(f"🔥 {symbol}-{interval} ({tactic_name}): Vốn ${invested_amount:,.2f}")
+
+    state['cash'] -= invested_amount
+    state['active_trades'].append(new_trade)
+    state.setdefault('temp_newly_opened_trades', []).append(f"🔥 {symbol}-{interval} ({tactic_name}): Vốn ${new_trade['total_invested_usd']:,.2f}")
+
+
+def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
+    if not MTF_ANALYSIS_CONFIG["ENABLED"]: return 1.0
+    trends = {tf: indicator_results.get(symbol, {}).get(tf, {}).get("trend", "sideways") for tf in ALL_TIME_FRAMES}
+    cfg, fav, unfav = MTF_ANALYSIS_CONFIG, "uptrend", "downtrend"
+    if target_interval == "1h":
+        htf1, htf2 = trends["4h"], trends["1d"]
+        if htf1 == unfav and htf2 == unfav: return cfg["SEVERE_PENALTY_COEFFICIENT"]
+        if htf1 == unfav or htf2 == unfav: return cfg["PENALTY_COEFFICIENT"]
+        if htf1 == fav and htf2 == fav: return cfg["BONUS_COEFFICIENT"]
+        if htf1 == "sideways" or htf2 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+    elif target_interval == "4h":
+        htf1 = trends["1d"]
+        if htf1 == unfav: return cfg["PENALTY_COEFFICIENT"]
+        if htf1 == fav: return cfg["BONUS_COEFFICIENT"]
+        if htf1 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+    return 1.0
 
 # ==============================================================================
 # BÁO CÁO & VÒNG LẶP CHÍNH
 # ==============================================================================
-
-def build_report_header(state: Dict, realtime_prices: Dict[str, float]) -> str:
-    # <<< SỬA LỖI BÁO CÁO >>>: Sử dụng realtime_prices để tính toán
-    total_equity = calculate_total_equity(state, realtime_prices=realtime_prices)
+def calculate_total_equity(state: Dict, realtime_prices: Dict[str, float] | None = None) -> float:
     cash = state.get('cash', INITIAL_CAPITAL)
-    pnl_since_start = total_equity - INITIAL_CAPITAL
+    value_of_open_positions = 0
+    for t in state.get('active_trades', []):
+        price = realtime_prices.get(t['symbol']) if realtime_prices else None
+        pnl_usd, _ = get_current_pnl(t, realtime_price=price)
+        value_of_open_positions += t.get('total_invested_usd', 0.0) + pnl_usd
+    return cash + value_of_open_positions
+
+def build_report_header(state: Dict, equity: float) -> str:
+    cash = state.get('cash', INITIAL_CAPITAL)
+    pnl_since_start = equity - INITIAL_CAPITAL
     pnl_percent = (pnl_since_start / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
     pnl_icon = "🟢" if pnl_since_start >= 0 else "🔴"
-    return (
-        f"💰 Vốn BĐ: **${INITIAL_CAPITAL:,.2f}** | 💵 Tiền mặt: **${cash:,.2f}**\n"
-        f"📊 Tổng TS: **${total_equity:,.2f}** | 📈 PnL Tổng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)**"
-    )
-
-def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
-    # <<< SỬA LỖI BÁO CÁO >>>: Sử dụng realtime_price được truyền vào
-    pnl_usd, pnl_pct = get_current_pnl(trade, realtime_price=realtime_price)
-    icon = "🟢" if pnl_usd >= 0 else "🔴"
-    holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
-    dca_info = f" (DCA: {len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-    tactic_cfg = TACTICS_LAB.get(trade.get('opened_by_tactic'), {})
-    tsl_info = f" TSL:{trade['trailing_sl']:.4f}" if tactic_cfg.get("USE_TRAILING_SL") and 'trailing_sl' in trade and trade['trailing_sl'] != trade['initial_sl'] else ""
-    tp1_info = " TP1✅" if trade.get('profit_taken') else ""
-
-    controlling_tactic_info = f" ({trade.get('controlling_tactic', trade['opened_by_tactic'])} | {trade.get('last_score', trade['entry_score']):.1f})"
-    trade_type_str = f" [{trade.get('trade_type', 'LONG')}]"
-
-    return (
-        f"  {icon} **{trade['symbol']}-{trade['interval']}**{trade_type_str}{controlling_tactic_info} "
-        f"PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}\n"
-        f"    Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} SL:{trade['sl']:.4f} TP:{trade['tp']:.4f}{tsl_info} "
-        f"Vốn:${trade.get('total_invested_usd', 0.0):,.2f}"
-    )
+    return (f"💰 Vốn BĐ: **${INITIAL_CAPITAL:,.2f}** | 💵 Tiền mặt: **${cash:,.2f}**\n"
+            f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)**")
 
 def build_pnl_summary_line(state: Dict, realtime_prices: Dict[str, float]) -> str:
-    # <<< SỬA LỖI BÁO CÁO >>>: Sử dụng realtime_prices để tính toán
-    trade_history = state.get('trade_history', [])
-    active_trades = state.get('active_trades', [])
-    if not trade_history and not active_trades: return "Chưa có giao dịch."
-
+    trade_history, active_trades = state.get('trade_history', []), state.get('active_trades', [])
     df_history = pd.DataFrame(trade_history) if trade_history else pd.DataFrame()
-
-    total_trades = len(df_history)
+    total_trades, win_rate_str = len(df_history), "N/A"
     if total_trades > 0:
         winning_trades = len(df_history[df_history['pnl_usd'] > 0])
         win_rate_str = f"{winning_trades / total_trades * 100:.2f}% ({winning_trades}/{total_trades})"
-    else:
-        win_rate_str = "N/A (0 trades)"
-
     total_pnl_closed = df_history['pnl_usd'].sum() if total_trades > 0 else 0.0
+    realized_partial_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in active_trades)
     unrealized_pnl = sum(get_current_pnl(trade, realtime_price=realtime_prices.get(trade['symbol']))[0] for trade in active_trades)
+    return (f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | "
+            f"💎 PnL TP1: **${realized_partial_pnl:,.2f}** | 📈 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**")
 
-    # Tính toán chính xác hơn PnL từ chốt lời một phần
-    total_equity_pnl = calculate_total_equity(state, realtime_prices=realtime_prices) - INITIAL_CAPITAL
-    realized_partial_pnl = total_equity_pnl - total_pnl_closed - unrealized_pnl
+# ### <<< THAY ĐỔI LỚN >>> ###
+# Cập nhật báo cáo để hiển thị thông tin Vùng và Điểm
+def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
+    pnl_usd, pnl_pct = get_current_pnl(trade, realtime_price=realtime_price)
+    icon = "🟢" if pnl_usd >= 0 else "🔴"
+    holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
+    dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
+    tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
+    tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
 
-    unrealized_pnl_sign = '+' if unrealized_pnl >= 0 else ''
-    return (
-        f"🏆 Win Rate: **{win_rate_str}** | "
-        f"✅ PnL Đóng: **${total_pnl_closed:,.2f}** | "
-        f"💎 PnL TP1: **${realized_partial_pnl:,.2f}** | "
-        f"📈 PnL Mở: **{unrealized_pnl_sign}${unrealized_pnl:,.2f}**"
-    )
+    entry_score = trade.get('entry_score', 0.0)
+    last_score = trade.get('last_score', entry_score)
+    score_display = f"{entry_score:,.1f}→{last_score:,.1f}"
+    if last_score < entry_score: score_display += "📉"
+    elif last_score > entry_score: score_display += "📈"
+
+    entry_zone = trade.get('entry_zone', 'N/A')
+    last_zone = trade.get('last_zone', entry_zone)
+    zone_display = entry_zone
+    if last_zone != entry_zone:
+        zone_display = f"{entry_zone}→{last_zone}"
+
+    tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
+    
+    invested_usd = trade.get('total_invested_usd', 0.0)
+    current_value = invested_usd + pnl_usd # Tính giá trị hiện tại của vị thế
+
+    return (f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}\n"
+            f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}")
 
 def build_report_text(state: Dict, realtime_prices: Dict[str, float], report_type: str) -> str:
-    # <<< SỬA LỖI BÁO CÁO >>>: Hàm tạo báo cáo chung, sử dụng realtime_prices
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
-    title = f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY** - `{now_vn_str}` 📊" if report_type == "daily" else f"💡 **CẬP NHẬT ĐỘNG** - `{now_vn_str}` 💡"
-
+    title = f"📊 **BÁO CÁO TỔNG KẾT (PAPER)** - `{now_vn_str}`" if report_type == "daily" else f"💡 **CẬP NHẬT ĐỘNG (PAPER)** - `{now_vn_str}`"
     lines = [title, ""]
-    lines.append(build_report_header(state, realtime_prices))
+    equity = calculate_total_equity(state, realtime_prices)
+    lines.append(build_report_header(state, equity))
     lines.append("\n" + build_pnl_summary_line(state, realtime_prices))
-
-    if report_type == "daily":
-        lines.append("\n--- **Chi tiết trong phiên** ---")
-        lines.append(f"✨ Lệnh mới mở: {len(state.get('temp_newly_opened_trades', []))}")
-        if state.get('temp_newly_opened_trades'): lines.extend([f"    - {msg}" for msg in state['temp_newly_opened_trades']])
-        lines.append(f"⛔ Lệnh đã đóng/chốt lời: {len(state.get('temp_newly_closed_trades', []))}")
-        if state.get('temp_newly_closed_trades'): lines.extend([f"    - {msg}" for msg in state['temp_newly_closed_trades']])
-
     active_trades = state.get('active_trades', [])
-    lines.append("\n--- **Vị thế đang mở** ---")
-    lines.append(f"💼 Tổng vị thế đang mở: **{len(active_trades)}**")
+    lines.append(f"\n--- **Vị thế đang mở ({len(active_trades)})** ---")
     if not active_trades: lines.append("    (Không có vị thế nào)")
     else:
         for trade in sorted(active_trades, key=lambda x: x['entry_time']):
             current_price = realtime_prices.get(trade["symbol"])
-            if current_price:
-                lines.append(build_trade_details_for_report(trade, current_price))
-            else:
-                lines.append(f"⚠️ {trade['symbol']} - Không có dữ liệu giá real-time.")
-
-    if report_type == "daily":
-        lines.append("\n--- **Lịch sử giao dịch gần nhất** ---")
-        trade_history = state.get('trade_history', [])
-        if trade_history:
-            df_history = pd.DataFrame(trade_history)
-            if 'exit_time' in df_history.columns and not df_history['exit_time'].isnull().all():
-                df_history['exit_time_dt'] = pd.to_datetime(df_history['exit_time'])
-                recent_trades = df_history.sort_values(by='exit_time_dt', ascending=False).head(5)
-                for _, trade in recent_trades.iterrows():
-                    icon = '✅' if trade.get('pnl_usd', 0) > 0 else '❌'
-                    lines.append(f"  {icon} {trade['symbol']} | PnL: `${trade.get('pnl_usd', 0):.2f}` | {trade.get('status', 'N/A')}")
-            else:
-                lines.append(" (Lịch sử giao dịch chưa có thời gian đóng lệnh để sắp xếp.)")
-        else:
-            lines.append("  (Chưa có lịch sử giao dịch)")
-
+            if current_price: lines.append(build_trade_details_for_report(trade, current_price))
     lines.append("\n====================================")
     return "\n".join(lines)
 
-
-def should_send_dynamic_alert(state: Dict, realtime_prices: Dict[str, float]) -> bool:
+def should_send_dynamic_alert(state: Dict, equity: float) -> bool:
     if not DYNAMIC_ALERT_CONFIG["ENABLED"]: return False
     now = datetime.now(VIETNAM_TZ)
-    last_alert = state.get('last_dynamic_alert', {})
+    last_alert = state.get('last_dynamic_alert', {"timestamp": None, "total_pnl_percent": 0.0})
     if not last_alert.get('timestamp'): return bool(state.get('active_trades'))
-
     last_alert_dt = datetime.fromisoformat(last_alert.get('timestamp')).astimezone(VIETNAM_TZ)
     hours_since = (now - last_alert_dt).total_seconds() / 3600
-
     if hours_since >= DYNAMIC_ALERT_CONFIG["FORCE_UPDATE_HOURS"]: return True
     if hours_since < DYNAMIC_ALERT_CONFIG["COOLDOWN_HOURS"]: return False
+    if INITIAL_CAPITAL <= 0: return False
+    current_pnl_pct = ((equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
+    return abs(current_pnl_pct - last_alert.get('total_pnl_percent', 0.0)) >= DYNAMIC_ALERT_CONFIG["PNL_CHANGE_THRESHOLD_PCT"]
 
-    current_equity = calculate_total_equity(state, realtime_prices=realtime_prices)
-    current_pnl_pct = ((current_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
-    pnl_change = abs(current_pnl_pct - last_alert.get('total_pnl_percent', 0.0))
 
-    return pnl_change >= DYNAMIC_ALERT_CONFIG["PNL_CHANGE_THRESHOLD_PCT"]
+# ### <<< XÓA BỎ >>> ###
+# Các hàm cũ không còn được sử dụng
+# def determine_market_state(...): ...
+# def determine_dynamic_capital_pct(...): ...
+# def handle_trade_closure(...): ...
+# def manage_active_trades(...): ...
 
+
+# --- CÁC HÀM TÁC VỤ CHÍNH ---
+def run_heavy_tasks(state: Dict, equity: float):
+    log_message("---[⚙️ Bắt đầu chu kỳ tác vụ nặng ⚙️]---")
+    log_message("⏳ Tải và tính toán indicators...")
+    indicator_results.clear(); price_dataframes.clear()
+    symbols_to_load = list(set(SYMBOLS_TO_SCAN + [t['symbol'] for t in state.get('active_trades', [])] + ["BTCUSDT"]))
+    for symbol in symbols_to_load:
+        indicator_results[symbol] = {}; price_dataframes[symbol] = {}
+        for interval in ALL_TIME_FRAMES:
+            df = get_price_data_with_cache(symbol, interval, GENERAL_CONFIG["DATA_FETCH_LIMIT"])
+            if df is not None and not df.empty:
+                if 'ema_20' not in df.columns or 'ema_50' not in df.columns:
+                    df['ema_20'] = ta.trend.ema_indicator(df["close"], window=20)
+                    df['ema_50'] = ta.trend.ema_indicator(df["close"], window=50)
+                if 'bb_width' not in df.columns:
+                    bb = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
+                    df['bb_width'] = bb.bollinger_wband()
+                indicator_results[symbol][interval] = calculate_indicators(df.copy(), symbol, interval)
+                price_dataframes[symbol][interval] = df
+            else:
+                indicator_results[symbol][interval] = {}
+                price_dataframes[symbol][interval] = pd.DataFrame()
+    
+    # ### <<< THÊM MỚI >>> ###
+    # Cập nhật điểm và vùng cho các lệnh đang mở, giống hệt live_trade
+    log_message("🧮 Cập nhật điểm & vùng cho các lệnh đang mở...")
+    for trade in state.get("active_trades", []):
+        indicators = indicator_results.get(trade['symbol'], {}).get(trade['interval'])
+        if indicators:
+            tactic_cfg = TACTICS_LAB.get(trade['opened_by_tactic'], {})
+            decision = get_advisor_decision(trade['symbol'], trade['interval'], indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
+            trade['last_score'] = decision.get("final_score", 0.0)
+            current_zone = determine_market_zone_with_scoring(trade['symbol'], trade['interval'])
+            trade['last_zone'] = current_zone
+            
+    find_and_open_new_trades(state, equity)
+    log_message("---[✔️ Kết thúc chu kỳ tác vụ nặng ✔️]---")
+
+# ==============================================================================
+# VÒNG LẶP CHÍNH
+# ==============================================================================
 def run_session():
     session_id = datetime.now(VIETNAM_TZ).strftime('%Y%m%d_%H%M%S')
-    log_message(f"====== 🚀 BẮT ĐẦU PHIÊN (v4.5.1) (ID: {session_id}) 🚀 ======")
+    log_message(f"====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: {session_id}) 🚀 ======")
     try:
         state = load_json_file(STATE_FILE, {
             "cash": INITIAL_CAPITAL, "active_trades": [], "trade_history": [],
-            "last_dynamic_alert": {}, "last_daily_reports_sent": {}, "cooldown_until": {}
+            "cooldown_until": {}, "last_indicator_refresh": None,
+            "last_dynamic_alert": {"timestamp": None, "total_pnl_percent": 0.0}
         })
         state['temp_newly_opened_trades'] = []
         state['temp_newly_closed_trades'] = []
+        if state.get('cash', 0) <= 0 and not state.get('active_trades'):
+            state['cash'] = INITIAL_CAPITAL # Reset vốn nếu hết tiền và không còn lệnh
+        
+        equity_for_logic = calculate_total_equity(state) # Equity tính bằng giá đóng nến cho logic
+        
+        now_vn = datetime.now(VIETNAM_TZ)
+        last_refresh_str = state.get("last_indicator_refresh")
+        if not last_refresh_str or (now_vn - datetime.fromisoformat(last_refresh_str)).total_seconds() / 60 >= GENERAL_CONFIG["HEAVY_REFRESH_MINUTES"]:
+            run_heavy_tasks(state, equity_for_logic)
+            state["last_indicator_refresh"] = now_vn.isoformat()
+        else:
+            log_message("---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---")
 
-        log_message("⏳ Đang tải và tính toán indicators...")
-        indicator_results.clear()
-        price_dataframes.clear()
-        symbols_to_load = list(set(SYMBOLS_TO_SCAN + [t['symbol'] for t in state.get('active_trades', [])] + ["BTCUSDT"]))
-
-        for symbol in symbols_to_load:
-            indicator_results[symbol] = {}
-            price_dataframes[symbol] = {}
-            for interval in ALL_TIME_FRAMES:
-                df = get_price_data_with_cache(symbol, interval, GENERAL_CONFIG["DATA_FETCH_LIMIT"])
-                if df is not None:
-                    indicator_results[symbol][interval] = calculate_indicators(df, symbol, interval)
-                    price_dataframes[symbol][interval] = df
-        log_message("✅ Đã tải xong indicators.")
-
-        manage_active_trades(state)
-
-        all_closed_in_session = handle_trade_closure(state) + handle_stale_trades(state)
+        check_and_manage_open_positions(state)
+        handle_stale_trades(state)
+        handle_dca_opportunities(state, equity_for_logic)
+        
+        all_closed_in_session = [t for t in state.get('trade_history', []) if t.get('exit_time') and datetime.fromisoformat(t['exit_time']).strftime('%Y%m%d_%H%M%S') >= session_id]
         if all_closed_in_session:
             export_trade_history_to_csv(all_closed_in_session)
 
-        # Equity tính bằng giá đóng nến cho logic DCA và mở lệnh mới
-        equity_for_logic = calculate_total_equity(state)
-        handle_dca_opportunities(state, equity_for_logic)
-        find_and_open_new_trades(state, equity_for_logic)
-
-        # --- BẮT ĐẦU KHỐI BÁO CÁO ---
-        # <<< SỬA LỖI BÁO CÁO >>>: Lấy giá real-time CHỈ DÀNH CHO VIỆC BÁO CÁO
-        active_symbols_for_report = [t['symbol'] for t in state.get('active_trades', [])]
-        realtime_prices_for_report = {sym: get_realtime_price(sym) for sym in active_symbols_for_report}
-
-        now_vn = datetime.now(VIETNAM_TZ)
-        cron_interval_minutes = GENERAL_CONFIG.get("CRON_JOB_INTERVAL_MINUTES", 15)
-        for daily_time_str in GENERAL_CONFIG["DAILY_SUMMARY_TIMES"]:
-            h, m = map(int, daily_time_str.split(':'))
-            report_time_today = now_vn.replace(hour=h, minute=m, second=0, microsecond=0)
-
-            last_sent_iso = state.get('last_daily_reports_sent', {}).get(daily_time_str)
-            sent_today = last_sent_iso and datetime.fromisoformat(last_sent_iso).date() == now_vn.date()
-
-            time_since_report = (now_vn - report_time_today).total_seconds()
-            if not sent_today and 0 <= time_since_report < cron_interval_minutes * 60:
-                log_message(f"🔔 Gửi báo cáo hàng ngày cho khung giờ {daily_time_str}.")
-                report_content = build_report_text(state, realtime_prices_for_report, "daily")
-                send_discord_message_chunks(report_content)
-                state.setdefault('last_daily_reports_sent', {})[daily_time_str] = now_vn.isoformat()
-
-        if should_send_dynamic_alert(state, realtime_prices_for_report):
+        # Lấy giá real-time chỉ cho mục đích báo cáo
+        realtime_prices_for_report = {sym: get_realtime_price(sym) for sym in list(set([t['symbol'] for t in state.get('active_trades', [])])) if sym}
+        final_equity = calculate_total_equity(state, realtime_prices=realtime_prices_for_report)
+        
+        if should_send_dynamic_alert(state, final_equity):
             log_message("🔔 Gửi alert động.")
             report_content = build_report_text(state, realtime_prices_for_report, "dynamic")
             send_discord_message_chunks(report_content)
-
-            # Cập nhật PnL cuối cùng bằng giá real-time
-            equity_for_alert = calculate_total_equity(state, realtime_prices=realtime_prices_for_report)
-            pnl_percent_for_alert = ((equity_for_alert - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
-
-            state['last_dynamic_alert'] = {
-                "timestamp": now_vn.isoformat(),
-                "total_pnl_percent": pnl_percent_for_alert
-            }
+            pnl_percent_for_alert = ((final_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100 if INITIAL_CAPITAL > 0 else 0
+            state['last_dynamic_alert'] = {"timestamp": now_vn.isoformat(), "total_pnl_percent": pnl_percent_for_alert}
 
         save_json_file(STATE_FILE, state)
+
     except Exception:
         error_details = traceback.format_exc()
-        log_message(f"!!!!!! ❌ LỖI NGHIÊM TRỌNG ❌ !!!!!!\n{error_details}")
+        log_message(f"!!!!!! ❌ LỖI NGHIÊM TRỌNG NGOÀI DỰ KIẾN ❌ !!!!!!\n{error_details}")
         send_discord_message_chunks(f"🔥🔥🔥 BOT GẶP LỖI NGHIÊM TRỌNG 🔥🔥🔥\n```python\n{error_details}\n```")
     log_message(f"====== ✅ KẾT THÚC PHIÊN (ID: {session_id}) ✅ ======\n")
 
