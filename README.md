@@ -1,5 +1,3 @@
-# Đây là một file YAML hợp lệ.
-# Toàn bộ tài liệu phân tích được đặt làm giá trị cho khóa "rice_alert_analysis_document".
 rice_alert_analysis_document: |
   ---
   
