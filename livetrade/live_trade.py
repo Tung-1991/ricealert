@@ -55,7 +55,7 @@ TRADING_MODE: Literal["live", "testnet"] = "testnet"
 INITIAL_CAPITAL = 0.0
 GENERAL_CONFIG = {
     "DATA_FETCH_LIMIT": 300,
-    "DAILY_SUMMARY_TIMES": ["08:05", "20:05"],
+    "DAILY_SUMMARY_TIMES": ["08:10", "20:10"],
     "TRADE_COOLDOWN_HOURS": 1,
     "CRON_JOB_INTERVAL_MINUTES": 1,
     "HEAVY_REFRESH_MINUTES": 15,
@@ -63,9 +63,9 @@ GENERAL_CONFIG = {
     "CLOSE_TRADE_RETRY_LIMIT": 3,
     "DEPOSIT_DETECTION_MIN_USD": 5.0,
     "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.005,
-    "CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES": 30,
+    "CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES": 45,
     # Ngưỡng phát hiện bán thủ công. Nếu số lượng thực tế < số lượng bot * ngưỡng này -> coi là desync.
-    "RECONCILIATION_QTY_THRESHOLD": 0.9
+    "RECONCILIATION_QTY_THRESHOLD": 0.95
 }
 MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,
@@ -94,7 +94,7 @@ DYNAMIC_ALERT_CONFIG = {
 RISK_RULES_CONFIG = {
     "MAX_ACTIVE_TRADES": 12,
     "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.06, "4h": 0.08, "1d": 0.10},
-    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.12, "4h": 0.20, "1d": 0.35},
+    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.12, "4h": 0.16, "1d": 0.20},
     "STALE_TRADE_RULES": {
         "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 25.0},
         "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 25.0},
@@ -126,10 +126,10 @@ LAGGING_ZONE = "LAGGING"
 NOISE_ZONE = "NOISE"
 ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 ZONE_BASED_POLICIES = {
-    LEADING_ZONE: {"NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng.", "CAPITAL_PCT": 0.04},
-    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.07},
+    LEADING_ZONE: {"NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng.", "CAPITAL_PCT": 0.055},
+    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.065},
     LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.06},
-    NOISE_ZONE: {"NOTES": "Nguy hiểm, chỉ vào lệnh siêu nhỏ khi có tín hiệu VÀNG.", "CAPITAL_PCT": 0.03}
+    NOISE_ZONE: {"NOTES": "Nguy hiểm, chỉ vào lệnh siêu nhỏ khi có tín hiệu VÀNG.", "CAPITAL_PCT": 0.05}
 }
 TACTICS_LAB = {
     "Breakout_Hunter": {
