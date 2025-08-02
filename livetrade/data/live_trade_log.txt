@@ -1,52 +1,79 @@
-[2025-08-01 00:15:07] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN LIVE (v5.1) (ID: 20250801_001507) 🚀 ======
-[2025-08-01 00:15:08] (LiveTrade) 🔄 Bắt đầu đồng bộ trạng thái với Binance...
-[2025-08-01 00:15:08] (LiveTrade) ✅ Không có lệnh nào trong state cục bộ để đồng bộ.
-[2025-08-01 00:15:08] (LiveTrade)  Lần chạy đầu tiên, ghi nhận vốn ban đầu là: $145,321.27
-[2025-08-01 00:15:08] (LiveTrade) 💵 USDT Khả dụng: $145,321.27 | 🏦 Tổng quỹ USDT: $145,321.27
-[2025-08-01 00:15:08] (LiveTrade) ⏳ Đang tải và tính toán indicators...
-[2025-08-01 00:15:09] (LiveTrade) ✅ Đã tải xong indicators.
-[2025-08-01 00:15:09] (LiveTrade) 🧠 Bắt đầu chu trình Quản lý Lệnh Chủ động...
-[2025-08-01 00:15:09] (LiveTrade) ⏳ Bắt đầu kiểm tra các lệnh bị 'ì'...
-[2025-08-01 00:15:09] (LiveTrade) 🎯 Bắt đầu quét cơ hội DCA...
-[2025-08-01 00:15:09] (LiveTrade) 🏦 Quỹ USDT: $145,321.27 | Vốn đã dùng: $0.00 | Hạn mức: $108,990.96
-[2025-08-01 00:15:09] (LiveTrade) 🔎 Bắt đầu quét cơ hội lệnh LONG...
-[2025-08-01 00:15:09] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ETHUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:09] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho SUIUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:09] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ADAUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:09] (LiveTrade) ℹ️ Phiên này không tìm thấy cơ hội nào đủ điều kiện.
-[2025-08-01 00:15:10] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN LIVE (ID: 20250801_001507) ✅ ======
+[2025-08-02 13:25:36] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_132536) 🚀 ======
+[2025-08-02 13:25:36] (LiveTrade) Lần chạy đầu, ghi nhận vốn ban đầu: $173,626.00
+[2025-08-02 13:25:36] (LiveTrade) ---[⚙️ Bắt đầu chu kỳ tác vụ nặng ⚙️]---
+[2025-08-02 13:25:36] (LiveTrade) ⏳ Tải và tính toán indicators...
+[2025-08-02 13:25:37] (LiveTrade) 🧮 Cập nhật điểm & vùng cho các lệnh đang mở...
+[2025-08-02 13:25:37] (LiveTrade) 🔎 Bắt đầu quét cơ hội lệnh mới theo mô hình 4 Vùng...
+[2025-08-02 13:25:37] (LiveTrade)   -> ETHUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ETHUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ETHUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> AVAXUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> AVAXUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> AVAXUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> INJUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> INJUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> INJUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> LINKUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> LINKUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> LINKUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SUIUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SUIUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SUIUSDT-1d: Vùng xác định = LEADING
+[2025-08-02 13:25:37] (LiveTrade)   -> FETUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> FETUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> FETUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> TAOUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> TAOUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> TAOUSDT-1d: Vùng xác định = NOISE
+[2025-08-02 13:25:37] (LiveTrade)   -> BTCUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> BTCUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> BTCUSDT-1d: Vùng xác định = LEADING
+[2025-08-02 13:25:37] (LiveTrade)   -> ARBUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ARBUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ARBUSDT-1d: Vùng xác định = LEADING
+[2025-08-02 13:25:37] (LiveTrade)   -> ADAUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ADAUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> ADAUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SOLUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SOLUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade)   -> SOLUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 13:25:37] (LiveTrade) 🏆 Cơ hội tốt nhất: SUIUSDT-4h | Vùng: LAGGING | Tactic: Balanced_Trader | Điểm: 6.79
+[2025-08-02 13:25:37] (LiveTrade) 🔥 Thực thi lệnh LONG SUIUSDT với $10,417.56 (Vùng: LAGGING, Vốn: 6.0%)
+[2025-08-02 13:25:37] (LiveTrade)   -> ✅ Lệnh MARKET đã khớp. Entry:3.4748, Qty:2998.0
+[2025-08-02 13:25:37] (LiveTrade)   -> 📝 Lưu vào state: TP:3.9795, SL:3.1944
+[2025-08-02 13:25:37] (LiveTrade) ---[✔️ Kết thúc chu kỳ tác vụ nặng ✔️]---
+[2025-08-02 13:25:38] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:25:38] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:25:38] (LiveTrade) 🔔 Gửi alert động.
+[2025-08-02 13:25:38] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_132536) ✅ ======
 
-[2025-08-01 00:15:22] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN LIVE (v5.1) (ID: 20250801_001522) 🚀 ======
-[2025-08-01 00:15:23] (LiveTrade) 🔄 Bắt đầu đồng bộ trạng thái với Binance...
-[2025-08-01 00:15:23] (LiveTrade) ✅ Không có lệnh nào trong state cục bộ để đồng bộ.
-[2025-08-01 00:15:24] (LiveTrade) 💵 USDT Khả dụng: $145,321.27 | 🏦 Tổng quỹ USDT: $145,321.27
-[2025-08-01 00:15:24] (LiveTrade) ⏳ Đang tải và tính toán indicators...
-[2025-08-01 00:15:24] (LiveTrade) ✅ Đã tải xong indicators.
-[2025-08-01 00:15:24] (LiveTrade) 🧠 Bắt đầu chu trình Quản lý Lệnh Chủ động...
-[2025-08-01 00:15:24] (LiveTrade) ⏳ Bắt đầu kiểm tra các lệnh bị 'ì'...
-[2025-08-01 00:15:24] (LiveTrade) 🎯 Bắt đầu quét cơ hội DCA...
-[2025-08-01 00:15:25] (LiveTrade) 🏦 Quỹ USDT: $145,321.27 | Vốn đã dùng: $0.00 | Hạn mức: $108,990.96
-[2025-08-01 00:15:25] (LiveTrade) 🔎 Bắt đầu quét cơ hội lệnh LONG...
-[2025-08-01 00:15:25] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ETHUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:25] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho SUIUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:25] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ADAUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:15:25] (LiveTrade) ℹ️ Phiên này không tìm thấy cơ hội nào đủ điều kiện.
-[2025-08-01 00:15:25] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN LIVE (ID: 20250801_001522) ✅ ======
+[2025-08-02 13:26:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_132602) 🚀 ======
+[2025-08-02 13:26:02] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 13:26:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:26:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:26:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_132602) ✅ ======
 
-[2025-08-01 00:16:10] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN LIVE (v5.1) (ID: 20250801_001610) 🚀 ======
-[2025-08-01 00:16:11] (LiveTrade) 🔄 Bắt đầu đồng bộ trạng thái với Binance...
-[2025-08-01 00:16:11] (LiveTrade) ✅ Không có lệnh nào trong state cục bộ để đồng bộ.
-[2025-08-01 00:16:11] (LiveTrade) 💵 USDT Khả dụng: $145,321.27 | 🏦 Tổng quỹ USDT: $145,321.27
-[2025-08-01 00:16:11] (LiveTrade) ⏳ Đang tải và tính toán indicators...
-[2025-08-01 00:16:12] (LiveTrade) ✅ Đã tải xong indicators.
-[2025-08-01 00:16:12] (LiveTrade) 🧠 Bắt đầu chu trình Quản lý Lệnh Chủ động...
-[2025-08-01 00:16:12] (LiveTrade) ⏳ Bắt đầu kiểm tra các lệnh bị 'ì'...
-[2025-08-01 00:16:12] (LiveTrade) 🎯 Bắt đầu quét cơ hội DCA...
-[2025-08-01 00:16:13] (LiveTrade) 🏦 Quỹ USDT: $145,321.27 | Vốn đã dùng: $0.00 | Hạn mức: $108,990.96
-[2025-08-01 00:16:13] (LiveTrade) 🔎 Bắt đầu quét cơ hội lệnh LONG...
-[2025-08-01 00:16:13] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ETHUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:16:13] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho SUIUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:16:13] (LiveTrade) 🛡️ CẢNH BÁO: Đã phát hiện lệnh đang mở cho ADAUSDT trên Binance nhưng không có trong state. Bỏ qua.
-[2025-08-01 00:16:13] (LiveTrade) ℹ️ Phiên này không tìm thấy cơ hội nào đủ điều kiện.
-[2025-08-01 00:16:13] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN LIVE (ID: 20250801_001610) ✅ ======
+[2025-08-02 13:27:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_132702) 🚀 ======
+[2025-08-02 13:27:02] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 13:27:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:27:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:27:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_132702) ✅ ======
+
+[2025-08-02 13:28:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_132802) 🚀 ======
+[2025-08-02 13:28:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 13:28:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:28:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:28:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_132802) ✅ ======
+
+[2025-08-02 13:29:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_132902) 🚀 ======
+[2025-08-02 13:29:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 13:29:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:29:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:29:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_132902) ✅ ======
+
+[2025-08-02 13:30:03] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_133003) 🚀 ======
+[2025-08-02 13:30:05] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 13:30:05] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 13:30:05] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 13:30:05] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_133003) ✅ ======
 

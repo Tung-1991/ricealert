@@ -107,6 +107,11 @@ RISK_RULES_CONFIG = {
         "4h": 0.08,  # Trần an toàn 8% cho các lệnh trung hạn
         "1d": 0.10   # Trần an toàn 10% cho các lệnh dài hạn
     },
+        "MAX_TP_PERCENT_BY_TIMEFRAME": {
+        "1h": 0.12,  # Lợi nhuận tối đa 12% cho lệnh 1h
+        "4h": 0.20,  # Lợi nhuận tối đa 20% cho lệnh 4h
+        "1d": 0.35   # Lợi nhuận tối đa 35% cho lệnh 1d
+    },
     # =================================================================
 
     "STALE_TRADE_RULES": { # Quy tắc xử lý các lệnh bị "ì" (giữ quá lâu mà không có tiến triển).
@@ -923,13 +928,40 @@ def find_and_open_new_trades(state: Dict, equity: float):
         return
 
     # Dùng final_risk_dist đã được "ép" để tính SL/TP
+    # ========= BƯỚC 1: TÍNH TOÁN SL VÀ TP VỚI LOGIC ÁP TRẦN =========
     pnl_multiplier = 1.0 if trade_type == "LONG" else -1.0
+    
+    # Tính SL cuối cùng từ final_risk_dist đã được áp trần
     sl_p = entry_p - (final_risk_dist * pnl_multiplier)
-    tp_p = entry_p + (final_risk_dist * tactic_cfg.get("RR", 2.0) * pnl_multiplier)
+    
+    # --- Logic áp trần TP ---
+    # 1. Tính TP theo Tỷ lệ R:R (Risk:Reward)
+    tp_by_rr = entry_p + (final_risk_dist * tactic_cfg.get("RR", 2.0) * pnl_multiplier)
+    
+    # 2. Lấy cấu hình trần TP
+    max_tp_pct = RISK_RULES_CONFIG.get("MAX_TP_PERCENT_BY_TIMEFRAME", {}).get(interval)
+    
+    # 3. Mặc định TP cuối cùng bằng TP tính theo RR
+    tp_p = tp_by_rr 
 
-    if (trade_type == "LONG" and (tp_p <= entry_p or sl_p <= 0)) or \
+    if max_tp_pct is not None:
+        # Tính giá trị TP trần
+        tp_capped = entry_p * (1 + (max_tp_pct * pnl_multiplier))
+        
+        # 4. So sánh và chọn TP cuối cùng
+        if trade_type == "LONG":
+            if tp_by_rr > tp_capped:
+                log_message(f"  -> 🛡️ TP: RR quá cao! Ép lợi nhuận về mức trần an toàn ({max_tp_pct:.2%}).")
+                tp_p = tp_capped
+        else: # SHORT
+            if tp_by_rr < tp_capped:
+                log_message(f"  -> 🛡️ TP: RR quá cao! Ép lợi nhuận về mức trần an toàn ({max_tp_pct:.2%}).")
+                tp_p = tp_capped
+    
+    # --- Kiểm tra tính hợp lệ cuối cùng của SL/TP ---
+    if (trade_type == "LONG" and (tp_p <= entry_p or sl_p >= entry_p or sl_p <= 0)) or \
        (trade_type == "SHORT" and (tp_p >= entry_p or sl_p <= entry_p)):
-        log_message(f"⚠️ SL/TP không hợp lệ cho {symbol} ({tactic_name}). Bỏ qua.")
+        log_message(f"⚠️ SL/TP không hợp lệ sau khi tính toán. SL: {sl_p:.4f}, TP: {tp_p:.4f}. Bỏ qua.")
         return
 
     new_trade = {
