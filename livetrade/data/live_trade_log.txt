@@ -461,3 +461,109 @@
 [2025-08-02 14:17:03] (LiveTrade) 🎯 Quét cơ hội DCA...
 [2025-08-02 14:17:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_141701) ✅ ======
 
+[2025-08-02 14:18:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_141802) 🚀 ======
+[2025-08-02 14:18:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:18:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:18:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:18:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_141802) ✅ ======
+
+[2025-08-02 14:19:01] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_141901) 🚀 ======
+[2025-08-02 14:19:02] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:19:02] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:19:02] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:19:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_141901) ✅ ======
+
+[2025-08-02 14:20:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142002) 🚀 ======
+[2025-08-02 14:20:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:20:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:20:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:20:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142002) ✅ ======
+
+[2025-08-02 14:21:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142102) 🚀 ======
+[2025-08-02 14:21:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:21:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:21:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:21:04] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142102) ✅ ======
+
+[2025-08-02 14:22:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142202) 🚀 ======
+[2025-08-02 14:22:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:22:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:22:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:22:04] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142202) ✅ ======
+
+[2025-08-02 14:23:01] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142301) 🚀 ======
+[2025-08-02 14:23:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:23:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:23:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:23:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142301) ✅ ======
+
+[2025-08-02 14:24:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142402) 🚀 ======
+[2025-08-02 14:24:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:24:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:24:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:24:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142402) ✅ ======
+
+[2025-08-02 14:25:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142502) 🚀 ======
+[2025-08-02 14:25:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:25:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:25:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:25:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142502) ✅ ======
+
+[2025-08-02 14:26:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142602) 🚀 ======
+[2025-08-02 14:26:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:26:04] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:26:04] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:26:04] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142602) ✅ ======
+
+[2025-08-02 14:27:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142702) 🚀 ======
+[2025-08-02 14:27:03] (LiveTrade) ---[⚙️ Bắt đầu chu kỳ tác vụ nặng ⚙️]---
+[2025-08-02 14:27:03] (LiveTrade) ⏳ Tải và tính toán indicators...
+[2025-08-02 14:27:04] (LiveTrade) 🧮 Cập nhật điểm & vùng cho các lệnh đang mở...
+[2025-08-02 14:27:04] (LiveTrade) 🔎 Bắt đầu quét cơ hội lệnh mới theo mô hình 4 Vùng...
+[2025-08-02 14:27:04] (LiveTrade)   -> ETHUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ETHUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ETHUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> AVAXUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> AVAXUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> AVAXUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> INJUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> INJUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> INJUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> LINKUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> LINKUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> LINKUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> FETUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> FETUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> FETUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> TAOUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> TAOUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> TAOUSDT-1d: Vùng xác định = NOISE
+[2025-08-02 14:27:04] (LiveTrade)   -> BTCUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> BTCUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> BTCUSDT-1d: Vùng xác định = LEADING
+[2025-08-02 14:27:04] (LiveTrade)   -> ARBUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ARBUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ARBUSDT-1d: Vùng xác định = LEADING
+[2025-08-02 14:27:04] (LiveTrade)   -> ADAUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ADAUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> ADAUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> SOLUSDT-1h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> SOLUSDT-4h: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade)   -> SOLUSDT-1d: Vùng xác định = LAGGING
+[2025-08-02 14:27:04] (LiveTrade) ---[✔️ Kết thúc chu kỳ tác vụ nặng ✔️]---
+[2025-08-02 14:27:04] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:27:04] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:27:04] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142702) ✅ ======
+
+[2025-08-02 14:28:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142802) 🚀 ======
+[2025-08-02 14:28:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:28:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:28:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:28:03] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142802) ✅ ======
+
+[2025-08-02 14:29:02] (LiveTrade) ====== 🚀 BẮT ĐẦU PHIÊN (v8.0.0 - 4-Zone Strategy) (ID: 20250802_142902) 🚀 ======
+[2025-08-02 14:29:03] (LiveTrade) ---[⚡ Bắt đầu chu kỳ tác vụ nhẹ ⚡]---
+[2025-08-02 14:29:03] (LiveTrade) 🧠 Quản lý 1 vị thế mở...
+[2025-08-02 14:29:03] (LiveTrade) 🎯 Quét cơ hội DCA...
+[2025-08-02 14:29:04] (LiveTrade) ====== ✅ KẾT THÚC PHIÊN (ID: 20250802_142902) ✅ ======
+

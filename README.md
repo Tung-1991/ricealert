@@ -1,4 +1,4 @@
-Chắc chắn rồi. Dựa trên tất cả các yêu cầu và mã nguồn bạn đã cung cấp, đây là phiên bản tài liệu Markdown cuối cùng, tổng hợp và chi tiết nhất.
+Chắc chắn rồi! Dựa trên toàn bộ ghi chú chi tiết của bạn, đây là phiên bản tài liệu được định dạng bằng Markdown, được trình bày một cách chuyên nghiệp, đẹp mắt và dễ đọc.
 
 Hệ Thống Giao Dịch RiceAlert: Phân Tích Toàn Diện v3.0 (Bản Cuối Cùng)
 Lời Mở Đầu: Tìm Kiếm "Linh Hồn" Của Hệ Thống
@@ -40,7 +40,7 @@ Kết luận: Mức 8 hiện tại là một lựa chọn tốt và hợp lý v�
 
 II. Trụ Cột 1: Phân Tích Kỹ Thuật (Module indicator & signal_logic)
 
-Linh Hồn: 🕵️ Một "Hệ Thống Chấm Điểm Đồng Thuận" (Consensus Scoring System).
+🕵️ Một "Hệ Thống Chấm Điểm Đồng Thuận" (Consensus Scoring System).
 
 2.1. Các Chỉ Báo Nền Tảng (từ indicator.py)
 
@@ -76,13 +76,9 @@ score_ema200, score_rsi_multi, score_adx, score_bb	0.5	Đây là các tín hiệ
 
 Điểm yếu: Một vài quy tắc có thể bị tương quan (correlated), ví dụ score_trend và score_ema200 cùng đo lường một khái niệm về xu hướng. Điều này có thể vô tình làm tăng trọng số của một loại tín hiệu.
 
-(Các trụ cột 2 (AI) và 3 (Bối cảnh) giữ nguyên phân tích từ trước để tập trung vào các phần được yêu cầu)
-
-Chắc chắn rồi. Tôi sẽ tái tạo lại Trụ Cột 2 và 3 với đầy đủ chi tiết, giữ nguyên văn phong và cấu trúc của tài liệu tổng thể để bạn có thể dễ dàng ghép nối.
-
 III. Trụ Cột 2: Dự Báo AI (Module trainer.py & ml_report.py)
 
-Linh Hồn: 🧠 Một "Nhà Tiên Tri Thống Kê" (A Statistical Forecaster).
+🧠 Một "Nhà Tiên Tri Thống Kê" (A Statistical Forecaster).
 
 Cách Hoạt Động: Trụ cột này không dựa trên các quy tắc cứng như phân tích kỹ thuật, mà sử dụng mô hình học máy (cụ thể là LightGBM, một lựa chọn rất hiệu quả cho dữ liệu dạng bảng) để dự báo xác suất các sự kiện trong tương lai gần. Nó thực hiện hai nhiệm vụ song song:
 
@@ -120,7 +116,7 @@ Hướng Nâng Cấp:
 
 IV. Trụ Cột 3: Phân Tích Bối Cảnh (Module market_context.py & rice_news.py)
 
-Linh Hồn: 📰 Một "Bộ Lọc Vĩ Mô" (A Macro Filter).
+📰 Một "Bộ Lọc Vĩ Mô" (A Macro Filter).
 
 Cách Hoạt Động: Mục tiêu của trụ cột này là đảm bảo các quyết định giao dịch của bot không đi ngược lại "con sóng lớn" hay "thời tiết" chung của toàn thị trường. Nó hoạt động dựa trên hai nguồn thông tin chính:
 
@@ -152,9 +148,10 @@ Hướng Nâng Cấp:
 Đây là nơi mà Mô hình Ngôn ngữ Lớn (LLM) như GPT-4, Claude, hoặc Gemini có thể tạo ra tác động cách mạng. Thay vì quét từ khóa, một LLM có thể đọc, hiểu ngữ nghĩa, và phân tích sắc thái của toàn bộ bài báo.
 
 Nó có thể trả về một kết quả chính xác hơn nhiều, ví dụ: một điểm số cảm tính (sentiment score) từ -1.0 (rất tiêu cực) đến +1.0 (rất tích cực) cùng với một bản tóm tắt ngắn gọn. Điều này sẽ làm cho điểm context_score trở nên đáng tin cậy và có giá trị hơn rất nhiều.
+
 V. Trụ Cột 4: Thực Thi & Quản Lý (Module live_trade.py v8.0)
 
-Linh Hồn: 🎖️ Một "Tổng Tư Lệnh Chiến Dịch Thích Ứng" (Adaptive Campaign Commander).
+🎖️ Một "Tổng Tư Lệnh Chiến Dịch Thích Ứng" (Adaptive Campaign Commander).
 
 Đây là phần tinh vi nhất của hệ thống, nơi các tín hiệu thô được chuyển hóa thành hành động giao dịch có chiến lược.
 
@@ -186,7 +183,7 @@ ATR_SL_MULTIPLIER	1.8	Điểm Cắt lỗ (SL) được đặt cách giá vào l�
 TRAIL_ACTIVATION_RR	1.0	Bắt đầu kích hoạt Trailing SL khi lợi nhuận đạt 1R (1 lần rủi ro).
 TP1_RR_RATIO	1.0	Chốt lời phần 1 (TP1) khi lợi nhuận đạt 1R.
 TP1_PROFIT_PCT	0.5	Chốt 50% vị thế tại TP1 và dời SL về hòa vốn.
-5.2. Các Module Cấu Hình Vận Hành & Rủi Ro (live_trade.py)
+5.2. Các Module Cấu Hình Vận Hành & Rủi Ro (từ live_trade.py)
 
 Đây là các "bảng điều khiển" chi tiết để tinh chỉnh hành vi của bot trong thực tế.
 
