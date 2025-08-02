@@ -2,15 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 Control Live Panel - Manual Intervention Tool
-Version: 1.1.0 - Full Compatibility
+Version: 1.2.0 - Ultimate Safety
 Date: 2025-08-03
 
-CHANGELOG (v1.1.0):
-- COMPATIBILITY: Updated the manual trade creation function (`open_manual_trade`) to include all necessary keys
-  (e.g., peak_pnl_percent, profit_taken) to ensure full compatibility with the v8.3.x live_trade bot.
-- UI/UX: The open trades view (`view_open_trades`) now displays a shield icon (🛡️) for trades that have
-  a manual stale check extension, providing better visibility.
-- ROBUSTNESS: Minor improvements to error handling and user prompts.
+CHANGELOG (v1.2.0):
+- CRITICAL FIX (Signal Handling): Implemented a signal handler for SIGTSTP (Ctrl+Z).
+  This prevents the lock file from being orphaned when the user suspends the process,
+  which was the root cause of the panel getting stuck.
+- ROBUSTNESS (Auto Backup): The panel now automatically creates a `live_trade_state.json.backup`
+  file before any modification, ensuring a safe restore point in case of a crash.
+- UX (Timeout Increase): Increased the lock acquisition timeout to 120 seconds, giving users
+  more flexibility when the bot is performing a long-running task.
+- FIX: Resolved a `KeyError` when closing trades by initializing temporary state keys.
 """
 import os
 import sys
@@ -20,6 +23,9 @@ import pytz
 import requests
 import uuid
 import traceback
+import time
+import shutil # << THÊM MỚI: Để sao chép file
+import signal # << THÊM MỚI: Để xử lý Ctrl+Z
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,13 +39,59 @@ except ImportError as e:
     sys.exit(f"Lỗi: Không thể import module cần thiết. Lỗi: {e}")
 
 # --- CÁC HẰNG SỐ VÀ CẤU HÌNH ---
-STATE_FILE = os.path.join(BASE_DIR, "data", "live_trade_state.json")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+STATE_FILE = os.path.join(DATA_DIR, "live_trade_state.json")
+BACKUP_FILE = STATE_FILE + ".backup" # << THÊM MỚI: Đường dẫn file backup
+LOCK_FILE = STATE_FILE + ".lock"
 ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 
 TACTICS = list(TACTICS_LAB.keys())
-ZONES = list(ZONES) # Sử dụng ZONES đã import
-INTERVALS = list(INTERVALS_TO_SCAN) # Sử dụng INTERVALS_TO_SCAN đã import
+ZONES = list(ZONES)
+INTERVALS = list(INTERVALS_TO_SCAN)
+
+# --- CÁC HÀM KHÓA FILE VÀ BẢO VỆ ---
+def acquire_lock(timeout=120): # << THAY ĐỔI: Tăng timeout lên 120 giây
+    """Cố gắng chiếm giữ lock, chờ tối đa 'timeout' giây."""
+    start_time = time.time()
+    print("⏳ Đang chờ quyền truy cập file trạng thái...")
+    while os.path.exists(LOCK_FILE):
+        if time.time() - start_time > timeout:
+            print(f"❌ Lỗi: Không thể chiếm quyền điều khiển file trạng thái sau {timeout} giây. Bot có thể đang chạy một tác vụ nặng.")
+            return False
+        time.sleep(0.5)
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        print("✅ Đã có quyền truy cập.")
+        return True
+    except IOError as e:
+        print(f"❌ Lỗi I/O khi tạo file lock: {e}")
+        return False
+
+def release_lock():
+    """Giải phóng lock."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            print("✅ Đã giải phóng quyền truy cập file.")
+    except OSError as e:
+        print(f"❌ Lỗi khi giải phóng file lock: {e}")
+
+def create_backup(): # << THÊM MỚI: Hàm tạo backup
+    """Tạo một bản sao lưu của file state."""
+    try:
+        if os.path.exists(STATE_FILE):
+            shutil.copy2(STATE_FILE, BACKUP_FILE)
+            print("📋 Đã tạo bản sao lưu an toàn (`.backup`).")
+    except Exception as e:
+        print(f"⚠️ Cảnh báo: Không thể tạo file sao lưu. Lỗi: {e}")
+
+def handle_exit_signals(signum, frame): # << THÊM MỚI: Hàm xử lý tín hiệu thoát
+    """Đảm bảo giải phóng lock khi bị ngắt bởi Ctrl+C hoặc Ctrl+Z."""
+    print(f"\n🚨 Nhận được tín hiệu ngắt ({signal.Signals(signum).name}). Đang dọn dẹp và thoát...")
+    release_lock()
+    sys.exit(1)
 
 # --- CÁC HÀM TIỆN ÍCH ---
 def parse_env_variable(key_name):
@@ -82,8 +134,7 @@ def load_state():
 def save_state(state):
     try:
         state_to_save = state.copy()
-        # Xóa các key tạm thời trước khi lưu
-        for key in ['temp_newly_opened_trades', 'temp_newly_closed_trades', 'temp_money_spent_on_trades', 'temp_pnl_from_closed_trades']:
+        for key in ['temp_newly_opened_trades', 'temp_newly_closed_trades', 'temp_money_spent_on_trades', 'temp_pnl_from_closed_trades', 'session_has_events']:
             state_to_save.pop(key, None)
         with open(STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(state_to_save, f, indent=4, ensure_ascii=False)
@@ -96,7 +147,9 @@ def select_from_list(options, prompt):
     for i, option in enumerate(options): print(f"  {i+1}. {option}")
     while True:
         try:
-            choice = int(input(prompt))
+            choice_str = input(prompt)
+            if not choice_str: return None
+            choice = int(choice_str)
             if 1 <= choice <= len(options): return options[choice - 1]
             else: print("⚠️ Lựa chọn không hợp lệ.")
         except ValueError:
@@ -149,7 +202,7 @@ def view_open_trades(bnc: BinanceConnector):
         dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
         tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
         tp1_info = " TP1✅" if trade.get('tp1_hit', False) else ""
-        
+
         stale_info = ""
         if 'stale_override_until' in trade:
             override_dt = datetime.fromisoformat(trade['stale_override_until'])
@@ -163,7 +216,7 @@ def view_open_trades(bnc: BinanceConnector):
 
         line1 = f"{i+1}. {pnl_icon} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) | Giữ:{holding_hours:.1f}h{dca_info}{tp1_info}{stale_info}"
         current_value = invested_usd + pnl_usd
-        line2 = f"    Vốn:${invested_usd:,.2f} -> ${current_value:,.2f} | Entry:{entry_price:.4f} Cur:{current_price:.4f} TP:{trade.get('tp', 0):.4f} SL:{trade.get('sl', 0):.4f}{tsl_info}"
+        line2 = f"   Vốn:${invested_usd:,.2f} -> ${current_value:,.2f} | Entry:{entry_price:.4f} Cur:{current_price:.4f} TP:{trade.get('tp', 0):.4f} SL:{trade.get('sl', 0):.4f}{tsl_info}"
 
         print(line1)
         print(line2)
@@ -171,116 +224,177 @@ def view_open_trades(bnc: BinanceConnector):
     return active_trades
 
 def close_manual_trades(bnc: BinanceConnector):
-    print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
-    print("--- Chức năng: Đóng lệnh thủ công ---")
-    state = load_state()
-    if not state: return
-    active_trades = view_open_trades(bnc)
-    if not active_trades: return
+    if not acquire_lock(): return
     try:
+        create_backup() # << THÊM MỚI
+        print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
+        print("--- Chức năng: Đóng lệnh thủ công ---")
+        state = load_state()
+        if not state: return
+        
+        state['temp_pnl_from_closed_trades'] = 0.0
+        state.setdefault('temp_newly_closed_trades', [])
+
+        active_trades = view_open_trades(bnc)
+        if not active_trades: return
+        
         choice = input("\n👉 Nhập số thứ tự của các lệnh cần đóng (ví dụ: 1,3). Nhấn Enter để hủy: ")
-        if not choice.strip(): print("Hủy thao tác."); return
+        if not choice.strip():
+            print("Hủy thao tác.")
+            return
 
         indices_to_close = []
         for part in choice.split(','):
             if part.strip().isdigit():
                 index = int(part.strip()) - 1
-                if 0 <= index < len(active_trades): indices_to_close.append(index)
-                else: print(f"⚠️ Cảnh báo: Số '{part.strip()}' không hợp lệ.")
-        if not indices_to_close: print("❌ Không có lựa chọn hợp lệ."); return
+                if 0 <= index < len(active_trades):
+                    indices_to_close.append(index)
+                else:
+                    print(f"⚠️ Cảnh báo: Số '{part.strip()}' không hợp lệ.")
+        if not indices_to_close:
+            print("❌ Không có lựa chọn hợp lệ.")
+            return
 
         trades_to_process = [active_trades[i] for i in sorted(list(set(indices_to_close)), reverse=True)]
+        closed_count = 0
         for trade in trades_to_process:
             print(f"\n⚡️ Đang gửi yêu cầu đóng lệnh cho {trade['symbol']}...")
             success = close_trade_on_binance(bnc, trade, "Manual Panel", state)
-            if success: print(f"✅ Yêu cầu đóng {trade['symbol']} thành công.")
-            else: print(f"❌ Không thể đóng {trade['symbol']}. Vui lòng kiểm tra log.")
-        save_state(state)
+            if success:
+                print(f"✅ Yêu cầu đóng {trade['symbol']} thành công.")
+                closed_count += 1
+            else:
+                print(f"❌ Không thể đóng {trade['symbol']}. Vui lòng kiểm tra log.")
+        
+        if closed_count > 0:
+            save_state(state)
+
     except Exception as e:
         print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
+    finally:
+        release_lock()
 
 def close_all_trades(bnc: BinanceConnector):
-    print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
-    print("--- Chức năng: Đóng TẤT CẢ lệnh ---")
-    state = load_state()
-    if not state or not state.get("active_trades"):
-        print("ℹ️ Không có lệnh nào đang mở để đóng."); return
-    if input("⚠️ CẢNH BÁO: Đóng tất cả vị thế? (y/n): ").lower() != 'y':
-        print("Hủy thao tác."); return
+    if not acquire_lock(): return
+    try:
+        create_backup() # << THÊM MỚI
+        print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
+        print("--- Chức năng: Đóng TẤT CẢ lệnh ---")
+        state = load_state()
+        if not state or not state.get("active_trades"):
+            print("ℹ️ Không có lệnh nào đang mở để đóng.")
+            return
+            
+        state['temp_pnl_from_closed_trades'] = 0.0
+        state.setdefault('temp_newly_closed_trades', [])
 
-    trades_to_close, closed_count = list(state['active_trades']), 0
-    for trade in trades_to_close:
-        print(f"\n⚡️ Đang đóng {trade['symbol']}...")
-        if close_trade_on_binance(bnc, trade, "All Manual", state):
-            print(f"✅ Đóng {trade['symbol']} thành công."); closed_count += 1
-        else: print(f"❌ Không thể đóng {trade['symbol']}.")
-    if closed_count > 0: save_state(state)
+        if input("⚠️ CẢNH BÁO: Đóng tất cả vị thế? (y/n): ").lower() != 'y':
+            print("Hủy thao tác.")
+            return
+
+        trades_to_close, closed_count = list(state['active_trades']), 0
+        for trade in trades_to_close:
+            print(f"\n⚡️ Đang đóng {trade['symbol']}...")
+            if close_trade_on_binance(bnc, trade, "All Manual", state):
+                print(f"✅ Đóng {trade['symbol']} thành công.")
+                closed_count += 1
+            else:
+                print(f"❌ Không thể đóng {trade['symbol']}.")
+        if closed_count > 0:
+            save_state(state)
+    finally:
+        release_lock()
 
 def extend_stale_check(bnc: BinanceConnector):
-    print("\n--- Chức năng: Gia hạn lệnh ---")
-    state = load_state()
-    if not state: return
-    active_trades = view_open_trades(bnc)
-    if not active_trades: return
+    if not acquire_lock(): return
     try:
+        create_backup() # << THÊM MỚI
+        print("\n--- Chức năng: Gia hạn lệnh ---")
+        state = load_state()
+        if not state: return
+        active_trades = view_open_trades(bnc)
+        if not active_trades: return
+        
         choice = input("\n👉 Chọn số lệnh cần gia hạn (Enter để hủy): ")
-        if not choice.strip() or not choice.strip().isdigit(): print("Hủy thao tác."); return
+        if not choice.strip() or not choice.strip().isdigit():
+            print("Hủy thao tác.")
+            return
         index = int(choice.strip()) - 1
-        if not (0 <= index < len(active_trades)): print("❌ Lựa chọn không hợp lệ."); return
+        if not (0 <= index < len(active_trades)):
+            print("❌ Lựa chọn không hợp lệ.")
+            return
 
-        hours = float(input("👉 Nhập số giờ muốn gia hạn (ví dụ: 48): "))
-        if hours <= 0: print("❌ Số giờ phải dương."); return
+        hours_input = input("👉 Nhập số giờ muốn gia hạn (ví dụ: 48): ")
+        hours = float(hours_input)
+        if hours <= 0:
+            print("❌ Số giờ phải dương.")
+            return
 
         trade_id_to_update = active_trades[index]['trade_id']
-        
-        # Tìm và cập nhật trade trong state gốc bằng trade_id để đảm bảo chính xác
+        trade_found = False
         for trade in state['active_trades']:
             if trade['trade_id'] == trade_id_to_update:
                 override_until = datetime.now(VIETNAM_TZ) + timedelta(hours=hours)
                 trade['stale_override_until'] = override_until.isoformat()
                 print(f"\n✅ Lệnh {trade['symbol']} đã được gia hạn đến: {override_until.strftime('%Y-%m-%d %H:%M:%S')}")
                 save_state(state)
-                return
-        print("❌ Không tìm thấy trade để cập nhật. Có thể state đã thay đổi.")
+                trade_found = True
+                break
+        
+        if not trade_found:
+            print("❌ Không tìm thấy trade để cập nhật. Có thể state đã thay đổi.")
 
     except ValueError:
         print("❌ Vui lòng nhập một con số hợp lệ.")
     except Exception as e:
         print(f"\n❌ Lỗi không mong muốn: {e}")
+    finally:
+        release_lock()
 
 def open_manual_trade(bnc: BinanceConnector):
-    print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
-    print("--- Chức năng: Mở lệnh mới thủ công ---")
-    state = load_state()
-    if not state: return
+    if not acquire_lock(): return
     try:
+        create_backup() # << THÊM MỚI
+        print("\n" + "🔥" * 10 + " HÀNH ĐỘNG TRỰC TIẾP TRÊN SÀN BINANCE " + "🔥" * 10)
+        print("--- Chức năng: Mở lệnh mới thủ công ---")
+        state = load_state()
+        if not state: return
+        
         available_usdt, _ = get_usdt_fund(bnc)
         print(f"💵 USDT khả dụng: ${available_usdt:,.2f}")
 
         allowed_symbols = parse_env_variable("SYMBOLS_TO_SCAN")
         if not allowed_symbols:
-            print("❌ Không đọc được SYMBOLS_TO_SCAN từ file .env."); return
+            print("❌ Không đọc được SYMBOLS_TO_SCAN từ file .env.")
+            return
 
         print("\n--- Bước 1: Chọn thông tin ---")
         symbol = select_from_list(allowed_symbols, "👉 Chọn Symbol: ")
+        if symbol is None: print("Hủy thao tác."); return
         interval = select_from_list(INTERVALS, "👉 Chọn Interval: ")
+        if interval is None: print("Hủy thao tác."); return
         tactic = select_from_list(TACTICS, "👉 Chọn Tactic: ")
+        if tactic is None: print("Hủy thao tác."); return
         zone = select_from_list(ZONES, "👉 Chọn Vùng (Zone): ")
+        if zone is None: print("Hủy thao tác."); return
 
         print("\n--- Bước 2: Nhập chi tiết ---")
-        invested_usd = float(input(f"👉 Vốn đầu tư (USD): "))
+        invested_usd = float(input(f"� Vốn đầu tư (USD): "))
         sl_percent = float(input("👉 Cắt lỗ % (ví dụ: 5): ")) / 100
         rr_ratio = float(input("👉 Tỷ lệ R:R (ví dụ: 2): "))
 
         if not all(x > 0 for x in [invested_usd, sl_percent, rr_ratio]):
-            print("❌ Các giá trị phải dương."); return
+            print("❌ Các giá trị phải dương.")
+            return
         if invested_usd > available_usdt:
-            print(f"❌ Vốn đầu tư (${invested_usd:,.2f}) lớn hơn USDT khả dụng (${available_usdt:,.2f})."); return
+            print(f"❌ Vốn đầu tư (${invested_usd:,.2f}) lớn hơn USDT khả dụng (${available_usdt:,.2f}).")
+            return
 
         print(f"\n⚡️ Đang gửi yêu cầu mua {invested_usd:,.2f} USD của {symbol}...")
         market_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(invested_usd, 2))
         if not (market_order and float(market_order.get('executedQty', 0)) > 0):
-            print("❌ Lệnh Market không khớp. Response:", market_order); return
+            print("❌ Lệnh Market không khớp. Response:", market_order)
+            return
 
         filled_qty, filled_cost = float(market_order['executedQty']), float(market_order['cummulativeQuoteQty'])
         avg_price = filled_cost / filled_qty
@@ -304,16 +418,20 @@ def open_manual_trade(bnc: BinanceConnector):
 
         state.setdefault('active_trades', []).append(new_trade)
         save_state(state)
+        
     except ValueError:
         print("❌ Giá trị nhập không hợp lệ.")
     except Exception as e:
         print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
+    finally:
+        release_lock()
 
 def main_menu():
     try:
         with BinanceConnector(network=TRADING_MODE) as bnc:
             if not bnc.test_connection():
-                print("❌ Không thể kết nối tới Binance."); return
+                print("❌ Không thể kết nối tới Binance.")
+                return
             while True:
                 print("\n" + "="*12 + f" 📊 BẢNG ĐIỀU KHIỂN (LIVE-{TRADING_MODE.upper()}) 📊 " + "="*12)
                 print("1. Xem tất cả lệnh đang mở")
@@ -335,4 +453,10 @@ def main_menu():
         print(f"\n🔥🔥🔥 Lỗi nghiêm trọng khi khởi tạo Binance Connector: {e}"); traceback.print_exc()
 
 if __name__ == "__main__":
+    # << THÊM MỚI: Đăng ký bộ xử lý tín hiệu
+    # Bắt tín hiệu Ctrl+C (SIGINT) và Ctrl+Z (SIGTSTP)
+    signal.signal(signal.SIGINT, handle_exit_signals)
+    if sys.platform != "win32": # SIGTSTP không có trên Windows
+        signal.signal(signal.SIGTSTP, handle_exit_signals)
+    
     main_menu()

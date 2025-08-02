@@ -1,25 +1,11 @@
-[2025-08-02 23:37:34] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
-[2025-08-02 23:37:34] (LiveTrade)   🏆 Cơ hội tốt nhất: SUIUSDT-4h | Tactic: Balanced_Trader | Điểm: 7.13 (Ngưỡng: 6.5)
-[2025-08-02 23:37:34] (LiveTrade)      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
-[2025-08-02 23:37:34] (LiveTrade) ---[⚡ Chuẩn bị thực thi SUIUSDT-4h ⚡]---
-[2025-08-02 23:37:34] (LiveTrade)   => 🔥 Gửi lệnh MUA SUIUSDT với $10,391.52 (Vùng: LAGGING, Vốn: 6.0%)
-[2025-08-02 23:37:34] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
-[2025-08-02 23:37:34] (LiveTrade)   🔥 SUIUSDT-4h (Balanced_Trader): Mua với vốn $10,391.51
-[2025-08-02 23:37:34] (LiveTrade) 🔔 Gửi báo cáo loại: DYNAMIC
-[2025-08-02 23:40:46] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
-[2025-08-02 23:40:46] (LiveTrade)   🏆 Cơ hội tốt nhất: ADAUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.55 (Ngưỡng: 6.5)
-[2025-08-02 23:40:46] (LiveTrade)      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
-[2025-08-02 23:40:46] (LiveTrade) ---[⚡ Chuẩn bị thực thi ADAUSDT-4h ⚡]---
-[2025-08-02 23:40:46] (LiveTrade)   => 🔥 Gửi lệnh MUA ADAUSDT với $9,768.03 (Vùng: LAGGING, Vốn: 6.0%)
-[2025-08-02 23:40:47] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
-[2025-08-02 23:40:47] (LiveTrade)   🔥 ADAUSDT-4h (Balanced_Trader): Mua với vốn $9,768.00
-[2025-08-02 23:52:32] (LiveTrade) 🔔 Gửi báo cáo loại: DAILY
-[2025-08-02 23:56:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
-[2025-08-02 23:56:04] (LiveTrade)   🏆 Cơ hội tốt nhất: LINKUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.32 (Ngưỡng: 6.5)
-[2025-08-02 23:56:04] (LiveTrade)      => 📉 Không đạt ngưỡng. Bỏ qua.
-[2025-08-03 00:11:05] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
-[2025-08-03 00:11:05] (LiveTrade)   🏆 Cơ hội tốt nhất: LINKUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.32 (Ngưỡng: 6.5)
-[2025-08-03 00:11:05] (LiveTrade)      => 📉 Không đạt ngưỡng. Bỏ qua.
-[2025-08-03 00:27:03] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
-[2025-08-03 00:27:03] (LiveTrade)   🏆 Cơ hội tốt nhất: LINKUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.32 (Ngưỡng: 6.5)
-[2025-08-03 00:27:03] (LiveTrade)      => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 01:51:52] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 01:51:52] (LiveTrade)   🏆 Cơ hội tốt nhất: SUIUSDT-4h | Tactic: Balanced_Trader | Điểm: 7.13 (Ngưỡng: 6.3)
+[2025-08-03 01:51:52] (LiveTrade)       => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
+[2025-08-03 01:51:52] (LiveTrade) ---[⚡ Chuẩn bị thực thi SUIUSDT-4h ⚡]---
+[2025-08-03 01:51:53] (LiveTrade)   => 🔥 Gửi lệnh MUA SUIUSDT với $10,377.28 (Vùng: LAGGING, Vốn: 6.0%)
+[2025-08-03 01:51:53] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
+[2025-08-03 01:51:53] (LiveTrade)   🔥 SUIUSDT-4h (Balanced_Trader): Mua với vốn $10,377.03
+[2025-08-03 01:51:53] (LiveTrade) 🔔 Gửi báo cáo loại: DYNAMIC
+[2025-08-03 01:51:53] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 01:53:02] (LiveTrade) 💵 Phát hiện Nạp/Rút ròng: $-9,999.76 (Ngưỡng động $762.89)
+[2025-08-03 01:53:03] (LiveTrade) ---[✅ Kết thúc phiên]---
