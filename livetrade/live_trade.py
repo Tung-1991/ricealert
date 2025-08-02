@@ -2,22 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 Live Trade - The 4-Zone Strategy
-Version: 8.3.2 - Smart Logging
+Version: 8.4.0 - State Reconciliation & Self-Healing
 Date: 2025-08-03
 
-CHANGELOG (v8.3.2):
-- LOGGING: Refined logging mechanism. The "---[✅ Kết thúc phiên]---" message will now only be logged if
-  significant events occurred during the session (e.g., new opportunities found, trades executed/closed,
-  reports sent). This eliminates repetitive logs for idle sessions, making the log file much cleaner.
-- ROBUSTNESS: Implemented a file-locking mechanism to prevent race conditions and data corruption
-  when the control_live_panel.py script and the main bot attempt to write to the state file simultaneously.
-  The bot will now safely skip a cycle if the state file is being accessed by the user.
-- PRECISION (Execution): Implemented a real-time price check immediately before trade execution.
-  This ensures that the capital allocated and risk calculations are based on the most current market price,
-  mitigating risks from data staleness.
-- DEBUGGABILITY: Enhanced `find_and_open_new_trades` to always log the best opportunity found during a heavy
-  scan cycle, including its score and the required threshold. This provides critical insight into why the bot
-  is or is not entering new trades.
+CHANGELOG (v8.4.0):
+- CRITICAL (Self-Healing): Implemented a state reconciliation mechanism. At the start of each session,
+  the bot now compares its active trades from the state file against the actual asset balances on Binance.
+  If a trade's asset quantity on the exchange is significantly lower (configurable threshold) than
+  recorded, the bot assumes it was manually closed, flags it as 'Desynced', and removes it from
+  active monitoring. This prevents the bot from managing "ghost trades".
+- CONFIG: Added `RECONCILIATION_QTY_THRESHOLD` to GENERAL_CONFIG for easy adjustment of the
+  desync detection sensitivity.
+- LOGGING: Refined logging to only record the "session end" message when significant events occur.
 """
 import os
 import sys
@@ -53,7 +49,7 @@ CACHE_DIR = os.path.join(LIVE_DATA_DIR, "indicator_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ==============================================================================
-# ================== ⚙️ TRUNG TÂM CẤU HÌNH (v8.3.1) ⚙️ ===================
+# ================== ⚙️ TRUNG TÂM CẤU HÌNH (v8.4.0) ⚙️ ===================
 # ==============================================================================
 TRADING_MODE: Literal["live", "testnet"] = "testnet"
 INITIAL_CAPITAL = 0.0
@@ -63,11 +59,13 @@ GENERAL_CONFIG = {
     "TRADE_COOLDOWN_HOURS": 1,
     "CRON_JOB_INTERVAL_MINUTES": 1,
     "HEAVY_REFRESH_MINUTES": 15,
-    "PENDING_TRADE_RETRY_LIMIT": 3, # Giảm retry để tránh kẹt lâu
+    "PENDING_TRADE_RETRY_LIMIT": 3,
     "CLOSE_TRADE_RETRY_LIMIT": 3,
     "DEPOSIT_DETECTION_MIN_USD": 5.0,
-    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.005, # 0.01%
-    "CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES": 30
+    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.005,
+    "CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES": 30,
+    # Ngưỡng phát hiện bán thủ công. Nếu số lượng thực tế < số lượng bot * ngưỡng này -> coi là desync.
+    "RECONCILIATION_QTY_THRESHOLD": 0.9
 }
 MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,
@@ -122,10 +120,10 @@ ALERT_CONFIG = {
 # ==============================================================================
 # ================= 🚀 CORE STRATEGY v8.0.0: 4-ZONE MODEL 🚀 =================
 # ==============================================================================
-LEADING_ZONE = "LEADING"      # Tín hiệu sớm, rủi ro cao, tiềm năng lớn
-COINCIDENT_ZONE = "COINCIDENT"  # Tín hiệu đồng thời, "điểm ngọt"
-LAGGING_ZONE = "LAGGING"      # Tín hiệu trễ, an toàn, theo trend đã rõ
-NOISE_ZONE = "NOISE"          # Vùng nhiễu, không có xu hướng
+LEADING_ZONE = "LEADING"
+COINCIDENT_ZONE = "COINCIDENT"
+LAGGING_ZONE = "LAGGING"
+NOISE_ZONE = "NOISE"
 ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 ZONE_BASED_POLICIES = {
     LEADING_ZONE: {"NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng.", "CAPITAL_PCT": 0.04},
@@ -133,7 +131,6 @@ ZONE_BASED_POLICIES = {
     LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.06},
     NOISE_ZONE: {"NOTES": "Nguy hiểm, chỉ vào lệnh siêu nhỏ khi có tín hiệu VÀNG.", "CAPITAL_PCT": 0.03}
 }
-#Tactic
 TACTICS_LAB = {
     "Breakout_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], "NOTES": "Săn đột phá từ nền giá siết chặt.",
@@ -182,52 +179,38 @@ SESSION_TEMP_KEYS = ['temp_newly_opened_trades', 'temp_newly_closed_trades', 'te
 
 # --- CÁC HÀM KHÓA FILE (FILE LOCKING) ---
 def acquire_lock(timeout=55):
-    """
-    Cố gắng chiếm giữ lock, chờ tối đa 'timeout' giây.
-    Timeout nên nhỏ hơn 1 phút của cron job.
-    """
     start_time = time.time()
     while os.path.exists(LOCK_FILE):
         if time.time() - start_time > timeout:
-            # Ghi log trực tiếp vì hàm này chạy trước khi state được khởi tạo
             timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
-            log_entry = f"[{timestamp}] (LiveTrade) ⏳ Bỏ qua phiên này, file trạng thái đang được khóa (có thể do Bảng Điều Khiển)."
+            log_entry = f"[{timestamp}] (LiveTrade) ⏳ Bỏ qua phiên này, file trạng thái đang được khóa."
             print(log_entry)
             with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
             return False
         time.sleep(1)
     try:
-        with open(LOCK_FILE, 'w') as f:
-            f.write(str(os.getpid()))
+        with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
         return True
-    except IOError:
-        return False
+    except IOError: return False
 
 def release_lock():
-    """Giải phóng lock."""
     try:
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
-    except OSError as e:
-        log_error(f"Lỗi khi giải phóng file lock: {e}")
+        if os.path.exists(LOCK_FILE): os.remove(LOCK_FILE)
+    except OSError as e: log_error(f"Lỗi khi giải phóng file lock: {e}")
 
 # --- CÁC HÀM TIỆN ÍCH ---
 def log_message(message: str, state: Optional[Dict] = None):
-    """Ghi log một thông điệp và đánh dấu phiên có sự kiện."""
-    if state is not None:
-        state['session_has_events'] = True
+    if state is not None: state['session_has_events'] = True
     timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
     log_entry = f"[{timestamp}] (LiveTrade) {message}"
     print(log_entry)
     with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
 
 def log_error(message: str, error_details: str = "", send_to_discord: bool = False, force_discord: bool = False, state: Optional[Dict] = None):
-    """Ghi log lỗi và tùy chọn gửi cảnh báo."""
     timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
     log_entry = f"[{timestamp}] (LiveTrade-ERROR) {message}\n"
     if error_details: log_entry += f"--- TRACEBACK ---\n{error_details}\n------------------\n"
     with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry)
-    # Gửi log lỗi tới log chính
     log_message(f"!!!!!! ❌ LỖI: {message}. Chi tiết trong error.log ❌ !!!!!!", state=state)
     if send_to_discord:
         discord_message = f"🔥🔥🔥 LỖI NGHIÊM TRỌNG 🔥🔥🔥\n**{message}**\n```python\n{error_details if error_details else 'N/A'}\n```"
@@ -238,7 +221,6 @@ def load_json_file(path: str, default: Any = None) -> Any:
     try:
         with open(path, "r", encoding="utf-8") as f: return json.load(f)
     except json.JSONDecodeError:
-        # Không truyền state ở đây vì hàm này được gọi để tạo state
         log_error(f"File JSON hỏng: {path}. Sử dụng giá trị mặc định.", send_to_discord=True)
         return default if default is not None else {}
 
@@ -253,7 +235,7 @@ def can_send_discord_now(force: bool = False) -> bool:
     global _last_discord_send_time
     if force: return True
     now = datetime.now()
-    if _last_discord_send_time is None or (now - _last_discord_send_time).total_seconds() > 120: # Cooldown 2 phút
+    if _last_discord_send_time is None or (now - _last_discord_send_time).total_seconds() > 120:
         _last_discord_send_time = now
         return True
     return False
@@ -286,8 +268,7 @@ def get_realtime_price(symbol: str) -> Optional[float]:
         response.raise_for_status()
         return float(response.json()['price'])
     except requests.exceptions.RequestException as e:
-        if 'timeout' not in str(e).lower():
-            log_error(f"Lỗi API khi lấy giá {symbol}: {e}")
+        if 'timeout' not in str(e).lower(): log_error(f"Lỗi API khi lấy giá {symbol}: {e}")
         return None
     except Exception as e:
         log_error(f"Lỗi không xác định khi lấy giá {symbol}", error_details=traceback.format_exc())
@@ -304,7 +285,7 @@ def get_usdt_fund(bnc: BinanceConnector) -> Tuple[float, float]:
 
 def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tuple[float, float]:
     if not (trade and trade.get('entry_price', 0) > 0 and realtime_price and realtime_price > 0): return 0.0, 0.0
-    pnl_multiplier = 1.0 # Chỉ có lệnh MUA (LONG) trong Spot
+    pnl_multiplier = 1.0
     pnl_percent = (realtime_price - trade['entry_price']) / trade['entry_price'] * 100 * pnl_multiplier
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
     return pnl_usd, pnl_percent
@@ -388,7 +369,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
 
-    if close_pct >= 0.999: # Đóng toàn bộ lệnh
+    if close_pct >= 0.999:
         pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100
         trade.update({'status': f'Closed ({reason})', 'exit_price': exit_price, 'exit_time': datetime.now(VIETNAM_TZ).isoformat(), 'pnl_usd': trade.get('realized_pnl_usd', 0.0) + pnl_usd, 'pnl_percent': pnl_percent})
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
@@ -396,7 +377,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         state.setdefault('cooldown_until', {})[symbol] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
         export_trade_history_to_csv([trade])
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
-    else: # Đóng một phần
+    else:
         trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_usd
         trade['total_invested_usd'] *= (1 - close_pct)
         trade['quantity'] -= closed_qty
@@ -608,7 +589,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         max_tp_pct_cfg = RISK_RULES_CONFIG["MAX_TP_PERCENT_BY_TIMEFRAME"].get(interval)
         if max_tp_pct_cfg is not None and tp_p > avg_price * (1 + max_tp_pct_cfg): tp_p = avg_price * (1 + max_tp_pct_cfg)
 
-        if tp_p <= avg_price or sl_p >= avg_price or sl_p <= 0: raise Exception(f"SL/TP không hợp lệ sau khi thực thi: TP={tp_p}, SL={sl_p}, AvgPrice={avg_price}")
+        if tp_p <= avg_price or sl_p >= avg_price or sl_p <= 0: raise Exception(f"SL/TP không hợp lệ: TP={tp_p}, SL={sl_p}, AvgPrice={avg_price}")
 
         new_trade = {"trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE", "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": avg_price, "quantity": filled_qty, "tp": tp_p, "sl": sl_p, "initial_sl": sl_p, "initial_entry": {"price": avg_price, "quantity": filled_qty, "invested_usd": float(market_order['cummulativeQuoteQty'])}, "total_invested_usd": float(market_order['cummulativeQuoteQty']), "entry_time": datetime.now(VIETNAM_TZ).isoformat(), "entry_score": opportunity['score'], "entry_zone": zone, "last_zone": zone, "binance_market_order_id": market_order['orderId'], "dca_entries": [], "realized_pnl_usd": 0.0, "last_score": opportunity['score'], "peak_pnl_percent": 0.0, "tp1_hit": False, "close_retry_count": 0}
 
@@ -621,7 +602,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state['pending_trade_opportunity']['retry_count'] = retry_count
         log_error(f"Lỗi khi thực thi lệnh {symbol} (lần {retry_count})", error_details=traceback.format_exc(), state=state)
         if retry_count >= GENERAL_CONFIG["PENDING_TRADE_RETRY_LIMIT"]:
-            log_error(f"Không thể mở lệnh {symbol} sau {retry_count} lần thử. Hủy bỏ cơ hội.", send_to_discord=True, force_discord=True, state=state)
+            log_error(f"Không thể mở lệnh {symbol} sau {retry_count} lần thử. Hủy bỏ.", send_to_discord=True, force_discord=True, state=state)
             state.pop('pending_trade_opportunity', None)
 
 def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
@@ -747,6 +728,46 @@ def run_heavy_tasks(bnc: BinanceConnector, state: Dict, available_usdt: float, t
 
     find_and_open_new_trades(bnc, state, available_usdt, total_usdt)
 
+def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
+    """
+    Đối soát các lệnh trong state với số dư thực tế trên Binance để loại bỏ 'lệnh ma'.
+    """
+    active_trades = state.get("active_trades", [])
+    if not active_trades:
+        return
+
+    try:
+        balances = bnc.get_account_balance().get("balances", [])
+        asset_balances = {item['asset']: float(item['free']) + float(item['locked']) for item in balances}
+    except Exception as e:
+        log_error("Không thể lấy số dư tài khoản để đối soát.", error_details=str(e), state=state)
+        return
+
+    trades_to_remove = []
+    threshold = GENERAL_CONFIG["RECONCILIATION_QTY_THRESHOLD"]
+    for trade in active_trades:
+        symbol_asset = trade['symbol'].replace("USDT", "")
+        bot_quantity = float(trade.get('quantity', 0))
+        real_quantity = asset_balances.get(symbol_asset, 0.0)
+
+        if real_quantity < bot_quantity * threshold:
+            trades_to_remove.append(trade)
+            log_message(f"⚠️ Đối soát: Lệnh {trade['symbol']} đã bị đóng/thay đổi thủ công. "
+                        f"(Bot: {bot_quantity:.6f}, Sàn: {real_quantity:.6f}). Đang xóa.", state=state)
+
+    if trades_to_remove:
+        log_message(f"---[⚙️ Bắt đầu dọn dẹp {len(trades_to_remove)} lệnh bất đồng bộ ⚙️]---", state=state)
+        trade_ids_to_remove = {t['trade_id'] for t in trades_to_remove}
+        for trade in trades_to_remove:
+            trade['status'] = 'Closed (Desynced)'
+            trade['exit_time'] = datetime.now(VIETNAM_TZ).isoformat()
+            trade['pnl_usd'] = 0
+            trade['pnl_percent'] = 0
+            state['trade_history'].append(trade)
+
+        state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
+        log_message(f"---[✅ Đã dọn dẹp xong]---", state=state)
+
 def run_session():
     if not acquire_lock():
         return
@@ -755,18 +776,17 @@ def run_session():
     try:
         with BinanceConnector(network=TRADING_MODE) as bnc:
             if not bnc.test_connection():
-                log_error("Không thể kết nối đến Binance API.", send_to_discord=True, state=state)
+                log_error("Không thể kết nối đến Binance API.", send_to_discord=True)
                 return
 
-            state = load_json_file(STATE_FILE, {"active_trades": [], "trade_history": [], "initial_capital": 0.0, "cooldown_until": {}, "last_indicator_refresh": None, "usdt_balance_end_of_last_session": 0.0, "pnl_closed_last_session": 0.0, "last_dynamic_alert": {}, "pending_trade_opportunity": {}, "last_summary_sent_time": None, "last_critical_error": {}})
-            
-            # Khởi tạo cờ sự kiện cho phiên
+            state = load_json_file(STATE_FILE, {"active_trades": [], "trade_history": [], "initial_capital": 0.0})
             state['session_has_events'] = False
             state['temp_newly_opened_trades'], state['temp_newly_closed_trades'], state['temp_money_spent_on_trades'], state['temp_pnl_from_closed_trades'] = [], [], 0.0, 0.0
 
+            reconcile_positions_with_binance(bnc, state)
+
             available_usdt, total_usdt_at_start = get_usdt_fund(bnc)
             if total_usdt_at_start == 0.0 and available_usdt == 0.0:
-                # Không log gì ở đây nếu không có tiền, vì đây là trạng thái bình thường
                 return
 
             prev_usdt = state.get("usdt_balance_end_of_last_session", 0.0)
@@ -776,7 +796,7 @@ def run_session():
                 min_threshold_usd = GENERAL_CONFIG.get("DEPOSIT_DETECTION_MIN_USD", 5.0)
                 dynamic_threshold = max(min_threshold_usd, total_usdt_at_start * threshold_pct)
                 if abs(net_deposit) > dynamic_threshold:
-                    log_message(f"💵 Phát hiện Nạp/Rút ròng: ${net_deposit:,.2f} (Ngưỡng động ${dynamic_threshold:,.2f})", state=state)
+                    log_message(f"💵 Phát hiện Nạp/Rút ròng: ${net_deposit:,.2f}", state=state)
                     state["initial_capital"] = state.get("initial_capital", 0.0) + net_deposit
 
             if state.get('initial_capital', 0.0) == 0.0 and total_usdt_at_start > 0:
@@ -821,7 +841,6 @@ def run_session():
                 pnl_percent_for_alert = ((final_equity - state.get('initial_capital', 1)) / state.get('initial_capital', 1)) * 100 if state.get('initial_capital', 1) > 0 else 0
                 state['last_dynamic_alert'] = {"timestamp": now_vn.isoformat(), "total_pnl_percent": pnl_percent_for_alert}
 
-            # Xóa cờ lỗi nếu phiên chạy thành công
             if 'last_critical_error' in state:
                 state['last_critical_error'] = {}
 
@@ -833,7 +852,6 @@ def run_session():
         last_error = state.get('last_critical_error', {})
         now_ts = time.time()
         cooldown_seconds = GENERAL_CONFIG.get("CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES", 30) * 60
-
         should_alert_discord = True
         if last_error.get('message') == error_msg:
             if (now_ts - last_error.get('timestamp', 0)) < cooldown_seconds:
@@ -841,18 +859,13 @@ def run_session():
 
         log_error(f"LỖI TOÀN CỤC NGOÀI DỰ KIẾN", error_details=traceback.format_exc(), send_to_discord=should_alert_discord, state=state)
 
-        if state: # Chỉ cập nhật nếu state đã được load
-            state['last_critical_error'] = {
-                'message': error_msg,
-                'timestamp': now_ts
-            }
+        if state:
+            state['last_critical_error'] = {'message': error_msg, 'timestamp': now_ts}
             save_json_file(STATE_FILE, state)
 
     finally:
         release_lock()
-        # Chỉ ghi log kết thúc nếu phiên này có sự kiện
         if state and state.get('session_has_events', False):
-            # Không cần truyền state ở đây nữa vì đây là dòng log cuối cùng
             timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
             log_entry = f"[{timestamp}] (LiveTrade) ---[✅ Kết thúc phiên]---"
             print(log_entry)

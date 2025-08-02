@@ -1,5 +1,11 @@
+Chắc chắn rồi! Dựa trên văn bản bạn cung cấp và mẫu Markdown bạn đã đưa, tôi đã chuyển đổi toàn bộ tài liệu sang định dạng Markdown chuẩn, giữ nguyên cấu trúc, nhấn mạnh và các chi tiết kỹ thuật.
+
+Đây là phiên bản đã được định dạng:
+
+---
+
 # Hệ Thống Giao Dịch Thuật Toán RiceAlert
-### Phân Tích Kiến Trúc & Triết Lý Giao Dịch v3.0
+### Phân Tích Kiến Trúc & Triết Lý Giao Dịch v3.2
 
 > ### Lời Mở Đầu: Tìm Kiếm "Linh Hồn" Của Hệ Thống
 >
@@ -9,9 +15,9 @@
 
 Hệ thống hoạt động như một hội đồng quân sự cấp cao:
 
--   **Các Cục Tình Báo** (`indicator`, `AI`, `News`): Liên tục thu thập và phân tích thông tin từ chiến trường (kỹ thuật), các dự báo (AI), và bối cảnh toàn cục (vĩ mô, tin tức).
--   **Phòng Họp Chiến Lược** (`trade_advisor`): Tổng hợp báo cáo từ các cục tình báo, đưa ra một "điểm số đồng thuận" có trọng số.
--   **Tổng Tư Lệnh** (`live_trade`): Nhận điểm số đồng thuận, nhưng không hành động mù quáng. Ngài nhìn vào bản đồ địa hình (4 Vùng Thị trường) để quyết định chiến thuật, binh chủng, và quân số phù hợp nhất cho trận đánh.
+- **Các Cục Tình Báo** (`indicator`, `AI`, `News`): Liên tục thu thập và phân tích thông tin từ chiến trường (kỹ thuật), các dự báo (AI), và bối cảnh toàn cục (vĩ mô, tin tức).
+- **Phòng Họp Chiến Lược** (`trade_advisor`): Tổng hợp báo cáo từ các cục tình báo, đưa ra một "điểm số đồng thuận" có trọng số.
+- **Tổng Tư Lệnh** (`live_trade`): Nhận điểm số đồng thuận, nhưng không hành động mù quáng. Ngài nhìn vào bản đồ địa hình (4 Vùng Thị trường) để quyết định chiến thuật, binh chủng, và quân số phù hợp nhất cho trận đánh, đồng thời được trang bị các cơ chế tự bảo vệ tối tân.
 
 Tài liệu này sẽ mổ xẻ từng bộ phận của cỗ máy phức tạp này, từ các tham số nền tảng đến các chiến lược thực thi bậc cao.
 
@@ -70,7 +76,7 @@ Hệ thống cho mỗi tín hiệu một "phiếu bầu" với "sức nặng" kh
 | `score_doji` | **1.5** | Phát hiện các mẫu nến Doji đảo chiều, cho thấy sự do dự và khả năng đảo chiều. |
 | `score_cmf` | **1.0** | Dòng tiền Chaikin (CMF) > 0.05 (mua) hoặc < -0.05 (bán), cho thấy áp lực dòng tiền. |
 | `score_volume` | **1.0** | Khối lượng giao dịch cao đột biến, xác nhận sức mạnh cho một cú breakout hoặc đảo chiều. |
-| `score_support_resistance` | **1.0** | Giá đang ở rất gần một vùng hỗ trợ hoặc kháng cự mạnh. |
+| `score_support_resistance`| **1.0** | Giá đang ở rất gần một vùng hỗ trợ hoặc kháng cự mạnh. |
 | `score_candle_pattern` | **1.0** | Phát hiện các mẫu nến nhấn chìm (Engulfing), một tín hiệu đảo chiều mạnh mẽ. |
 | `score_atr_vol` | **-1.0** | *(Quy tắc phạt)* Nếu biến động ATR quá cao (> 5%), điểm sẽ bị trừ để tránh thị trường quá "hoảng loạn". |
 | `score_ema200`, `score_rsi_multi`, `score_adx`, `score_bb` | **0.5** | Các tín hiệu phụ, dùng để củng cố thêm cho các nhận định chính. |
@@ -87,7 +93,7 @@ Hệ thống cho mỗi tín hiệu một "phiếu bầu" với "sức nặng" kh
 
 Mô hình học máy (LightGBM) dự báo xác suất các sự kiện trong tương lai gần.
 
--   **Phân Loại (Classifier):** Dự báo hướng đi của giá (`Tăng`, `Giảm`, `Đi Ngang`). Việc định nghĩa "Tăng/Giảm" dựa vào `ATR_FACTOR` giúp mô hình tự thích ứng với sự biến động của từng coin.
+-   **Phân Loại (Classifier):** Dự báo hướng đi của giá (Tăng, Giảm, Đi Ngang). Việc định nghĩa "Tăng/Giảm" dựa vào `ATR_FACTOR` giúp mô hình tự thích ứng với sự biến động của từng coin.
 -   **Hồi Quy (Regressor):** Dự báo biên độ (magnitude) của sự thay đổi giá (ví dụ: "tăng khoảng 1.2%").
 
 **Bảng Tham Số Huấn Luyện Cốt Lõi (ví dụ cho khung 1h):**
@@ -133,54 +139,111 @@ Mục tiêu là đảm bảo các quyết định giao dịch không đi ngượ
 
 ---
 
-## V. 🎖️ Trụ Cột 4: Thực Thi & Quản Lý (`live_trade.py` v8.0)
+## V. 🎖️ Trụ Cột 4: Thực Thi & Quản Lý (`live_trade.py` v8.4)
 
-> Đây là một **"Tổng Tư Lệnh Chiến Dịch Thích Ứng"** (Adaptive Campaign Commander).
+> Đây là một **"Tổng Tư Lệnh Chiến Dịch Thích Ứng & Tự Chữa Lành"** (An Adaptive & Self-Healing Campaign Commander).
 
-Đây là phần tinh vi nhất, nơi tín hiệu được chuyển hóa thành hành động giao dịch có chiến lược.
+Đây là phần tinh vi nhất, nơi tín hiệu được chuyển hóa thành hành động giao dịch có chiến lược, được bảo vệ bởi nhiều lớp an toàn.
 
-### 5.1. "4-Zone Strategy" & Phòng Thí Nghiệm Chiến Thuật (`TACTICS_LAB`)
+### 5.1. Mô Hình Chiến Lược Cốt Lõi
 
-Hệ thống phân tích "địa hình" và chọn "binh chủng" phù hợp.
+#### 5.1.1. "4-Zone Strategy" - Phân Tích Địa Hình
+Hệ thống phân loại "địa hình" thị trường thành 4 vùng để quyết định mức độ rủi ro và phân bổ vốn.
 
-1.  **Phân Tích "Địa Hình"** (`determine_market_zone_with_scoring`): Xác định thị trường đang ở 1 trong 4 Vùng:
-    -   `LEADING`: Vùng tín hiệu sớm, rủi ro cao.
-    -   `COINCIDENT`: Vùng "điểm ngọt", tín hiệu đồng pha.
-    -   `LAGGING`: Vùng an toàn, đi theo trend đã rõ.
-    -   `NOISE`: Vùng nhiễu, không xu hướng.
-2.  **Lựa Chọn "Binh Chủng"** (`TACTICS_LAB`): Mỗi chiến thuật là một "binh chủng" chuyên dụng được thiết kế cho một "địa hình" (`OPTIMAL_ZONE`).
-3.  **Phân Bổ "Quân Lực"** (`ZONE_BASED_POLICIES`): Phân bổ vốn linh động theo rủi ro của từng Vùng (ví dụ: 4% vốn ở `LEADING`, 7% ở `COINCIDENT`).
+| Vùng | `ZONE_BASED_POLICIES` (Vốn/lệnh) | Đặc Điểm & Triết Lý |
+| :-- | :-- | :--- |
+| **LEADING** | 4% | **Vùng Dẫn Dắt:** Các tín hiệu sớm xuất hiện, tiềm năng lợi nhuận cao nhưng rủi ro cũng cao. Phân bổ vốn nhỏ để "dò mìn" cơ hội. |
+| **COINCIDENT**| 7% | **Vùng Đồng Pha:** "Điểm ngọt" của thị trường, nơi các tín hiệu đồng thuận mạnh mẽ. Quyết đoán vào lệnh với vốn lớn nhất. |
+| **LAGGING** | 6% | **Vùng Theo Sau:** Xu hướng đã rõ ràng và bền vững. Giao dịch an toàn hơn, đi theo "con sóng" đã hình thành. |
+| **NOISE** | 3% | **Vùng Nhiễu:** Thị trường đi ngang, không có xu hướng. Rủi ro cao, chỉ vào lệnh siêu nhỏ khi có tín hiệu cực kỳ mạnh (VÀNG). |
+
+#### 5.1.2. `TACTICS_LAB` - Phòng Thí Nghiệm Chiến Thuật
+Mỗi chiến thuật là một "binh chủng" chuyên dụng, được thiết kế để tối ưu hóa cho từng loại "địa hình" và tín hiệu.
 
 **Bảng Tham Số Chiến Thuật (ví dụ `Breakout_Hunter`):**
 
 | Tham Số | Giá Trị | Ý Nghĩa Chi Tiết |
 | :--- | :--- | :--- |
-| `OPTIMAL_ZONE` | `[LEADING, COINCIDENT]` | Tối ưu cho Vùng Dẫn dắt và Đồng pha. |
+| `OPTIMAL_ZONE` | `[LEADING, COINCIDENT]` | Binh chủng này hoạt động hiệu quả nhất ở Vùng Dẫn dắt và Đồng pha. |
+| `WEIGHTS` | `{'tech': 0.7, ...}` | Trọng số của các trụ cột (Kỹ thuật, AI, Bối cảnh) khi tính điểm tổng hợp cho chiến thuật này. |
 | `ENTRY_SCORE` | `7.0` | Điểm tổng hợp tối thiểu để vào lệnh. |
-| `RR` | `2.5` | Tỷ lệ Lời/Lỗ mục tiêu là 2.5. |
-| `ATR_SL_MULTIPLIER`| `1.8` | Điểm Cắt lỗ (SL) được đặt cách giá vào lệnh 1.8 lần chỉ số ATR. |
-| `TRAIL_ACTIVATION_RR`| `1.0` | Kích hoạt Trailing SL khi lợi nhuận đạt 1R. |
+| `RR` | `2.5` | Tỷ lệ Lời/Lỗ (Risk/Reward) mục tiêu là 2.5. |
+| `ATR_SL_MULTIPLIER` | `1.8` | Điểm Cắt lỗ (SL) được đặt cách giá vào lệnh 1.8 lần chỉ số biến động ATR. |
+| `USE_TRAILING_SL` | `True` | Kích hoạt Cắt lỗ động (Trailing Stop Loss). |
+| `TRAIL_ACTIVATION_RR`| `1.0` | Kích hoạt Trailing SL khi lợi nhuận đạt 1R (1 lần rủi ro ban đầu). |
+| `ENABLE_PARTIAL_TP` | `True` | Kích hoạt Chốt lời một phần (TP1). |
 | `TP1_RR_RATIO` | `1.0` | Chốt lời phần 1 (TP1) khi lợi nhuận đạt 1R. |
 | `TP1_PROFIT_PCT`| `0.5` | Chốt 50% vị thế tại TP1 và dời SL về hòa vốn. |
 
-### 5.2. Các Module Cấu Hình Vận Hành & Rủi Ro
+### 5.2. Toàn Cảnh Các Module Cấu Hình Vận Hành
+Đây là các "bảng điều khiển" chi tiết để tinh chỉnh mọi hành vi của bot, từ tần suất hoạt động đến các quy tắc quản lý rủi ro cụ thể.
 
-Đây là các "bảng điều khiển" chi tiết để tinh chỉnh hành vi của bot.
+#### 5.2.1. `GENERAL_CONFIG` - Cấu Hình Vận Hành Chung
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `TRADING_MODE` | `"testnet"` | Chế độ hoạt động: `"live"` (tiền thật) hoặc `"testnet"` (thử nghiệm). |
+| `DATA_FETCH_LIMIT` | `300` | Số lượng nến lịch sử tối đa được tải về để tính toán chỉ báo. |
+| `DAILY_SUMMARY_TIMES` | `["08:05", "20:05"]` | Các mốc thời gian trong ngày để bot tự động gửi báo cáo tổng kết. |
+| `HEAVY_REFRESH_MINUTES`| `15` | Tần suất (phút) bot thực hiện một phiên "quét sâu": tính toán lại toàn bộ chỉ báo và tìm kiếm cơ hội mới. |
+| `TRADE_COOLDOWN_HOURS`| `1` | Thời gian "nghỉ" cho một coin sau khi vừa đóng lệnh để tránh giao dịch trả thù (revenge trading). |
+| `PENDING_TRADE_RETRY_LIMIT`| `3` | Số lần tối đa bot cố gắng thực thi lại một lệnh nếu gặp lỗi kết nối. |
+| `CLOSE_TRADE_RETRY_LIMIT`| `3` | Số lần tối đa bot cố gắng đóng một lệnh nếu gặp lỗi kết nối. |
+| `DEPOSIT_DETECTION_...`| `{...}` | Các tham số để tự động phát hiện Nạp/Rút tiền và điều chỉnh vốn ban đầu. |
+| `CRITICAL_ERROR_...` | `30` | Thời gian (phút) tạm ngưng gửi cảnh báo lỗi lặp lại để tránh spam. |
+| `RECONCILIATION_QTY_THRESHOLD`| `0.9` | **Ngưỡng tự chữa lành.** Nếu số lượng coin thực tế < 90% so với bot ghi nhận, lệnh sẽ bị coi là 'bất đồng bộ' và tự động bị dọn dẹp. |
 
-| Cấu Hình | Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
-| :--- | :--- | :--- | :--- |
-| **Vận Hành Chung** | `HEAVY_REFRESH_MINUTES` | `15` | Tần suất (phút) bot quét cơ hội mới và tính toán lại toàn bộ chỉ báo. |
-| | `TRADE_COOLDOWN_HOURS` | `1` | Thời gian "nghỉ" cho một coin sau khi vừa đóng lệnh để tránh giao dịch trả thù. |
-| **Phân Tích Đa Khung** | `BONUS_COEFFICIENT` | `1.15` | Nếu trend ở khung lớn hơn đồng thuận, điểm tín hiệu được thưởng 15%. |
-| | `SEVERE_PENALTY_COEFFICIENT`| `0.70` | Phạt nặng 30% nếu cả hai khung lớn hơn cùng xung đột. |
-| **Quản Lý Vị Thế** | `EARLY_CLOSE_ABSOLUTE_THRESHOLD`| `4.8` | *Phòng tuyến cuối cùng:* Nếu điểm tín hiệu của lệnh tụt dưới 4.8, đóng toàn bộ lệnh ngay lập tức. |
-| | `EARLY_CLOSE_RELATIVE_DROP_PCT`| `0.27` | *Tường lửa linh hoạt:* Nếu điểm tín hiệu sụt giảm > 27% so với lúc vào, đóng 50% vị thế. |
-| | `PROFIT_PROTECTION` | `{...}` | *Chốt chặn lợi nhuận:* Khi lệnh đạt đỉnh PnL > 3.5% và sau đó sụt 2.0%, tự động chốt 70% vị thế. |
-| **Quản Lý Rủi Ro** | `MAX_ACTIVE_TRADES` | `12` | Số lượng vị thế mở đồng thời tối đa. |
-| | `MAX_SL_PERCENT_BY_TIMEFRAME` | `{...}` | Giới hạn mức cắt lỗ tối đa cho phép theo từng khung thời gian (ví dụ: lệnh 1h không có SL xa hơn 6%). |
-| | `STALE_TRADE_RULES` | `{...}` | Tự động đóng các lệnh "ì" (stale) không có tiến triển sau một khoảng thời gian nhất định. |
-| **Quản Lý Vốn** | `MAX_TOTAL_EXPOSURE_PCT` | `0.75` | Tổng vốn trong các lệnh không được vượt quá 75% tổng tài sản. |
-| | `DCA_CONFIG` | `{...}` | Kích hoạt Trung bình giá (DCA) khi lệnh âm 5.0% và điểm tín hiệu vẫn tốt (>6.5). |
+#### 5.2.2. `MTF_ANALYSIS_CONFIG` - Phân Tích Đa Khung Thời Gian
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `ENABLED` | `True` | Bật/Tắt tính năng phân tích đa khung thời gian. |
+| `BONUS_COEFFICIENT` | `1.15` | Nếu trend ở khung thời gian lớn hơn đồng thuận, điểm tín hiệu được **thưởng 15%**. |
+| `PENALTY_COEFFICIENT` | `0.85` | Nếu trend ở khung lớn hơn xung đột, điểm tín hiệu bị **phạt 15%**. |
+| `SEVERE_PENALTY_COEFFICIENT`| `0.70` | **Phạt nặng 30%** nếu cả hai khung lớn hơn cùng xung đột. |
+| `SIDEWAYS_PENALTY_COEFFICIENT`| `0.90` | **Phạt nhẹ 10%** nếu khung lớn hơn đang đi ngang (sideways). |
+
+#### 5.2.3. `ACTIVE_TRADE_MANAGEMENT_CONFIG` - Quản Lý Vị Thế Đang Mở
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `EARLY_CLOSE_ABSOLUTE_THRESHOLD`| `4.8` | **Phòng tuyến cuối cùng:** Nếu điểm tín hiệu của một lệnh đang mở tụt xuống dưới 4.8, đóng toàn bộ lệnh ngay lập tức bất kể PnL. |
+| `EARLY_CLOSE_RELATIVE_DROP_PCT`| `0.27` | **Tường lửa linh hoạt:** Nếu điểm tín hiệu sụt giảm hơn 27% so với lúc vào lệnh, đóng 50% vị thế và dời SL về hòa vốn. |
+| `PROFIT_PROTECTION` | `{...}` | **Chốt chặn lợi nhuận:** Khi lệnh đạt đỉnh PnL > 3.5% và sau đó sụt 2.0% từ đỉnh, tự động chốt 70% vị thế để bảo toàn lợi nhuận. |
+
+#### 5.2.4. `RISK_RULES_CONFIG` - Các Quy Tắc Rủi Ro Cứng
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `MAX_ACTIVE_TRADES` | `12` | Số lượng vị thế được phép mở đồng thời tối đa. |
+| `MAX_SL_PERCENT_BY_TIMEFRAME` | `{"1h": 0.06, ...}`| Giới hạn mức cắt lỗ tối đa cho phép theo từng khung thời gian (ví dụ: lệnh 1h không được có SL xa hơn 6% giá vào lệnh). |
+| `MAX_TP_PERCENT_BY_TIMEFRAME` | `{"1h": 0.12, ...}`| Giới hạn mức chốt lời tối đa để giữ mục tiêu thực tế, tránh các TP viển vông. |
+| `STALE_TRADE_RULES` | `{"1h": {"HOURS": 48, ...}}`| Tự động đóng các lệnh "ì" (stale) không có tiến triển đáng kể sau một khoảng thời gian nhất định (ví dụ: 48 giờ cho lệnh 1h). |
+
+#### 5.2.5. `CAPITAL_MANAGEMENT_CONFIG` & `DCA_CONFIG` - Quản Lý Vốn & Trung Bình Giá
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `MAX_TOTAL_EXPOSURE_PCT` | `0.75` | Tổng vốn đã đầu tư vào các lệnh đang mở không được vượt quá 75% tổng tài sản. |
+| `DCA_CONFIG` | `{...}` | Toàn bộ cấu hình cho chiến lược Trung bình giá (DCA), bao gồm: số lần DCA tối đa, % sụt giảm để kích hoạt, điểm tín hiệu tối thiểu, và hệ số vốn cho lần DCA sau. |
+
+#### 5.2.6. `DYNAMIC_ALERT_CONFIG` - Cảnh Báo Động
+| Tham Số | Giá Trị | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `ENABLED` | `True` | Bật/Tắt tính năng gửi báo cáo động khi có biến động PnL. |
+| `COOLDOWN_HOURS` | `3` | Thời gian tối thiểu (giờ) giữa hai lần gửi báo cáo động để tránh spam. |
+| `FORCE_UPDATE_HOURS`| `10` | Bắt buộc gửi báo cáo sau mỗi 10 giờ nếu có lệnh đang mở, bất kể PnL. |
+| `PNL_CHANGE_THRESHOLD_PCT` | `2.0` | Gửi báo cáo nếu tổng PnL của tài khoản thay đổi lớn hơn 2.0% so với lần báo cáo trước. |
+
+### 5.3. Cơ Chế Tự Bảo Vệ & Tự Chữa Lành (Self-Healing & Failsafes)
+Đây là lớp phòng thủ tối quan trọng, đảm bảo sự ổn định và an toàn cho hệ thống trước các sự kiện không lường trước hoặc can thiệp thủ công.
+
+**Cơ Chế Khóa File (`.lock`)**
+- **Vấn đề:** Bot (`live_trade.py`) và Bảng điều khiển (`control_live_panel.py`) có thể cùng lúc cố gắng ghi vào file trạng thái `state.json`, gây ra xung đột và hỏng dữ liệu.
+- **Giải pháp:** Trước khi thực hiện bất kỳ thay đổi nào, một file khóa (`.lock`) sẽ được tạo ra. File kia nếu phát hiện file khóa sẽ kiên nhẫn chờ đến khi nó được giải phóng. Điều này đảm bảo tính toàn vẹn của dữ liệu.
+
+**Cơ Chế Đối Soát Trạng Thái (State Reconciliation)**
+- **Vấn đề "Lệnh Ma" (Ghost Trade):** Nếu người dùng bán một coin thủ công trên sàn, bot sẽ không biết và vẫn tiếp tục quản lý một lệnh không còn tồn tại, dẫn đến lỗi và báo cáo sai.
+- **Giải pháp:** Vào đầu mỗi phiên, bot sẽ thực hiện một bước đối soát bắt buộc:
+    1.  Nó lấy danh sách lệnh đang mở từ `state.json`.
+    2.  Nó gọi API Binance để lấy số dư thực tế của từng tài sản.
+    3.  Nếu số dư thực tế thấp hơn đáng kể so với số lượng bot ghi nhận (dựa trên ngưỡng `RECONCILIATION_QTY_THRESHOLD`), bot sẽ hiểu rằng lệnh đã bị can thiệp.
+- **Hành động:** Bot sẽ tự động đóng "lệnh ma" này, ghi vào lịch sử với trạng thái `Closed (Desynced)` và loại bỏ nó khỏi danh sách theo dõi. Cơ chế này giúp hệ thống có khả năng tự chữa lành khỏi các can thiệp bên ngoài.
 
 ---
 
@@ -188,8 +251,7 @@ Hệ thống phân tích "địa hình" và chọn "binh chủng" phù hợp.
 
 > Phiên bản phân tích chi tiết này khẳng định lại: **RiceAlert không phải là một hệ thống chắp vá.** Nó là một kiến trúc phân lớp, có khả năng cấu hình sâu và triết lý giao dịch rõ ràng. Sự phức tạp của nó đến từ các lớp logic được thiết kế để tăng cường sự vững chắc và khả năng thích ứng.
 
-## Lộ Trình & Hướng Phát Triển
-
+### Lộ Trình & Hướng Phát Triển
 Với tài liệu này, bạn đã có một bản đồ chi tiết về "cỗ máy" của mình. Công việc tiếp theo là sử dụng nó để:
 
 1.  **Backtest & Tinh chỉnh:** Chạy các kịch bản backtest bằng cách thay đổi các tham số trong các file cấu hình này để tìm ra bộ số tối ưu nhất.
