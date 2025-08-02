@@ -29,3 +29,7 @@
 [2025-08-03 02:23:05] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
 [2025-08-03 02:23:05] (LiveTrade)   🔥 LINKUSDT-4h (Balanced_Trader): Mua với vốn $9,205.32
 [2025-08-03 02:23:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 02:39:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 02:39:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.21 (Ngưỡng: 6.3)
+[2025-08-03 02:39:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 02:39:05] (LiveTrade) ---[✅ Kết thúc phiên]---
