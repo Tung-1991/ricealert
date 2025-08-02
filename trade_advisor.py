@@ -44,10 +44,20 @@ def get_news_sentiment(title: str, config: dict) -> float:
 def analyze_market_trend(mc: dict) -> str:
     if not mc: return "NEUTRAL"
     up_score, down_score = 0, 0
-    if mc.get('fear_greed', 50) > 68: up_score += 1
-    elif mc.get('fear_greed', 50) < 35: down_score += 1
-    if mc.get('btc_dominance', 50) > 55: up_score += 1
-    elif mc.get('btc_dominance', 50) < 48: down_score += 1
+    
+    # Lấy giá trị và đảm bảo nó không phải None trước khi so sánh
+    fear_greed_value = mc.get('fear_greed', 50)
+    if fear_greed_value is None: fear_greed_value = 50
+
+    btc_dominance_value = mc.get('btc_dominance', 50)
+    if btc_dominance_value is None: btc_dominance_value = 50
+
+    if fear_greed_value > 68: up_score += 1
+    elif fear_greed_value < 35: down_score += 1
+
+    if btc_dominance_value > 55: up_score += 1
+    elif btc_dominance_value < 48: down_score += 1
+    
     if up_score == 2: return "STRONG_UPTREND"
     if down_score == 2: return "STRONG_DOWNTREND"
     if up_score > down_score: return "UPTREND"
