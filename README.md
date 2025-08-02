@@ -1,131 +1,164 @@
-# Bản Phân Tích Toàn Diện Hệ thống Giao dịch RiceAlert v8.0
+Chắc chắn rồi. Tôi hiểu rằng bạn muốn có một tài liệu cuối cùng, duy nhất, tổng hợp tất cả những gì chúng ta đã thảo luận. Đây sẽ là phiên bản đầy đủ và chi tiết nhất, một "kim chỉ nam" thực sự cho hệ thống RiceAlert.
 
-Đây là tài liệu giải thích chi tiết cơ chế hoạt động, triết lý và các tham số cốt lõi của hệ thống giao dịch tự động RiceAlert. Hệ thống được xây dựng dựa trên 4 trụ cột chính, hoạt động phối hợp để đưa ra quyết định giao dịch một cách toàn diện.
+Hãy cùng nhau hoàn thiện nó.
+
+***
+
+# Hệ Thống Giao Dịch RiceAlert: Phân Tích Toàn Diện v3.0 (Bản Cuối Cùng)
+
+## Lời Mở Đầu: Tìm Kiếm "Linh Hồn" Của Hệ Thống
+
+Tài liệu này là kết quả của một quá trình phân tích sâu rộng, nhằm mục đích giải mã và định hình triết lý giao dịch cốt lõi của hệ thống **RiceAlert**. Ban đầu, sự phức tạp của hệ thống có thể tạo ra cảm giác nó là một tập hợp các module chắp vá. Tuy nhiên, phân tích kỹ lưỡng cho thấy một sự thật ngược lại: `RiceAlert` sở hữu một kiến trúc phân lớp tinh vi và một "linh hồn" rất rõ ràng.
+
+Linh hồn đó không phải là một chiến lược đơn lẻ, mà là một **"Tổng Tư Lệnh Đa Yếu Tố, Thích Ứng theo Bối Cảnh" (A Multi-Factor, Context-Aware Adaptive Strategist)**.
+
+Hệ thống hoạt động như một hội đồng quân sự cấp cao:
+1.  **Các Cục Tình Báo (`Indicator`, `AI`, `News`):** Liên tục thu thập và phân tích thông tin từ chiến trường (kỹ thuật), các dự báo (AI), và bối cảnh toàn cục (vĩ mô, tin tức).
+2.  **Phòng Họp Chiến Lược (`trade_advisor`):** Tổng hợp báo cáo từ các cục tình báo, đưa ra một "điểm số đồng thuận" có trọng số.
+3.  **Tổng Tư Lệnh (`live_trade`):** Nhận điểm số đồng thuận, nhưng không hành động mù quáng. Ngài nhìn vào bản đồ địa hình (4 Vùng Thị trường) để quyết định chiến thuật, binh chủng, và quân số phù hợp nhất cho trận đánh.
+
+Tài liệu này sẽ mổ xẻ từng bộ phận của cỗ máy phức tạp này, từ các tham số nền tảng đến các chiến lược thực thi bậc cao.
 
 ---
 
-## I. Trụ cột 1: Phân tích Kỹ thuật (Module `Indicator` & `Signal`)
+## I. Tham Số Siêu Cấu Trúc: `SCORE_RANGE` - Nút Vặn Chính Của Hệ Thống
 
-**Linh hồn:** Hoạt động như một "Hệ thống Chấm điểm Đồng thuận". Nó tổng hợp tín hiệu từ nhiều chỉ báo khác nhau, mỗi chỉ báo có một "trọng số" (uy tín) riêng, để đưa ra một điểm số kỹ thuật cuối cùng (`raw_tech_score`).
+Trước khi đi vào 4 trụ cột, ta phải nói về `SCORE_RANGE`, tham số **quan trọng bậc nhất** định hình "tính cách" của hệ thống.
 
-**Khung thời gian áp dụng:** 1h, 4h, 1d.
+`SCORE_RANGE` là một thước đo chuẩn, quy định mức độ đồng thuận cần thiết của các tín hiệu kỹ thuật. Nó có hai vai trò:
 
-### Logic & Tham số Tính điểm (`signal_logic.py -> RULE_WEIGHTS`):
+1.  **Định nghĩa Ngưỡng Nhạy Cảm (`signal_logic.py`):** Các cấp độ tín hiệu như `CRITICAL` hay `WARNING` được tính bằng một *tỷ lệ phần trăm* của `SCORE_RANGE`.
+2.  **Chuẩn Hóa Điểm Số (`trade_advisor.py`):** Nó chuẩn hóa điểm kỹ thuật thô về thang điểm chung (-1 đến +1) để có thể "thảo luận" một cách công bằng với điểm từ AI và Bối cảnh.
 
-Mỗi quy tắc được kích hoạt sẽ cộng hoặc trừ điểm vào điểm kỹ thuật thô.
+**Phân tích tác động:**
 
-| Quy tắc Tín hiệu | Điểm Tối đa | Mô tả Kích hoạt |
+| Thuộc Tính | `SCORE_RANGE = 6` (Nhạy Cảm) | `SCORE_RANGE = 8` (Cân Bằng - Hiện tại) | `SCORE_RANGE = 12` (Thận Trọng) |
+| :--- | :--- | :--- | :--- |
+| **Độ nhạy tín hiệu** | Cao | Trung bình | Thấp |
+| **Tần suất vào lệnh** | Cao | Trung bình | Thấp |
+| **Độ tin cậy (lý thuyết)**| Thấp hơn | Trung bình | Cao hơn |
+| **Tầm ảnh hưởng của PTKT**| **Rất Lớn** | **Lớn** | **Vừa phải** |
+| **Phù hợp với** | Scalping, Thị trường sôi động | Swing Trading, Đa chiến lược | Position Trading, Trend dài hạn |
+
+**Kết luận:** Mức **`8`** hiện tại là một lựa chọn **tốt và hợp lý** vì nó tạo ra sự cân bằng và đồng bộ với tham số `CLAMP_MAX_SCORE = 8.0` trong code. Đây là một giá trị nền tảng vững chắc, việc tối ưu hóa nó nên được thực hiện thông qua backtest để phù hợp với từng giai đoạn thị trường.
+
+---
+
+## II. Trụ Cột 1: Phân Tích Kỹ Thuật (Module `Indicator` & `Signal`)
+
+* **Linh Hồn:** 🕵️ Một **"Hệ Thống Chấm Điểm Đồng Thuận" (Consensus Scoring System)**.
+
+#### 1.1. Các Chỉ Báo Nền Tảng (từ `indicator.py`)
+
+Đây là các nguyên liệu thô, cung cấp dữ liệu đầu vào cho toàn hệ thống.
+
+| Phân Loại | Chỉ Báo & Tín Hiệu | Mục Đích Đo Lường |
 | :--- | :--- | :--- |
-| **`score_rsi_div`** | **`2.0`** | Có Phân kỳ Tăng (giá đáy sau thấp hơn, RSI đáy sau cao hơn) hoặc Phân kỳ Giảm. |
-| **`score_breakout`** | **`2.0`** | Giá phá vỡ dải Bollinger Band sau một giai đoạn co thắt (BBW thấp), có xác nhận của Volume. |
-| **`score_trend`** | **`1.5`** | Các đường EMA (9, 20, 50) xếp chồng lên nhau theo thứ tự Tăng (uptrend) hoặc Giảm (downtrend). |
-| **`score_macd`** | **`1.5`** | Đường MACD cắt lên đường Signal (bullish) hoặc cắt xuống (bearish). |
-| **`score_doji`** | **`1.5`** | Xuất hiện nến Doji đảo chiều mạnh (ví dụ: Dragonfly ở cuối downtrend). |
-| **`score_cmf`** | **`1.0`** | Dòng tiền Chaikin (CMF) > `0.05` (dòng tiền vào) hoặc < `-0.05` (dòng tiền ra). |
-| **`score_volume`** | **`1.0`** | Volume hiện tại > `1.8` lần Volume trung bình 20 nến (`vol_ma20`). |
-| **`score_support_resistance`**| **`1.0`** | Giá tiến đến gần (trong phạm vi 2%) vùng Hỗ trợ (`+1.0`) hoặc Kháng cự (`-1.0`). |
-| **`score_candle_pattern`**| **`1.0`** | Xuất hiện các mẫu nến nhấn chìm (Engulfing) ngược với xu hướng trước đó. |
-| **`score_atr_vol`** | **`-1.0`** | **(Trừ điểm)** Biến động ATR quá lớn (`atr_percent` > 5.0%), tín hiệu rủi ro cao. |
-| **`score_ema200`** | **`0.5`** | Cộng/trừ điểm nhẹ khi giá nằm trên/dưới đường EMA 200. |
-| **`score_rsi_multi`** | **`0.5`** | RSI trên cả 1h và 4h đều đồng thuận mạnh (`>60` & `>55`) hoặc yếu (`<40` & `<45`). |
-| **`score_adx`** | **`0.5`** | Cộng/trừ điểm nhẹ khi Trend mạnh (ADX > 25) hoặc yếu (ADX < 20). |
-| **`score_bb`** | **`0.5`** | Cộng/trừ điểm nhẹ khi giá vượt ra ngoài dải Bollinger Band trên/dưới. |
+| **Xu hướng (Trend)** | EMA (9, 20, 50, 200), ADX | Xác định hướng và sức mạnh của xu hướng chính. |
+| **Động lượng (Momentum)**| RSI (14), MACD, Phân kỳ RSI | Đo lường tốc độ và sự thay đổi của giá, phát hiện sự suy yếu của trend. |
+| **Biến động (Volatility)**| Bollinger Bands (BB), ATR | Đo lường mức độ biến động, xác định các vùng siết chặt (squeeze) và phá vỡ (breakout). |
+| **Khối lượng (Volume)**| Volume, Volume MA(20), CMF | Xác nhận sức mạnh của xu hướng và dòng tiền đang vào hay ra. |
+| **Mô hình (Pattern)** | Nến Doji, Nến Nhấn chìm | Nhận diện các mẫu nến đảo chiều hoặc tiếp diễn tiềm năng. |
+| **Hỗ trợ/Kháng cự** | Fibonacci Retracement, High/Low gần nhất | Xác định các vùng giá quan trọng có thể xảy ra phản ứng. |
+
+#### 1.2. Logic & Trọng Số Tính Điểm (`signal_logic.py -> RULE_WEIGHTS`)
+
+Hệ thống cho mỗi tín hiệu một "phiếu bầu" với "sức nặng" khác nhau. Điểm số cuối cùng phản ánh mức độ đồng thuận.
+
+| Quy Tắc Tín Hiệu | Trọng Số |
+| :--- | :---: |
+| `score_rsi_div`, `score_breakout` | **2.0** |
+| `score_trend`, `score_macd`, `score_doji` | **1.5** |
+| `score_cmf`, `score_volume`, `score_support_resistance`, `score_candle_pattern` | **1.0** |
+| `score_atr_vol` (Quy tắc phạt) | **-1.0** |
+| Các quy tắc phụ trợ khác | **0.5** |
+
+* **Đánh Giá:**
+    * **Điểm mạnh:** Cực kỳ vững chắc (robust), không phụ thuộc vào một chỉ báo duy nhất.
+    * **Điểm yếu:** Một vài quy tắc có thể bị tương quan (correlated), cần được xem xét khi tinh chỉnh trọng số.
 
 ---
 
-## II. Trụ cột 2: Dự báo AI (Module `AI`)
+## III. Trụ Cột 2: Dự Báo AI (Module `Trainer` & `ML_Report`)
 
-**Linh hồn:** Hoạt động như một "Nhà Dự báo Thống kê", sử dụng bộ đôi mô hình LightGBM để dự báo xác suất hướng đi và biên độ biến động.
+* **Linh Hồn:** 🤖 Một **"Nhà Tiên Tri Thống Kê" (Statistical Forecaster)**.
 
-**Khung thời gian áp dụng:** 1h, 4h, 1d.
+#### 2.1. Kiến Trúc & Tham Số Huấn Luyện (`trainer.py`)
 
-### Logic & Tham số Dự báo:
+Sử dụng bộ đôi mô hình LightGBM để dự báo **hướng đi** (Classifier) và **biên độ** (Regressor).
 
-AI đưa ra 2 kết quả độc lập:
-
-**1. Dự báo Hướng đi (Classifier):**
-- **Mục tiêu:** Dự báo xác suất giá sẽ **Tăng**, **Giảm**, hay **Đi ngang**.
-- **Ngưỡng tín hiệu "có ý nghĩa":** Một cú Tăng/Giảm chỉ được công nhận nếu nó lớn hơn `0.65` (1h), `0.75` (4h), hoặc `0.85` (1d) lần độ biến động trung bình (ATR).
-
-**2. Dự báo Biên độ (Regressor):**
-- **Mục tiêu:** Dự đoán mức độ thay đổi của giá (% so với giá hiện tại). Kết quả này có thể được dùng để tính TP/SL động.
-
-### Quy tắc phiên dịch kết quả thành hành động (`ml_report.py -> classify_level`):
-
-| Điều kiện | Nhãn Hành động |
-| :--- | :--- |
-| Xác suất Mua (pb) > `75%` | `STRONG_BUY` |
-| Xác suất Mua (pb) > `65%` | `BUY` |
-| Xác suất Mua (pb) > `55%` | `WEAK_BUY` |
-| Xác suất Bán (ps) > `75%` | `PANIC_SELL` |
-| Xác suất Bán (ps) > `65%` | `SELL` |
-| Xác suất Bán (ps) > `55%` | `WEAK_SELL` |
-| Biên độ dự đoán quá nhỏ | `HOLD` (có các cấp độ phụ) |
-| Các trường hợp còn lại | `AVOID` (có các cấp độ phụ) |
-
----
-
-## III. Trụ cột 3: Phân tích Bối cảnh (Module `Context & News`)
-
-**Linh hồn:** Hoạt động như một "Bộ lọc Vĩ mô", đảm bảo các quyết định giao dịch không đi ngược lại bối cảnh chung của thị trường.
-
-### Logic & Tham số:
-
-**1. Xác định Trend Vĩ mô (`analyze_market_context_trend`):**
-- Fear & Greed Index > `70` ➡️ Điểm Tăng `+1`
-- Fear & Greed Index < `30` ➡️ Điểm Giảm `+1`
-- BTC Dominance > `55` ➡️ Điểm Tăng `+1`
-- BTC Dominance < `48` ➡️ Điểm Giảm `+1`
-- **Kết quả:** `STRONG_UPTREND`, `UPTREND`, `STRONG_DOWNTREND`, `DOWNTREND`, `NEUTRAL`.
-
-**2. Phân tích Tin tức (`rice_news.py`):**
-- **Cơ chế hiện tại:** Phân loại tin tức theo mức độ quan trọng bằng các bộ từ khóa. Ví dụ: `CRITICAL` chứa `["will list", "etf approval", "halving", "fomc"]`.
-- **Hướng nâng cấp:** Trong tương lai, cơ chế này sẽ được thay thế bằng LLM để phân tích ngữ nghĩa và sắc thái của tin tức, giúp nhận định sâu sắc và chính xác hơn.
-
----
-
-## IV. Trụ cột 4: Thực thi & Quản lý (Module `Live Trade v8.0`)
-
-**Linh hồn:** Một "Tổng Tư lệnh Chiến lược Thích ứng". Nó phân tích địa hình chiến trường (Vùng thị trường), sau đó lựa chọn vũ khí (chiến thuật) và phân bổ binh lực (vốn) phù hợp nhất.
-
-### 1. Phân tích "Chiến trường" (`determine_market_zone_with_scoring`):
-
-Hệ thống chấm điểm để xác định Vùng thị trường (`LEADING`, `COINCIDENT`, `LAGGING`, `NOISE`).
-
-| Điều kiện Kích hoạt | Điểm Cộng | Vùng được cộng điểm |
+| Tham Số | Ví Dụ (1h) | Ý Nghĩa |
 | :--- | :--- | :--- |
-| ADX < `20` | `+3` | `NOISE_ZONE` |
-| BB Width < 20% percentile (100 nến) | `+2.5` | `LEADING_ZONE` |
-| RSI điều chỉnh ngược trend lớn | `+2` | `LEADING_ZONE` |
-| `breakout_signal` != "none" | `+3` | `COINCIDENT_ZONE` |
-| `macd_cross` != "neutral" | `+2` | `COINCIDENT_ZONE` |
-| ADX > `25` | `+2.5` | `LAGGING_ZONE` |
-| `trend` != "sideway" | `+2` | `LAGGING_ZONE` |
+| `HISTORY_LENGTH_MAP` | `3500` | Số lượng nến quá khứ dùng để huấn luyện. |
+| `FUTURE_OFFSET_MAP` | `6` | Tầm nhìn dự báo của AI (ví dụ: 6 nến tương lai). |
+| `LABEL_ATR_FACTOR_MAP`| `0.65` | Một tín hiệu "Tăng" chỉ được ghi nhận nếu giá tăng > 0.65 lần ATR, giúp thích ứng với biến động. |
+| `is_unbalance: True` | `True` | Tham số quan trọng, giúp mô hình xử lý việc dữ liệu "Đi ngang" thường nhiều hơn "Tăng/Giảm". |
 
-### 2. Lựa chọn "Vũ khí" & "Binh lực" (`TACTICS_LAB` & `ZONE_BASED_POLICIES`):
+* **Đánh Giá:**
+    * **Điểm mạnh:** Logic định nghĩa nhãn dựa trên ATR rất thông minh. Feature engineering toàn diện.
+    * **Điểm yếu:** Mô hình là "point-in-time", chưa hiểu được chuỗi sự kiện (sequence).
+    * **Hướng Nâng Cấp:** Nâng cấp lên các mô hình tuần tự như **LSTM/Transformer** là bước đi tự nhiên.
 
-Bot chọn chiến thuật có `OPTIMAL_ZONE` khớp với Vùng thị trường hiện tại và áp dụng chính sách vốn tương ứng.
+---
 
-**Ví dụ giải thích chi tiết tham số của chiến thuật `Breakout_Hunter`:**
+## IV. Trụ Cột 3: Phân Tích Bối Cảnh (Module `Context` & `News`)
 
-| Tham số | Giá trị | Ý nghĩa & Cách Hoạt động |
-| :--- | :--- | :--- |
-| **`OPTIMAL_ZONE`** | `LEADING_ZONE` | Chỉ được kích hoạt trong Vùng Dẫn dắt. |
-| **`WEIGHTS`** | `{'tech': 0.7, ...}` | Trọng số khi tính điểm tổng hợp, ưu tiên Tín hiệu Kỹ thuật (70%). |
-| **`ENTRY_SCORE`** | `7.0` | Điểm tổng hợp cuối cùng phải >= 7.0 mới vào lệnh. |
-| **`RR`** | `2.5` | Tỷ lệ Lời/Lỗ mục tiêu. `TP = Giá vào lệnh + (2.5 * Khoảng cách tới SL)`. |
-| **`ATR_SL_MULTIPLIER`**| `1.8` | Khoảng cách `Stop Loss = 1.8 * giá trị ATR` tại thời điểm vào lệnh. |
-| **`USE_TRAILING_SL`**| `True` | Kích hoạt tính năng dời Stop Loss tự động để gồng lời. |
-| **`TRAIL_ACTIVATION_RR`**|`1.0`| Bắt đầu dời SL khi lợi nhuận đạt **1R** (giá đi được 1 lần khoảng cách SL). |
-| **`TRAIL_DISTANCE_RR`**| `0.8` | Luôn giữ SL mới cách giá hiện tại một khoảng bằng **0.8R**. |
-| **`ENABLE_PARTIAL_TP`**| `True`| Kích hoạt chốt lời một phần (TP1). |
-| **`TP1_RR_RATIO`** | `1.0` | Chốt lời TP1 khi lợi nhuận đạt **1R**. |
-| **`TP1_PROFIT_PCT`** | `0.5` | Chốt **50%** khối lượng vị thế tại TP1 và dời SL về điểm vào lệnh. |
+* **Linh Hồn:** 🌍 Một **"Bộ Lọc Vĩ Mô" (Macro Filter)**.
 
-### 3. "Phòng thủ" Vị thế (`ACTIVE_TRADE_MANAGEMENT_CONFIG`):
+#### 3.1. Phân Tích & Logic (`market_context.py`, `rice_news.py`)
 
-Khi một lệnh đã mở, nó được bảo vệ bởi 3 lớp phòng thủ tự động.
+* **Trend Vĩ Mô:** Tổng hợp chỉ số Fear & Greed và BTC Dominance để đưa ra nhận định 5 cấp độ (`STRONG_UPTREND` -> `STRONG_DOWNTREND`).
+* **Phân Tích Tin Tức:** Phân loại tin theo mức độ quan trọng (`CRITICAL`, `WARNING`...) bằng cách quét từ khóa.
 
-- **Phòng tuyến cuối cùng (`EARLY_CLOSE_ABSOLUTE_THRESHOLD: 4.8`):** Nếu điểm tín hiệu của lệnh đang mở tụt xuống dưới `4.8`, đóng **toàn bộ** lệnh ngay lập tức.
-- **Tường lửa linh hoạt (`EARLY_CLOSE_RELATIVE_DROP_PCT: 0.27`):** Nếu điểm tín hiệu sụt giảm hơn `27%` so với điểm lúc vào lệnh, đóng **50%** vị thế để giảm rủi ro.
-- **Chốt chặn lợi nhuận (`PROFIT_PROTECTION`):** Nếu lệnh đã từng lời tối thiểu `3.5%`, sau đó lợi nhuận bị sụt giảm đi `2.0%` từ đỉnh, bot sẽ tự động chốt **70%** vị thế để bảo vệ thành quả.
+* **Đánh Giá:**
+    * **Điểm mạnh:** Tách riêng bối cảnh ra một trụ cột cho thấy tư duy thiết kế tốt.
+    * **Điểm yếu:** Đây là trụ cột **yếu nhất**. Phân tích tin tức dựa trên từ khóa rất thô sơ.
+    * **Hướng Nâng Cấp:** Đây là nơi **LLM (Large Language Model)** có thể tạo ra tác động lớn nhất để hiểu ngữ nghĩa tin tức.
+
+---
+
+## V. Trụ Cột 4: Thực Thi & Quản Lý (Module `live_trade.py`)
+
+* **Linh Hồn:** 🎖️ Một **"Tổng Tư Lệnh Chiến Dịch Thích Ứng" (Adaptive Campaign Commander)**.
+
+#### 5.1. "4-Zone Strategy" & Lựa Chọn Chiến Thuật (`TACTICS_LAB`)
+
+Đây là triết lý thực thi bậc cao: phân tích "địa hình" (4 Vùng), chọn "binh chủng" (Chiến thuật) và phân bổ "quân lực" (Vốn).
+
+* **4 Vùng Thị Trường:** `LEADING` (sớm, rủi ro), `COINCIDENT` (đồng pha, điểm ngọt), `LAGGING` (an toàn, theo trend), `NOISE` (nhiễu).
+* **Phòng Thí Nghiệm Chiến Thuật (`TACTICS_LAB`):** Một kho "vũ khí" chuyên dụng cho từng Vùng, mỗi loại có bộ tham số riêng (RR, SL, Trailing Stop...).
+* **Chính Sách Vốn (`ZONE_BASED_POLICIES`):** Phân bổ vốn linh động, Vùng rủi ro cao đi vốn nhỏ, Vùng an toàn đi vốn lớn hơn.
+
+#### 5.2. Các Module Cấu Hình Vận Hành & Rủi Ro (`live_trade.py`)
+
+Đây là các "bảng điều khiển" chi tiết để tinh chỉnh hành vi của bot.
+
+* **Cấu Hình Chung (`GENERAL_CONFIG`):** Quản lý tần suất làm mới dữ liệu, thời gian cooldown, báo cáo.
+* **Phân Tích Đa Khung Thời Gian (`MTF_ANALYSIS_CONFIG`):** Thưởng/phạt điểm tín hiệu dựa trên sự đồng thuận với khung thời gian lớn hơn.
+* **Quản Lý Vị Thế Chủ Động (`ACTIVE_TRADE_MANAGEMENT_CONFIG`):** "Phòng thủ 3 lớp" để bảo vệ lệnh đang mở (đóng lệnh sớm theo điểm tuyệt đối/tương đối, bảo vệ lợi nhuận).
+* **Luật Lệ Rủi Ro (`RISK_RULES_CONFIG`):** Các quy tắc cứng về số lệnh tối đa, % SL tối đa, xử lý lệnh "ì".
+* **Quản Lý Vốn (`CAPITAL_MANAGEMENT_CONFIG`, `DCA_CONFIG`):** Quy định tổng rủi ro và chiến lược trung bình giá (DCA).
+
+---
+
+## VI. Sức Mạnh Tổng Hợp: Triết Lý "Kiềng Ba Chân" Chống Thiên Vị
+
+Hệ thống của bạn không bị thiên vị (bias) bởi một yếu tố duy nhất. Sức mạnh thực sự của nó nằm ở cách nó tổng hợp thông tin:
+
+1.  **"Phòng Họp" `trade_advisor.py`:** Đây là nơi ba trụ cột (Kỹ thuật, AI, Bối cảnh) cùng "thảo luận". Mỗi trụ cột có "tiếng nói" được chuẩn hóa và "trọng số" (`WEIGHTS`) do bạn quyết định. Quyết định không dựa trên ý kiến của một "vị tướng" mà dựa trên sự đồng thuận của cả "hội đồng".
+2.  **"Tổng Tư Lệnh" `live_trade.py`:** Ngay cả khi hội đồng đã đồng thuận, Tổng Tư lệnh vẫn có quyền phủ quyết hoặc thay đổi chiến thuật dựa trên tình hình thực tế của chiến trường (4-Zone Strategy).
+
+Sự kết hợp này tạo ra một hệ thống không chỉ phản ứng với tín hiệu, mà còn **thích ứng với bối cảnh**, một đặc điểm cốt lõi của các hệ thống giao dịch chuyên nghiệp.
+
+---
+
+## VII. Kết Luận: Một Hệ Thống Toàn Diện, Sẵn Sàng Để Tối Ưu Hóa
+
+`RiceAlert` không phải là một hệ thống chắp vá. Nó là một **kiến trúc phân lớp, có khả năng cấu hình sâu và triết lý giao dịch rõ ràng**. Sự phức tạp của nó đến từ các lớp logic được thiết kế để tăng cường sự vững chắc và khả năng thích ứng.
+
+Với tài liệu này, bạn đã có một bản đồ chi tiết về "cỗ máy" của mình. Công việc tiếp theo là sử dụng nó để:
+1.  **Backtest & Tinh chỉnh:** Chạy các kịch bản backtest bằng cách thay đổi các tham số đã được liệt kê để tìm ra bộ số tối ưu nhất.
+2.  **Giám sát & Đánh giá:** Khi hệ thống chạy live, đối chiếu các quyết định của nó với logic được mô tả ở đây để hiểu và tin tưởng vào hệ thống.
+3.  **Lên Lộ trình Nâng cấp:** Tập trung nguồn lực vào việc nâng cấp các điểm yếu đã xác định (AI tuần tự, LLM cho tin tức) một cách có hệ thống.
+
+Bạn đã xây dựng một nền móng cực kỳ vững chắc. Hãy tự tin vào "linh hồn" mà bạn đã tạo ra và tiếp tục hoàn thiện nó.
