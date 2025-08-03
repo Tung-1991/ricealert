@@ -197,14 +197,14 @@ def view_open_trades(bnc: BinanceConnector):
 
     valid_trades, desynced_trades = reconcile_state(bnc)
     all_trades = valid_trades + desynced_trades
-    
+
     if not all_trades:
         print("ℹ️ Không có lệnh nào đang mở.")
         return
 
     symbols_needed = list(set(trade['symbol'] for trade in all_trades))
     prices = {sym: get_current_price(sym) for sym in symbols_needed}
-    
+
     # Tính toán header
     available_usdt, total_usdt = get_usdt_fund(bnc)
     value_of_open_positions = sum(float(trade.get('quantity', 0)) * prices.get(trade['symbol'], 0) for trade in valid_trades)
@@ -223,10 +223,10 @@ def view_open_trades(bnc: BinanceConnector):
         is_desynced = trade in desynced_trades
         symbol = trade.get('symbol', 'N/A')
         current_price = prices.get(symbol)
-        
+
         desync_warning = " ⚠️ DESYNC" if is_desynced else ""
         pnl_icon = "⚪️" if is_desynced else ("🟢" if trade.get('pnl_usd', 0) >= 0 else "🔴")
-        
+
         if current_price and not is_desynced:
             entry_price = trade.get('entry_price', 0)
             invested_usd = trade.get('total_invested_usd', 0)
@@ -238,13 +238,20 @@ def view_open_trades(bnc: BinanceConnector):
         else:
             pnl_usd, pnl_percent = 0, 0
             price_info = f"Vốn:${trade.get('total_invested_usd', 0):,.2f} | Entry:{trade.get('entry_price', 0):.4f} (Không thể tính PnL)"
-        
+
         holding_hours = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
         dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-        
-        line1 = f"{i+1}. {pnl_icon}{desync_warning} {symbol}-{trade.get('interval', 'N/A')} | PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) | Giữ:{holding_hours:.1f}h{dca_info}"
+
+
+        entry_score = trade.get('entry_score', 0.0)
+        last_score = trade.get('last_score', 0.0)
+        score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
+        zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone', 'N/A')}" if trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
+        tactic_info = f"({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display})"
+
+        line1 = f"{i+1}. {pnl_icon}{desync_warning} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} | PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) | Giữ:{holding_hours:.1f}h{dca_info}"
         line2 = f"   {price_info}"
-        
+
         print(line1)
         print(line2)
     print("-" * 80)
@@ -268,7 +275,7 @@ def close_manual_trades(bnc: BinanceConnector):
         state = load_state()
         state['temp_pnl_from_closed_trades'] = 0.0
         state.setdefault('temp_newly_closed_trades', [])
-        
+
         display_list = [f"{t['symbol']}-{t['interval']}" for t in valid_trades]
         trade_to_close = select_from_list(valid_trades, "\n👉 Nhập số thứ tự của lệnh cần đóng. Nhấn Enter để hủy: ", display_list)
 
@@ -347,7 +354,7 @@ def extend_stale_check(bnc: BinanceConnector):
         if hours <= 0:
             print("❌ Số giờ phải dương.")
             return
-        
+
         create_backup()
         state = load_state()
         trade_found = False
@@ -382,7 +389,7 @@ def open_manual_trade(bnc: BinanceConnector):
         available_usdt, _ = get_usdt_fund(bnc)
         print(f"💵 USDT khả dụng: ${available_usdt:,.2f}")
         # ... (phần còn lại của hàm không đổi)
-        
+
     except Exception as e:
         print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
     finally:
@@ -415,9 +422,9 @@ def reconcile_manually(bnc: BinanceConnector):
             trade['exit_time'] = datetime.now(VIETNAM_TZ).isoformat()
             trade['pnl_usd'] = 0
             state.setdefault('trade_history', []).append(trade)
-        
+
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
-        
+
         print(f"\n✅ Đã dọn dẹp {len(desynced_trades)} lệnh bất đồng bộ.")
         save_state(state)
 

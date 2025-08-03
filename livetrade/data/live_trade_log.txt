@@ -33,3 +33,167 @@
 [2025-08-03 02:39:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.21 (Ngưỡng: 6.3)
 [2025-08-03 02:39:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
 [2025-08-03 02:39:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 02:54:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 02:54:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.21 (Ngưỡng: 6.3)
+[2025-08-03 02:54:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 02:54:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 03:10:06] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 03:10:06] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 03:10:06] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 03:10:07] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 03:25:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 03:25:04] (LiveTrade)   🏆 Cơ hội tốt nhất: ETHUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.44 (Ngưỡng: 6.3)
+[2025-08-03 03:25:04] (LiveTrade)       => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
+[2025-08-03 03:25:04] (LiveTrade) ---[⚡ Chuẩn bị thực thi ETHUSDT-4h ⚡]---
+[2025-08-03 03:25:05] (LiveTrade)   => 🔥 Gửi lệnh MUA ETHUSDT với $8,653.01 (Vùng: LAGGING, Vốn: 6.0%)
+[2025-08-03 03:25:05] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
+[2025-08-03 03:25:05] (LiveTrade)   🔥 ETHUSDT-4h (Balanced_Trader): Mua với vốn $8,653.00
+[2025-08-03 03:25:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 03:41:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 03:41:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 03:41:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 03:41:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 03:57:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 03:57:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 03:57:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 03:57:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 04:12:05] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 04:12:05] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 04:12:05] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 04:12:07] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 04:27:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 04:27:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 04:27:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 04:27:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 04:43:03] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 04:43:03] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 04:43:03] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 04:43:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 04:52:04] (LiveTrade) 🔔 Gửi báo cáo loại: DYNAMIC
+[2025-08-03 04:52:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 04:59:03] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 04:59:03] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 04:59:03] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 04:59:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 05:15:07] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 05:15:07] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 05:15:07] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 05:15:08] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 05:31:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 05:31:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 05:31:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 05:31:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 05:46:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 05:46:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 05:46:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 05:46:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 06:01:06] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 06:01:06] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 06:01:06] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 06:01:08] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 06:17:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 06:17:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.09 (Ngưỡng: 6.3)
+[2025-08-03 06:17:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 06:17:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 06:32:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 06:32:04] (LiveTrade)   🏆 Cơ hội tốt nhất: SOLUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.32 (Ngưỡng: 6.3)
+[2025-08-03 06:32:04] (LiveTrade)       => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
+[2025-08-03 06:32:04] (LiveTrade) ---[⚡ Chuẩn bị thực thi SOLUSDT-4h ⚡]---
+[2025-08-03 06:32:05] (LiveTrade)   => 🔥 Gửi lệnh MUA SOLUSDT với $8,133.83 (Vùng: LAGGING, Vốn: 6.0%)
+[2025-08-03 06:32:05] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
+[2025-08-03 06:32:05] (LiveTrade)   🔥 SOLUSDT-4h (Balanced_Trader): Mua với vốn $8,133.72
+[2025-08-03 06:32:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 06:48:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 06:48:04] (LiveTrade)   🏆 Cơ hội tốt nhất: AVAXUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.21 (Ngưỡng: 6.3)
+[2025-08-03 06:48:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 06:48:05] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 07:03:07] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 07:03:07] (LiveTrade)   🏆 Cơ hội tốt nhất: AVAXUSDT-4h | Tactic: Balanced_Trader | Điểm: 6.44 (Ngưỡng: 6.3)
+[2025-08-03 07:03:07] (LiveTrade)       => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...
+[2025-08-03 07:03:07] (LiveTrade) ---[⚡ Chuẩn bị thực thi AVAXUSDT-4h ⚡]---
+[2025-08-03 07:03:08] (LiveTrade)   => 🔥 Gửi lệnh MUA AVAXUSDT với $7,645.81 (Vùng: LAGGING, Vốn: 6.0%)
+[2025-08-03 07:03:09] (LiveTrade) --- Cập nhật các sự kiện trong phiên ---
+[2025-08-03 07:03:09] (LiveTrade)   🔥 AVAXUSDT-4h (Balanced_Trader): Mua với vốn $7,645.74
+[2025-08-03 07:03:10] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 07:19:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 07:19:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 07:19:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 07:19:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 07:34:05] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 07:34:05] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 07:34:05] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 07:34:07] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 07:50:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 07:50:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 07:50:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 07:50:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:05:06] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 08:05:06] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 08:05:06] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 08:05:08] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:07:14] (LiveTrade) !!!!!! ❌ LỖI: Lỗi API khi lấy giá SUIUSDT: HTTPSConnectionPool(host='api.binance.com', port=443): Max retries exceeded with url: /api/v3/ticker/price?symbol=SUIUSDT (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x719a5b8fff80>: Failed to resolve 'api.binance.com' ([Errno -2] Name or service not known)")). Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 08:07:24] (LiveTrade) !!!!!! ❌ LỖI: Lỗi API khi lấy giá ADAUSDT: HTTPSConnectionPool(host='api.binance.com', port=443): Max retries exceeded with url: /api/v3/ticker/price?symbol=ADAUSDT (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x719a5b8fedb0>: Failed to resolve 'api.binance.com' ([Errno -2] Name or service not known)")). Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 08:07:25] (LiveTrade) 🔔 Gửi báo cáo loại: DYNAMIC
+[2025-08-03 08:07:25] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:10:05] (LiveTrade) 🔔 Gửi báo cáo loại: DAILY
+[2025-08-03 08:10:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:21:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 08:21:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 08:21:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 08:21:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:36:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 08:36:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 08:36:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 08:36:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 08:51:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 08:51:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 08:51:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 08:51:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:07:05] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 09:07:05] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 09:07:05] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 09:07:07] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:22:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 09:22:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 09:22:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 09:22:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:38:03] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 09:38:03] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 09:38:03] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 09:38:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:53:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 09:53:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 09:53:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 09:53:06] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:55:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:55:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:55:49] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:55:49] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:56:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:56:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:57:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:57:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:58:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:58:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:58:32] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:58:32] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 09:59:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 09:59:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:00:04] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 10:00:04] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:01:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 10:01:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:02:04] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 10:02:04] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:03:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 10:03:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:04:03] (LiveTrade) !!!!!! ❌ LỖI: LỖI TOÀN CỤC NGOÀI DỰ KIẾN. Chi tiết trong error.log ❌ !!!!!!
+[2025-08-03 10:04:03] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:09:05] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 10:09:05] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 10:09:05] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 10:09:07] (LiveTrade) ---[✅ Kết thúc phiên]---
+[2025-08-03 10:24:04] (LiveTrade) ---[🔍 Quét Cơ Hội Mới 🔍]---
+[2025-08-03 10:24:04] (LiveTrade)   🏆 Cơ hội tốt nhất: INJUSDT-4h | Tactic: Balanced_Trader | Điểm: 5.98 (Ngưỡng: 6.3)
+[2025-08-03 10:24:04] (LiveTrade)       => 📉 Không đạt ngưỡng. Bỏ qua.
+[2025-08-03 10:24:06] (LiveTrade) ---[✅ Kết thúc phiên]---
