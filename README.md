@@ -128,133 +128,136 @@ rice_alert_analysis_document: |
   -   **Hướng nâng cấp:** Sử dụng **Mô hình Ngôn ngữ Lớn (LLM)** như `GPT-4`, `Claude`, hoặc `Gemini`. LLM có thể đọc, hiểu ngữ nghĩa, phân tích sắc thái của toàn bộ bài báo để cung cấp điểm số cảm tính (sentiment score) chính xác hơn.
   
   ---
-  
-  ## IV. Phần 4: Thực Thi & Quản Lý Rủi Ro (live_trade.py v8.4)
-  
+
+
+## IV. Phần 4: Thực Thi, Quản Lý Vốn & Rủi Ro (live_trade.py v8.6.1)
+
+Đây là module trung tâm, bộ não thực thi của toàn bộ hệ thống. Nó chịu trách nhiệm chuyển hóa các tín hiệu phân tích thành lệnh giao dịch thực tế, quản lý vòng đời của từng vị thế, và áp dụng một hệ thống quản lý rủi ro đa tầng, tự động và thông minh. Phiên bản 8.6.1 giới thiệu **Động Cơ Vốn Năng Động**, một bước tiến lớn trong việc tự động hóa quản lý vốn.
+
+### 4.1. Luồng Hoạt Động Của Một Phiên (Session Flow)
+
+Mỗi khi bot được kích hoạt (ví dụ: mỗi phút qua cron job), nó sẽ thực hiện một chu trình logic nghiêm ngặt:
+
+1.  **Khóa & Tải Trạng Thái**: Tạo file `.lock` để ngăn xung đột dữ liệu và tải file `state.json` chứa thông tin về các lệnh đang mở và lịch sử.
+2.  **Đối Soát & Vệ Sinh**: So sánh trạng thái của bot với số dư thực tế trên sàn để phát hiện và xử lý "Lệnh Ma" (lệnh bị đóng thủ công) và "Tài Sản Mồ Côi" (tài sản không được quản lý).
+3.  **Tính Toán Equity**: Lấy giá thực tế của tất cả tài sản và tính toán tổng giá trị tài khoản (equity) hiện tại.
+4.  **Quản Lý Vốn Năng Động**: **(v8.6.1)** Chạy `manage_dynamic_capital()` để kiểm tra Nạp/Rút, và tự động điều chỉnh Vốn Ban Đầu (`initial_capital`) nếu có lãi/lỗ đáng kể.
+5.  **Quét & Phân Tích (Heavy Task)**: Theo định kỳ (`HEAVY_REFRESH_MINUTES`), bot sẽ tải dữ liệu mới, tính toán lại toàn bộ chỉ báo cho các cặp coin và tìm kiếm cơ hội giao dịch mới.
+6.  **Thực Thi Lệnh Mới**: Nếu có cơ hội tiềm năng đang chờ (`pending_trade_opportunity`), bot sẽ tiến hành thực thi lệnh mua.
+7.  **Quản Lý Lệnh Đang Mở**: Đối với mỗi lệnh đang hoạt động, bot sẽ:
+    *   Kiểm tra điều kiện `SL` (Cắt Lỗ) / `TP` (Chốt Lời).
+    *   Đánh giá lại điểm tín hiệu để quyết định có đóng sớm (`Early Close`).
+    *   Kích hoạt cơ chế "Bảo Vệ Lợi Nhuận" (`Profit Protection`).
+    *   Di dời `SL` nếu đủ điều kiện (`Trailing SL`).
+    *   Tìm cơ hội Trung Bình Giá (`DCA`).
+    *   Xử lý các lệnh "ì" (`Stale Trades`).
+8.  **Báo Cáo**: Gửi báo cáo tổng kết định kỳ hoặc cảnh báo động đến Discord nếu đủ điều kiện.
+9.  **Lưu & Kết Thúc**: Lưu lại trạng thái mới vào `state.json` và giải phóng file `.lock`.
 
 ---
 
-## IV. Phần 4: Thực Thi & Quản Lý Rủi Ro (live_trade.py v8.6.1)
+### 4.2. Trung Tâm Cấu Hình Vận Hành (v8.6.1)
 
-Đây là module trung tâm, kiến trúc quản lý giao dịch và rủi ro nâng cao. Nó chuyển hóa tín hiệu từ các bộ phân tích thành hành động giao dịch thực tế trên thị trường, được bảo vệ bởi nhiều lớp an toàn và tự động hóa thông minh.
+Đây là bảng điều khiển chi tiết, nơi tinh chỉnh mọi khía cạnh hành vi của bot. Mỗi cấu hình đều có mục đích riêng và tác động trực tiếp đến chiến lược giao dịch và quản lý rủi ro.
 
-### 4.1. Mô Hình Chiến Lược Cốt Lõi: "4-Zone Strategy"
-
-Hệ thống phân loại "địa hình" thị trường thành 4 vùng để quyết định mức độ rủi ro và phân bổ vốn một cách linh hoạt.
-
-| Vùng | `ZONE_BASED_POLICIES` (Vốn/lệnh) | Đặc Điểm & Triết Lý Vận Hành |
-| :-- | :-- | :--- |
-| **LEADING** | **5.5%** Vốn BĐ | **Vùng Tiên Phong:** Các tín hiệu sớm, tiềm năng cao, rủi ro cao. Phân bổ vốn nhỏ để "dò mìn" và nắm bắt cơ hội từ giai đoạn đầu. |
-| **COINCIDENT**| **6.5%** Vốn BĐ | **Vùng Trùng Hợp:** "Điểm ngọt" của thị trường, nơi các yếu tố kỹ thuật và bối cảnh đồng thuận mạnh mẽ. Vào lệnh với vốn lớn nhất, quyết đoán. |
-| **LAGGING** | **6.0%** Vốn BĐ | **Vùng Trễ:** Xu hướng đã được xác nhận và rõ ràng. Giao dịch an toàn hơn, đi theo "con sóng" đã hình thành. |
-| **NOISE** | **5.0%** Vốn BĐ | **Vùng Nhiễu:** Thị trường đi ngang, không có xu hướng rõ ràng. Rủi ro cao, chỉ vào lệnh với tín hiệu cực mạnh (điểm số cao) và vốn nhỏ nhất. |
-
-### 4.2. FEATURE SPOTLIGHT: Động Cơ Vốn Năng Động (Dynamic Capital Engine - v8.6.1)
-
-Đây là nâng cấp cốt lõi của phiên bản 8.6.1, biến bot từ một công cụ thực thi thành một hệ thống quản lý vốn bán tự trị.
-
-**Mục tiêu:** Loại bỏ sự cần thiết phải can thiệp thủ công vào vốn hoạt động của bot. Hệ thống tự động điều chỉnh cơ sở vốn (`initial_capital`) dựa trên hiệu suất thực tế.
-
-**Cơ Chế Hoạt Động:**
-1.  **Phát Hiện Nạp/Rút Tiền:** Bot tự động phát hiện khi người dùng nạp hoặc rút tiền khỏi tài khoản và điều chỉnh `initial_capital` tương ứng để phản ánh đúng số vốn thực có.
-2.  **Tự Động Tái Đầu Tư (Auto-Compounding):** Khi tổng tài sản (equity) tăng trưởng vượt một ngưỡng phần trăm nhất định, bot sẽ tự động nâng mức `initial_capital` lên bằng với tổng tài sản hiện tại. Điều này giúp tái đầu tư lợi nhuận và tăng quy mô vị thế một cách tự nhiên.
-3.  **Tự Động Giảm Rủi Ro (Auto-Deleveraging):** Ngược lại, trong một giai đoạn sụt giảm (drawdown), nếu tổng tài sản giảm xuống dưới một ngưỡng, bot sẽ hạ `initial_capital` xuống. Hành động này nhằm mục đích giảm quy mô vị thế, bảo toàn vốn và hạn chế rủi ro trong giai đoạn thị trường bất lợi.
-4.  **Thời Gian Chờ Điều Chỉnh (Cooldown):** Một khoảng thời gian chờ được áp dụng giữa các lần điều chỉnh vốn tự động để đảm bảo sự ổn định và tránh các thay đổi quá thường xuyên do biến động ngắn hạn.
-
-**Bảng Tham Số Cấu Hình Động Cơ Vốn:**
+#### 4.2.1. `GENERAL_CONFIG` - Cấu Hình Vận Hành Chung
+*Ghi chú: Đây là các tham số nền tảng, ảnh hưởng đến tần suất hoạt động, giới hạn và các quy tắc cơ bản.*
 
 | Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
 | :--- | :--- | :--- |
-| `DEPOSIT_DETECTION_THRESHOLD_PCT` | `0.005` | Ngưỡng phát hiện Nạp/Rút (0.5% tổng tài sản). Bất kỳ thay đổi nào lớn hơn ngưỡng này sẽ kích hoạt điều chỉnh vốn. |
-| `AUTO_COMPOUND_THRESHOLD_PCT` | `10.0` | **Tái đầu tư:** Nếu tổng tài sản tăng **10%** so với Vốn BĐ, Vốn BĐ sẽ được nâng lên mức tài sản mới. |
-| `AUTO_DELEVERAGE_THRESHOLD_PCT` | `-10.0` | **Bảo toàn vốn:** Nếu tổng tài sản giảm **10%** so với Vốn BĐ, Vốn BĐ sẽ được hạ xuống mức tài sản mới. |
-| `CAPITAL_ADJUSTMENT_COOLDOWN_HOURS`| `72` | Hệ thống sẽ chờ **72 giờ** giữa các lần tự động điều chỉnh vốn do hiệu suất (không áp dụng cho việc Nạp/Rút). |
-
-### 4.3. Toàn Cảnh Các Module Cấu Hình Vận Hành
-
-Các "bảng điều khiển" chi tiết để tinh chỉnh mọi khía cạnh hành vi của bot.
-
-#### 4.3.1. `GENERAL_CONFIG` - Cấu Hình Vận Hành Chung
-
-Đây là các tham số nền tảng, ảnh hưởng đến tần suất hoạt động, giới hạn và các quy tắc cơ bản.
-
-| Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
-| :--- | :--- | :--- |
-| `TRADING_MODE` | `"testnet"` | Chế độ hoạt động: `"live"` (tiền thật) hoặc `"testnet"` (thử nghiệm). |
-| `HEAVY_REFRESH_MINUTES`| `15` | Tần suất (phút) bot "quét sâu": tính lại toàn bộ chỉ báo và tìm kiếm cơ hội giao dịch mới trên toàn thị trường. |
-| `TRADE_COOLDOWN_HOURS`| `1` | Thời gian "nghỉ" cho một coin sau khi đóng lệnh để tránh giao dịch trả thù và chờ thị trường ổn định. |
-| `OVERRIDE_COOLDOWN_SCORE`| `7.5` | Cho phép bot **phá vỡ thời gian nghỉ** nếu phát hiện một cơ hội có điểm tín hiệu cực cao (>= 7.5), đảm bảo không bỏ lỡ tín hiệu vàng. |
-| `RECONCILIATION_QTY_THRESHOLD`| `0.95` | **Ngưỡng tự chữa lành.** Nếu số lượng coin thực tế < **95%** so với bot ghi nhận, lệnh sẽ bị coi là 'bất đồng bộ' (do can thiệp thủ công) và tự động dọn dẹp. |
+| `TRADING_MODE` | `"testnet"` | **Môi trường hoạt động:** `"live"` (tiền thật) hoặc `"testnet"` (thử nghiệm). **Tham số quan trọng nhất, cần kiểm tra kỹ trước khi chạy.** |
+| `DATA_FETCH_LIMIT` | `300` | **Độ sâu phân tích:** Số lượng nến (dữ liệu lịch sử) tải về để tính toán chỉ báo. Con số lớn hơn cho các chỉ báo dài hạn (như EMA 200) chính xác hơn. |
+| `DAILY_SUMMARY_TIMES` | `["08:10", "20:10"]` | **Giao tiếp định kỳ:** Các mốc thời gian (giờ Việt Nam) bot sẽ tự động gửi báo cáo tổng kết chi tiết trong ngày ra Discord. |
+| `TRADE_COOLDOWN_HOURS` | `1` | **Kỷ luật giao dịch:** Thời gian "nghỉ" (giờ) cho một coin sau khi đóng lệnh. Giúp tránh "giao dịch trả thù" và cho thị trường thời gian để ổn định. |
+| `CRON_JOB_INTERVAL_MINUTES` | `1` | **Đồng bộ thời gian:** Phải khớp với tần suất bạn đặt trên crontab/scheduler. Bot dùng nó để tính toán một số logic liên quan đến thời gian. |
+| `HEAVY_REFRESH_MINUTES` | `15` | **Tần suất quét sâu:** Cứ mỗi 15 phút, bot sẽ thực hiện "quét sâu" - tính lại toàn bộ chỉ báo và tìm kiếm cơ hội giao dịch mới trên toàn thị trường. |
+| `PENDING_TRADE_RETRY_LIMIT` | `3` | **Tính bền bỉ:** Số lần thử lại tối đa nếu một lệnh MUA mới thất bại (ví dụ do lỗi mạng hoặc API của sàn). |
+| `CLOSE_TRADE_RETRY_LIMIT` | `3` | **Đảm bảo thoát lệnh:** Số lần thử lại tối đa nếu một lệnh BÁN (đóng) thất bại. |
+| `CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES` | `45` | **Giảm nhiễu cảnh báo:** Nếu gặp lỗi nghiêm trọng lặp đi lặp lại, bot sẽ chỉ gửi cảnh báo về lỗi đó mỗi 45 phút để tránh spam Discord. |
+| `RECONCILIATION_QTY_THRESHOLD`| `0.95` | **Ngưỡng tự chữa lành:** Nếu số lượng coin thực tế trên sàn < **95%** so với bot ghi nhận, lệnh sẽ bị coi là 'bất đồng bộ' (do bạn đã bán thủ công) và tự động dọn dẹp. |
+| `OVERRIDE_COOLDOWN_SCORE`| `7.5` | **Cơ hội vàng:** Cho phép bot **phá vỡ thời gian nghỉ** nếu phát hiện một cơ hội có điểm tín hiệu cực cao (>= 7.5), đảm bảo không bỏ lỡ tín hiệu tốt nhất. |
 | `ORPHAN_ASSET_MIN_VALUE_USDT`| `10.0` | **Vệ sinh tài khoản:** Tự động cảnh báo nếu phát hiện tài sản "mồ côi" (có trên sàn nhưng không được bot quản lý) trị giá trên 10 USD. |
-| `MIN_ORDER_VALUE_USDT` | `11.0` | Giá trị lệnh tối thiểu (USD) để đặt lệnh, tuân thủ yêu cầu của sàn giao dịch. |
+| `MIN_ORDER_VALUE_USDT` | `11.0` | **Tuân thủ quy định sàn:** Giá trị lệnh tối thiểu (USD) để đặt lệnh. Binance yêu cầu 10 USD, đặt 11 để an toàn do trượt giá. |
 
-#### 4.3.2. `MTF_ANALYSIS_CONFIG` - Phân Tích Đa Khung Thời Gian
+---
 
-Gia tăng hoặc giảm thiểu độ tin cậy của một tín hiệu bằng cách đối chiếu với xu hướng ở các khung thời gian lớn hơn.
-
-| Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
-| :--- | :--- | :--- |
-| `ENABLED` | `True` | Bật/Tắt tính năng phân tích đa khung thời gian. |
-| `BONUS_COEFFICIENT` | `1.15` | Nếu trend khung lớn hơn **đồng thuận**, điểm tín hiệu được **thưởng 15%**. |
-| `PENALTY_COEFFICIENT` | `0.85` | Nếu trend khung lớn hơn **xung đột**, điểm tín hiệu bị **phạt 15%**. |
-| `SEVERE_PENALTY_COEFFICIENT`| `0.70` | **Phạt nặng 30%** nếu cả hai khung lớn hơn cùng xung đột. |
-| `SIDEWAYS_PENALTY_COEFFICIENT`| `0.90` | Phạt nhẹ 10% nếu khung lớn hơn đang đi ngang (sideways). |
-
-#### 4.3.3. `ACTIVE_TRADE_MANAGEMENT_CONFIG` - Quản Lý Vị Thế Đang Mở
-
-Các quy tắc linh hoạt để quản lý một lệnh sau khi đã được mở, nhằm tối ưu hóa lợi nhuận và giảm thiểu rủi ro.
+#### 4.2.2. FEATURE SPOTLIGHT: `ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1)`
+*Ghi chú: Đây là nâng cấp cốt lõi, biến bot từ một công cụ thực thi thành một hệ thống quản lý vốn bán tự trị. Nó giúp vốn hóa lợi nhuận và giảm rủi ro một cách tự động.*
 
 | Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
 | :--- | :--- | :--- |
-| `EARLY_CLOSE_ABSOLUTE_THRESHOLD`| `4.8` | **Phòng tuyến cuối cùng:** Nếu điểm tín hiệu của lệnh tụt dưới 4.8, đóng toàn bộ lệnh ngay lập tức để tránh thua lỗ nặng. |
-| `EARLY_CLOSE_RELATIVE_DROP_PCT`| `0.27` | **Tường lửa linh hoạt:** Nếu điểm tín hiệu sụt giảm > **27%** so với lúc vào lệnh, đóng 50% vị thế và dời SL về hòa vốn. |
-| `PROFIT_PROTECTION` | `{...}` | **Chốt chặn lợi nhuận:** Khi lệnh đạt đỉnh PnL > **3.5%** và sau đó sụt **2.0%** từ đỉnh, tự động chốt **70%** vị thế để bảo vệ thành quả. |
+| `DEPOSIT_DETECTION_MIN_USD` | `5.0` | **Phát hiện Nạp/Rút (tuyệt đối):** Bất kỳ thay đổi ròng nào trong số dư USDT > 5 USD sẽ được coi là hành động nạp/rút và điều chỉnh Vốn Ban Đầu. |
+| `DEPOSIT_DETECTION_THRESHOLD_PCT` | `0.005` | **Phát hiện Nạp/Rút (tương đối):** Tương tự, nhưng dựa trên 0.5% tổng vốn. Bot sẽ dùng giá trị lớn hơn giữa ngưỡng tuyệt đối và tương đối. |
+| `AUTO_COMPOUND_THRESHOLD_PCT` | `10.0` | **Tự động tái đầu tư:** Nếu tổng tài sản tăng **+10%** so với Vốn Ban Đầu, Vốn Ban Đầu sẽ được nâng lên mức tài sản mới. Điều này giúp tăng quy mô lệnh trong giai đoạn tăng trưởng. |
+| `AUTO_DELEVERAGE_THRESHOLD_PCT` | `-10.0` | **Tự động bảo toàn vốn:** Nếu tổng tài sản giảm **-10%** so với Vốn Ban Đầu, Vốn Ban Đầu sẽ được hạ xuống mức tài sản mới. Điều này giúp giảm quy mô lệnh trong giai đoạn sụt giảm (drawdown). |
+| `CAPITAL_ADJUSTMENT_COOLDOWN_HOURS`| `72` | **Ổn định vốn:** Hệ thống sẽ chờ **72 giờ** giữa các lần tự động điều chỉnh vốn do hiệu suất (không áp dụng cho việc Nạp/Rút) để tránh các quyết định vội vàng do biến động ngắn hạn. |
 
-#### 4.3.4. `RISK_RULES_CONFIG` - Các Quy Tắc Rủi Ro Cứng
+---
 
-Các giới hạn không thể vi phạm để đảm bảo kỷ luật và kiểm soát rủi ro ở cấp độ danh mục.
-
-| Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
-| :--- | :--- | :--- |
-| `MAX_ACTIVE_TRADES` | `12` | Số lượng vị thế được phép mở đồng thời tối đa. |
-| `MAX_SL_PERCENT_BY_TIMEFRAME` | `{"1h": 0.06, ...}`| Giới hạn mức cắt lỗ tối đa cho phép theo từng khung thời gian (lệnh 1h không có SL xa hơn 6% giá vào lệnh). |
-| `STALE_TRADE_RULES` | `{"1h": {"HOURS": 48, ...}}`| Tự động đóng các lệnh "ì" (stale) không có tiến triển đáng kể sau một khoảng thời gian nhất định để giải phóng vốn cho cơ hội tốt hơn. |
-| `STAY_OF_EXECUTION_SCORE`| `6.8` | **Ân xá:** Một lệnh "ì" sẽ không bị đóng nếu điểm tín hiệu hiện tại của nó vẫn còn tốt (>= 6.8). |
-
-#### 4.3.5. `CAPITAL_MANAGEMENT_CONFIG` & `DCA_CONFIG` - Quản Lý Vốn & Trung Bình Giá
+#### 4.2.3. `MTF_ANALYSIS_CONFIG` - Phân Tích Đa Khung Thời Gian
+*Ghi chú: Tăng cường độ tin cậy của tín hiệu bằng cách đối chiếu với xu hướng ở các khung thời gian lớn hơn. Một tín hiệu "MUA" ở khung 1h sẽ mạnh hơn nếu khung 4h và 1d cũng đang trong xu hướng tăng.*
 
 | Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
 | :--- | :--- | :--- |
-| `MAX_TOTAL_EXPOSURE_PCT` | `0.75` | **Phanh an toàn tổng thể:** Tổng vốn đã đầu tư vào các lệnh đang mở không được vượt quá **75%** tổng tài sản USDT. |
-| `DCA_CONFIG` | `{...}` | Toàn bộ cấu hình cho chiến lược Trung bình giá (DCA), bao gồm số lần DCA tối đa, % giá giảm để kích hoạt, và hệ số vốn cho mỗi lần DCA. |
+| `ENABLED` | `True` | Bật/Tắt hoàn toàn mô-đun này. Nếu `False`, mọi tín hiệu sẽ có hệ số là 1.0. |
+| `BONUS_COEFFICIENT` | `1.15` | **Thưởng đồng thuận:** Nếu trend khung lớn hơn **đồng thuận**, điểm tín hiệu được **nhân thêm 15%** (ví dụ: điểm 7.0 -> 8.05). |
+| `PENALTY_COEFFICIENT` | `0.85` | **Phạt xung đột:** Nếu có 1 khung lớn hơn **xung đột**, điểm tín hiệu bị **nhân với 0.85 (phạt 15%)**. |
+| `SEVERE_PENALTY_COEFFICIENT`| `0.70` | **Phạt nặng:** Phạt 30% nếu tất cả các khung lớn hơn cùng xung đột, một dấu hiệu rủi ro rất cao. |
+| `SIDEWAYS_PENALTY_COEFFICIENT`| `0.90` | **Phạt do thiếu xác nhận:** Phạt nhẹ 10% nếu khung lớn hơn đang đi ngang (sideways), vì thiếu sự hỗ trợ từ xu hướng lớn. |
 
-#### 4.3.6. `DYNAMIC_ALERT_CONFIG` - Cảnh Báo Động
+---
 
-Cung cấp các cập nhật theo thời gian thực về hiệu suất danh mục, giúp người dùng nắm bắt tình hình mà không cần báo cáo thủ công.
+#### 4.2.4. `ACTIVE_TRADE_MANAGEMENT_CONFIG` - Quản Lý Vị Thế Đang Mở
+*Ghi chú: Các quy tắc linh hoạt để quản lý một lệnh *sau khi đã được mở*. Mục tiêu là tối ưu hóa lợi nhuận và giảm thiểu rủi ro một cách chủ động thay vì chỉ chờ SL/TP.*
 
 | Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
 | :--- | :--- | :--- |
-| `ENABLED` | `True` | Bật/Tắt tính năng gửi cập nhật động ra Discord. |
-| `COOLDOWN_HOURS` | `3` | Thời gian chờ tối thiểu (3 giờ) giữa các lần gửi cập nhật để tránh spam. |
-| `FORCE_UPDATE_HOURS`| `10` | Bắt buộc gửi một bản cập nhật sau mỗi 10 giờ, ngay cả khi không có thay đổi lớn. |
-| `PNL_CHANGE_THRESHOLD_PCT` | `2.0` | Gửi cập nhật ngay lập tức nếu Tổng PnL của danh mục thay đổi lớn hơn hoặc bằng 2.0%. |
+| `EARLY_CLOSE_ABSOLUTE_THRESHOLD`| `4.8` | **Phòng tuyến cuối cùng:** Nếu điểm tín hiệu của lệnh (được tính lại mỗi phiên) tụt xuống dưới 4.8, đóng toàn bộ lệnh ngay lập tức, bất kể PnL. |
+| `EARLY_CLOSE_RELATIVE_DROP_PCT`| `0.27` | **Tường lửa linh hoạt:** Nếu điểm tín hiệu sụt giảm > **27%** so với lúc vào lệnh (ví dụ từ 8.0 xuống 5.8), kích hoạt hành động chốt lời một phần. |
+| `PARTIAL_EARLY_CLOSE_PCT` | `0.5` | Khi `EARLY_CLOSE_RELATIVE_DROP_PCT` được kích hoạt, bot sẽ đóng **50%** vị thế và dời SL về hòa vốn. |
+| `PROFIT_PROTECTION` | `{...}` | **Module Chốt Chặn Lợi Nhuận:** |
+| `-> ENABLED` | `True` | Bật/tắt tính năng bảo vệ lợi nhuận. |
+| `-> MIN_PEAK_PNL_TRIGGER` | `3.5` | Lệnh phải đạt lãi tối thiểu **+3.5%** để kích hoạt chế độ bảo vệ. |
+| `-> PNL_DROP_TRIGGER_PCT` | `2.0` | Sau khi kích hoạt, nếu PnL sụt giảm **2.0%** từ đỉnh (ví dụ từ +8% xuống +6%), bot sẽ bán. |
+| `-> PARTIAL_CLOSE_PCT` | `0.7` | Khi `PNL_DROP_TRIGGER_PCT` được kích hoạt, bot sẽ chốt **70%** vị thế để hiện thực hóa lợi nhuận. |
 
-### 4.4. Cơ Chế Tự Bảo Vệ & Tự Chữa Lành (Self-Healing & Failsafes)
+---
 
-Các lớp phòng thủ được thiết kế để đảm bảo sự ổn định, an toàn và toàn vẹn dữ liệu cho hệ thống.
+#### 4.2.5. `RISK_RULES_CONFIG` - Các Quy Tắc Rủi Ro Cứng
+*Ghi chú: Các giới hạn không thể vi phạm để đảm bảo kỷ luật và kiểm soát rủi ro ở cấp độ toàn danh mục.*
 
-1.  **Cơ Chế Khóa File (`.lock`)**: Đảm bảo chỉ một tiến trình (bot hoặc control panel) có thể ghi vào file trạng thái `state.json` tại một thời điểm, ngăn chặn hoàn toàn nguy cơ hỏng dữ liệu.
+| Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- |
+| `MAX_ACTIVE_TRADES` | `12` | **Kiểm soát đa dạng hóa:** Số lượng vị thế được phép mở đồng thời tối đa. Tránh rủi ro tập trung quá mức. |
+| `MAX_SL_PERCENT_BY_TIMEFRAME` | `{"1h": 0.06, ...}`| **Kiểm soát rủi ro/lệnh:** Giới hạn mức cắt lỗ tối đa cho phép theo từng khung thời gian (lệnh 1h không có SL xa hơn 6% giá vào lệnh). |
+| `MAX_TP_PERCENT_BY_TIMEFRAME` | `{"1h": 0.12, ...}`| **Kỳ vọng thực tế:** Giới hạn mức chốt lời tối đa để tránh kỳ vọng phi thực tế và đảm bảo tỷ lệ Risk/Reward hợp lý. |
+| `STALE_TRADE_RULES` | `{...}`| **Module xử lý lệnh "ì":** |
+| `-> "1h": {"HOURS": 48, ...}` | Một lệnh 1h, sau 48 giờ, nếu chưa đạt được 25% chặng đường tới TP, sẽ bị xem xét đóng để giải phóng vốn cho cơ hội tốt hơn. |
+| `-> STAY_OF_EXECUTION_SCORE`| `6.8` | **Ân xá:** Một lệnh "ì" sẽ **KHÔNG** bị đóng nếu điểm tín hiệu hiện tại của nó vẫn còn tốt (>= 6.8), cho nó thêm cơ hội "sống". |
 
-2.  **Đối Soát Trạng Thái (State Reconciliation)**:
-    *   **Vấn đề:** "Lệnh Ma" - người dùng đóng lệnh thủ công trên sàn, nhưng bot không biết và tiếp tục quản lý một lệnh không còn tồn tại.
-    *   **Giải pháp:** Đầu mỗi phiên, bot so sánh số dư tài sản thực tế trên Binance với dữ liệu nó đang lưu trữ. Nếu số dư thực tế thấp hơn **95%** so với ghi nhận, bot sẽ coi lệnh đó đã bị can thiệp.
-    *   **Hành động:** Tự động đóng "lệnh ma" với trạng thái `Closed (Desynced)`, ghi vào lịch sử và giải phóng tài nguyên.
+---
 
-3.  **Phát Hiện Tài Sản Mồ Côi (Orphan Asset Detection)**:
-    *   **Vấn đề:** Các tài sản không được theo dõi (từ airdrop, nạp thủ công, giao dịch cũ) tồn tại trên tài khoản gây nhiễu loạn.
-    *   **Giải pháp:** Bot chủ động quét các tài sản có giá trị trên `10 USD` mà không thuộc bất kỳ lệnh đang mở nào.
-    *   **Hành động:** Gửi cảnh báo chi tiết đến Discord, yêu cầu người dùng xử lý (bán hoặc "nhận nuôi" bằng Control Panel), giữ cho danh mục luôn sạch sẽ và được kiểm soát.
-  
+#### 4.2.6. `CAPITAL_MANAGEMENT`, `DCA` & `ALERTS` - Các Module Chuyên Biệt
+
+| Module | Tham Số | Giá Trị Mẫu | Ý Nghĩa & Tác Động |
+| :--- | :--- | :--- | :--- |
+| **QUẢN LÝ VỐN TỔNG THỂ** | `MAX_TOTAL_EXPOSURE_PCT` | `0.75` | **Phanh an toàn tổng thể:** Tổng vốn đã đầu tư vào các lệnh đang mở không được vượt quá **75%** tổng số USDT có trên sàn. Đây là lớp bảo vệ cuối cùng chống lại việc "all-in". |
+| **TRUNG BÌNH GIÁ (DCA)** | `ENABLED` | `True` | **Bật/Tắt chiến lược DCA:** Cho phép bot mua thêm khi giá giảm để cải thiện giá vào lệnh trung bình. |
+| | `MAX_DCA_ENTRIES` | `2` | Mỗi lệnh chỉ được phép DCA tối đa 2 lần. |
+| | `TRIGGER_DROP_PCT` | `-5.0` | Kích hoạt DCA khi giá giảm **-5%** so với lần vào lệnh gần nhất. |
+| | `SCORE_MIN_THRESHOLD` | `6.5` | **DCA thông minh:** Chỉ DCA nếu điểm tín hiệu hiện tại vẫn đủ tốt (>= 6.5). Tránh "bắt dao rơi" một cách mù quáng. |
+| | `CAPITAL_MULTIPLIER` | `0.75` | **Quản lý vốn DCA:** Vốn cho lần DCA này sẽ bằng **75%** vốn của lần vào lệnh trước. |
+| | `DCA_COOLDOWN_HOURS` | `8` | Phải chờ ít nhất 8 giờ giữa các lần DCA để tránh mua vào liên tục trong một cú sập nhanh. |
+| **CẢNH BÁO** | `DISCORD_WEBHOOK_URL` | `os.getenv(...)` | Link webhook để gửi thông báo đến kênh Discord của bạn. |
+| | `DISCORD_CHUNK_DELAY_SECONDS` | `2` | Thời gian chờ (giây) giữa các phần của tin nhắn dài để đảm bảo Discord không chặn vì gửi quá nhanh. |
+| **CẢNH BÁO ĐỘNG** | `ENABLED` | `True` | Bật/tắt tính năng gửi cập nhật động về hiệu suất danh mục ra Discord. |
+| | `COOLDOWN_HOURS` | `3` | Thời gian chờ tối thiểu (3 giờ) giữa các lần gửi cập nhật để tránh spam. |
+| | `FORCE_UPDATE_HOURS` | `10` | Bắt buộc gửi một bản cập nhật sau mỗi 10 giờ, ngay cả khi không có thay đổi lớn. |
+| | `PNL_CHANGE_THRESHOLD_PCT` | `2.0` | Gửi cập nhật ngay lập tức nếu Tổng PnL của danh mục thay đổi lớn hơn hoặc bằng 2.0%. |
+
+ 
+
+  ---   
   ## V. Kết Luận và Hướng Phát Triển
   
   Hệ thống RiceAlert được xây dựng trên một kiến trúc phân lớp, có khả năng cấu hình sâu và triết lý giao dịch rõ ràng. Sự phức tạp của nó đến từ các lớp logic được thiết kế để tăng cường sự vững chắc và khả năng thích ứng.
