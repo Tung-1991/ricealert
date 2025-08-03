@@ -39,3 +39,4 @@ backtest/data_cache/
 backtest/backtest_results
 backtest/paper_data/
 livetrade/data/*
+livetrade/data/live_trade_log.txt

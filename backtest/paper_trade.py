@@ -1,28 +1,24 @@
 # -*- coding: utf-8 -*-
 """
 Paper Trade - The 4-Zone Strategy (Refactored)
-Version: 8.3.1 - Clarity & Sync
+Version: 8.3.2 - Safe Reporting & PnL Logic Fix
 Date: 2025-08-03
 
 Mô tả:
-Đây là phiên bản tái cấu trúc của paper_trade.py.
-Mục tiêu chính là cải thiện cấu trúc, khả năng đọc và bảo trì code
-mà không làm thay đổi logic giao dịch cốt lõi.
+Phiên bản 8.3.2 khắc phục các lỗi logic nghiêm trọng và cải thiện độ tin cậy.
 
 Các cải tiến chính:
-- Lập trình hướng đối tượng (OOP): Toàn bộ logic được đóng gói trong class `PaperTrader`
-  giúp quản lý trạng thái (state) và các hoạt động một cách mạch lạc,
-  loại bỏ các biến toàn cục.
-- Cấu trúc rõ ràng: Code được chia thành các khu vực chức năng riêng biệt
-  (Config, Utilities, Data Fetching, Trade Logic, Reporting, Main Execution).
-- Quản lý Config tập trung: Tất cả các cấu hình được gom vào một class `Config` duy nhất,
-  dễ dàng tìm kiếm và điều chỉnh.
-- Docstrings và Type Hinting: Bổ sung docstring chi tiết cho các class và phương thức,
-  đồng thời chuẩn hóa Type Hinting để tăng cường sự rõ ràng.
-- Hàm được chia nhỏ: Các hàm lớn, phức tạp (ví dụ: `check_and_manage_open_positions`)
-  được chia thành các phương thức nhỏ hơn, mỗi phương thức thực hiện một nhiệm vụ cụ thể.
-- Quản lý đường dẫn hiện đại: Sử dụng `pathlib` thay cho `os.path` để xử lý
-  đường dẫn file một cách an toàn và trực quan hơn.
+- CRITICAL FIX (Safe Reporting): Tích hợp "Chốt Chặn An Toàn". Bot sẽ chỉ tạo và gửi
+  báo cáo khi và chỉ khi nó có dữ liệu giá hợp lệ cho TẤT CẢ các vị thế đang mở.
+  Điều này loại bỏ hoàn toàn lỗi báo cáo sai lệch PnL và Tổng Tài Sản khi có
+  sự cố API tạm thời.
+- CRITICAL FIX (PnL Logic): Sửa lỗi logic tính toán PnL từ việc chốt lời một phần.
+  Bot giờ đây theo dõi 'realized_pnl_usd' trong mỗi đối tượng giao dịch, tương tự
+  như phiên bản live_trade, đảm bảo tính chính xác và nhất quán.
+- FEATURE (Enhanced Reporting): Đồng bộ hóa và nâng cấp chức năng báo cáo hàng ngày
+  để bao gồm lịch sử giao dịch gần nhất (Top 5 lãi/lỗ), mang lại cái nhìn sâu sắc
+  hơn về hiệu suất.
+- CODE STRUCTURE: Tái cấu trúc nhẹ các hàm báo cáo để phù hợp với logic mới.
 """
 import os
 import sys
@@ -41,7 +37,6 @@ from typing import Dict, List, Any, Tuple, Optional, Literal
 from dotenv import load_dotenv
 
 # --- Tải và Thiết lập Ban đầu ---
-# Sử dụng pathlib để quản lý đường dẫn một cách hiện đại và an toàn hơn
 try:
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
     sys.path.append(str(PROJECT_ROOT))
@@ -53,13 +48,10 @@ except (ImportError, FileNotFoundError) as e:
     sys.exit(f"Lỗi khởi tạo: Không thể tải các module hoặc file .env. Chi tiết: {e}")
 
 # ==============================================================================
-# ================== ⚙️ TRUNG TÂM CẤU HÌNH (Đồng bộ v8.3.1) ⚙️ ==================
+# ================== ⚙️ TRUNG TÂM CẤU HÌNH (Đồng bộ v8.3.2) ⚙️ ==================
 # ==============================================================================
 class Config:
-    """
-    Class chứa toàn bộ cấu hình của bot.
-    Việc gom vào một nơi giúp dễ dàng quản lý và tham chiếu.
-    """
+    """Class chứa toàn bộ cấu hình của bot."""
     # --- 1. Cấu hình Cơ bản & Môi trường ---
     INITIAL_CAPITAL = 10000.0
     SYMBOLS_TO_SCAN = [s.strip() for s in os.getenv("SYMBOLS_TO_SCAN", "ETHUSDT,BTCUSDT").split(',')]
@@ -196,10 +188,7 @@ class Config:
 # ==============================================================================
 
 class PaperTrader:
-    """
-    Class chính điều khiển toàn bộ logic của paper trading bot.
-    Quản lý trạng thái, dữ liệu, logic giao dịch và báo cáo.
-    """
+    """Class chính điều khiển toàn bộ logic của paper trading bot."""
 
     def __init__(self):
         """Khởi tạo bot, tải cấu hình và trạng thái."""
@@ -212,7 +201,7 @@ class PaperTrader:
         self.session_events: List[str] = []
 
         self._log_message("="*50)
-        self._log_message("🚀 Khởi động Paper Trading Bot...")
+        self._log_message("🚀 Khởi động Paper Trading Bot (v8.3.2)...")
         self._check_capital_adjustment()
 
     def _setup_directories(self):
@@ -273,21 +262,16 @@ class PaperTrader:
     def _send_discord_message(self, full_content: str):
         """Gửi tin nhắn (có thể chia nhỏ) đến Discord webhook."""
         webhook_url = self.config.ALERT["DISCORD_WEBHOOK_URL"]
-        if not webhook_url:
-            return
+        if not webhook_url: return
 
-        max_len = 1900
-        chunks = []
-        current_chunk = ""
+        max_len, chunks, current_chunk = 1900, [], ""
         for line in full_content.split('\n'):
             if len(current_chunk) + len(line) + 1 > max_len:
-                if current_chunk:
-                    chunks.append(current_chunk)
+                if current_chunk: chunks.append(current_chunk)
                 current_chunk = line
             else:
                 current_chunk += ("\n" + line) if current_chunk else line
-        if current_chunk:
-            chunks.append(current_chunk)
+        if current_chunk: chunks.append(current_chunk)
 
         for i, chunk in enumerate(chunks):
             content_to_send = f"*(Phần {i+1}/{len(chunks)})*\n{chunk}" if len(chunks) > 1 else chunk
@@ -310,8 +294,7 @@ class PaperTrader:
 
     def _export_trade_history_to_csv(self, closed_trades: List[Dict]):
         """Xuất lịch sử các lệnh đã đóng ra file CSV."""
-        if not closed_trades:
-            return
+        if not closed_trades: return
         try:
             df = pd.DataFrame(closed_trades)
             df['entry_time'] = pd.to_datetime(df['entry_time']).dt.tz_convert(self.config.VIETNAM_TZ)
@@ -327,10 +310,8 @@ class PaperTrader:
             if file_exists:
                 try:
                     existing_cols = set(pd.read_csv(self.config.TRADE_HISTORY_CSV_FILE, nrows=0).columns)
-                    if existing_cols != set(df.columns):
-                        header_mismatch = True
-                except Exception:
-                    header_mismatch = True
+                    if existing_cols != set(df.columns): header_mismatch = True
+                except Exception: header_mismatch = True
             
             write_header = not file_exists or header_mismatch
             write_mode = 'w' if write_header else 'a'
@@ -378,10 +359,7 @@ class PaperTrader:
         return existing_df
 
     def _run_heavy_tasks(self, equity: float):
-        """
-        Thực hiện các tác vụ nặng: tải dữ liệu, tính toán chỉ báo,
-        cập nhật điểm số cho các lệnh đang mở và tìm kiếm cơ hội mới.
-        """
+        """Thực hiện các tác vụ nặng: tải dữ liệu, tính toán chỉ báo, và tìm kiếm cơ hội mới."""
         self._log_message("---[🔄 Bắt đầu chu trình tác vụ nặng 🔄]---")
         self.indicator_results.clear()
         self.price_dataframes.clear()
@@ -394,7 +372,6 @@ class PaperTrader:
             for interval in self.config.ALL_TIME_FRAMES:
                 df = self._get_price_data_with_cache(symbol, interval)
                 if df is not None and not df.empty:
-                    # Tính toán các chỉ báo phụ trợ ngay tại đây
                     df['ema_20'] = ta.trend.ema_indicator(df["close"], window=20)
                     df['ema_50'] = ta.trend.ema_indicator(df["close"], window=50)
                     df['bb_width'] = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2).bollinger_wband()
@@ -402,7 +379,6 @@ class PaperTrader:
                     self.indicator_results[symbol][interval] = calculate_indicators(df.copy(), symbol, interval)
                     self.price_dataframes[symbol][interval] = df
 
-        # Cập nhật điểm và zone cho các lệnh đang mở
         for trade in self.state.get("active_trades", []):
             indicators = self.indicator_results.get(trade['symbol'], {}).get(trade['interval'])
             if indicators:
@@ -434,7 +410,7 @@ class PaperTrader:
             self.state.setdefault('cooldown_until', {})[trade['symbol']] = (datetime.now(self.config.VIETNAM_TZ) + timedelta(hours=self.config.GENERAL["TRADE_COOLDOWN_HOURS"])).isoformat()
             self._export_trade_history_to_csv([trade])
             
-            icon = '✅' if pnl_on_closed_part >= 0 else '❌'
+            icon = '✅' if trade['pnl_usd'] >= 0 else '❌'
             self.session_events.append(f"🎬 {icon} {trade['symbol']} (Đóng toàn bộ - {reason}): PnL ${trade['pnl_usd']:,.2f}")
         else: # Đóng một phần
             trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_on_closed_part
@@ -449,14 +425,11 @@ class PaperTrader:
         for trade in self.state.get("active_trades", [])[:]:
             indicators = self.indicator_results.get(trade['symbol'], {}).get(trade['interval'], {})
             current_price = indicators.get('price')
-            if not current_price:
-                continue
+            if not current_price: continue
 
-            # Cập nhật PnL đỉnh
             _, pnl_percent = self._get_current_pnl(trade, current_price=current_price)
             trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
 
-            # Kiểm tra các điều kiện đóng lệnh
             if self._check_sl_tp(trade, current_price): continue
             if self._check_early_close(trade, current_price): continue
             if self._check_partial_tp(trade, current_price): continue
@@ -466,9 +439,9 @@ class PaperTrader:
     def _check_sl_tp(self, trade: Dict, current_price: float) -> bool:
         """Kiểm tra chạm Stop Loss hoặc Take Profit."""
         if current_price <= trade['sl']:
-            return self._close_trade_simulated(trade, "SL", state=self.state, close_price=trade['sl'])
+            return self._close_trade_simulated(trade, "SL", close_price=trade['sl'])
         if current_price >= trade['tp']:
-            return self._close_trade_simulated(trade, "TP", state=self.state, close_price=trade['tp'])
+            return self._close_trade_simulated(trade, "TP", close_price=trade['tp'])
         return False
 
     def _check_early_close(self, trade: Dict, current_price: float) -> bool:
@@ -477,17 +450,17 @@ class PaperTrader:
         last_score, entry_score = trade.get('last_score', 5.0), trade.get('entry_score', 5.0)
 
         if last_score < cfg['EARLY_CLOSE_ABSOLUTE_THRESHOLD']:
-            return self._close_trade_simulated(trade, f"EC_Abs_{last_score:.1f}", self.state, current_price)
+            return self._close_trade_simulated(trade, f"EC_Abs_{last_score:.1f}", current_price)
         
         if last_score < entry_score and not trade.get('is_in_warning_zone', False):
             trade['is_in_warning_zone'] = True
         
         if trade.get('is_in_warning_zone', False) and not trade.get('partial_closed_by_score', False):
             if last_score < entry_score * (1 - cfg.get('EARLY_CLOSE_RELATIVE_DROP_PCT', 0.35)):
-                if self._close_trade_simulated(trade, f"EC_Rel_{last_score:.1f}", self.state, current_price, close_pct=cfg.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)):
+                if self._close_trade_simulated(trade, f"EC_Rel_{last_score:.1f}", current_price, close_pct=cfg.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)):
                     trade['partial_closed_by_score'] = True
-                    trade['sl'] = trade['entry_price'] # Dời SL về entry
-                    return True # Đã xử lý, có thể tiếp tục vòng lặp
+                    trade['sl'] = trade['entry_price']
+                    return True
         return False
 
     def _check_partial_tp(self, trade: Dict, current_price: float) -> bool:
@@ -504,9 +477,9 @@ class PaperTrader:
 
         if pnl_ratio >= tp1_rr_ratio:
             tp1_price = trade['initial_entry']['price'] + (initial_risk_dist * tp1_rr_ratio)
-            if self._close_trade_simulated(trade, f"TP1_{tp1_rr_ratio:.1f}R", self.state, tp1_price, close_pct=tactic_cfg.get("TP1_PROFIT_PCT", 0.5)):
+            if self._close_trade_simulated(trade, f"TP1_{tp1_rr_ratio:.1f}R", tp1_price, close_pct=tactic_cfg.get("TP1_PROFIT_PCT", 0.5)):
                 trade['tp1_hit'] = True
-                trade['sl'] = trade['entry_price'] # Dời SL về entry
+                trade['sl'] = trade['entry_price']
                 return True
         return False
 
@@ -519,17 +492,16 @@ class PaperTrader:
         _, pnl_percent = self._get_current_pnl(trade, current_price)
         if trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.5):
             if (trade['peak_pnl_percent'] - pnl_percent) >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.0):
-                if self._close_trade_simulated(trade, "Protect_Profit", self.state, current_price, close_pct=pp_config.get("PARTIAL_CLOSE_PCT", 0.7)):
+                if self._close_trade_simulated(trade, "Protect_Profit", current_price, close_pct=pp_config.get("PARTIAL_CLOSE_PCT", 0.7)):
                     trade['profit_taken'] = True
-                    trade['sl'] = trade['entry_price'] # Dời SL về entry
+                    trade['sl'] = trade['entry_price']
                     return True
         return False
 
     def _check_trailing_sl(self, trade: Dict, current_price: float):
         """Kiểm tra và cập nhật Trailing Stop Loss."""
         tactic_cfg = self.config.TACTICS_LAB.get(trade.get('opened_by_tactic'), {})
-        if not tactic_cfg.get("USE_TRAILING_SL", False):
-            return
+        if not tactic_cfg.get("USE_TRAILING_SL", False): return
 
         initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
         if initial_risk_dist <= 0: return
@@ -553,8 +525,7 @@ class PaperTrader:
                 continue
             
             rules = rules_cfg.get(trade.get("interval"))
-            if not rules:
-                continue
+            if not rules: continue
 
             holding_hours = (now_aware - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
             if holding_hours > rules["HOURS"]:
@@ -563,7 +534,7 @@ class PaperTrader:
 
                 _, pnl_pct = self._get_current_pnl(trade, current_price=current_price)
                 if pnl_pct < rules["PROGRESS_THRESHOLD_PCT"] and trade.get('last_score', 5.0) < rules_cfg["STAY_OF_EXECUTION_SCORE"]:
-                    self._close_trade_simulated(trade, "Stale", self.state, current_price)
+                    self._close_trade_simulated(trade, "Stale", current_price)
 
     def _handle_dca_opportunities(self, equity: float):
         """Tìm và thực hiện DCA cho các lệnh đủ điều kiện."""
@@ -574,7 +545,6 @@ class PaperTrader:
         now = datetime.now(self.config.VIETNAM_TZ)
 
         for trade in self.state.get("active_trades", [])[:]:
-            # Các điều kiện kiểm tra để thực hiện DCA
             if len(trade.get("dca_entries", [])) >= dca_cfg["MAX_DCA_ENTRIES"]: continue
             if trade.get('last_dca_time') and (now - datetime.fromisoformat(trade.get('last_dca_time'))).total_seconds() / 3600 < dca_cfg['DCA_COOLDOWN_HOURS']: continue
             
@@ -588,11 +558,9 @@ class PaperTrader:
 
             if get_advisor_decision(trade['symbol'], trade['interval'], current_data, ADVISOR_BASE_CONFIG).get("final_score", 0.0) < dca_cfg["SCORE_MIN_THRESHOLD"]: continue
             
-            # Tính toán và thực hiện DCA
             dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * dca_cfg["CAPITAL_MULTIPLIER"]
             if dca_investment <= 0 or dca_investment > self.state['cash'] or (current_exposure_usd + dca_investment) > (equity * self.config.CAPITAL_MANAGEMENT["MAX_TOTAL_EXPOSURE_PCT"]): continue
             
-            # Cập nhật trạng thái sau DCA
             self.state['cash'] -= dca_investment
             trade.setdefault('dca_entries', []).append({"price": current_price, "invested_usd": dca_investment, "timestamp": now.isoformat()})
             
@@ -620,26 +588,22 @@ class PaperTrader:
         scores = {zone: 0 for zone in self.config.ZONES}
         adx, bb_width, rsi_14, trend = indicators.get('adx', 20), indicators.get('bb_width', 0), indicators.get('rsi_14', 50), indicators.get('trend', "sideways")
 
-        # Noise Zone
         if adx < 20: scores[self.config.NOISE_ZONE] += 3
         if 'ema_50' in df.columns and np.sign(df['close'].iloc[-30:] - df['ema_50'].iloc[-30:]).diff().ne(0).sum() > 4: scores[self.config.NOISE_ZONE] += 2
         
-        # Lagging Zone (xu hướng rõ ràng)
         if adx > 25: scores[self.config.LAGGING_ZONE] += 2.5
         if trend == "uptrend": scores[self.config.LAGGING_ZONE] += 2
         if 'ema_20' in df.columns and 'ema_50' in df.columns and not df['ema_20'].isna().all() and not df['ema_50'].isna().all():
             if trend == "uptrend" and df['ema_20'].iloc[-1] > df['ema_50'].iloc[-1] and df['ema_20'].iloc[-10] > df['ema_50'].iloc[-10]:
                 scores[self.config.LAGGING_ZONE] += 1.5
         
-        # Leading Zone (tích lũy, chuẩn bị đột phá)
         if 'bb_width' in df.columns and not df['bb_width'].isna().all() and bb_width < df['bb_width'].iloc[-100:].quantile(0.20):
             scores[self.config.LEADING_ZONE] += 2.5
         htf_interval = '4h' if interval == '1h' else '1d'
         htf_trend = self.indicator_results.get(symbol, {}).get(htf_interval, {}).get('trend', 'sideway')
         if htf_trend == 'uptrend' and rsi_14 < 45: scores[self.config.LEADING_ZONE] += 2
-        if adx > 28: scores[self.config.LEADING_ZONE] -= 2 # Phạt nếu xu hướng đã quá mạnh
+        if adx > 28: scores[self.config.LEADING_ZONE] -= 2
 
-        # Coincident Zone (đang diễn ra đột phá)
         if indicators.get('breakout_signal', "none") != "none": scores[self.config.COINCIDENT_ZONE] += 3
         if indicators.get('macd_cross', "neutral") not in ["neutral", "no_cross"]: scores[self.config.COINCIDENT_ZONE] += 2
         if indicators.get('vol_ma20', 1) > 0 and indicators.get('volume', 0) > indicators.get('vol_ma20', 1) * 2: scores[self.config.COINCIDENT_ZONE] += 1.5
@@ -694,9 +658,8 @@ class PaperTrader:
                         adjusted_score = decision.get("final_score", 0.0) * self._get_mtf_adjustment_coefficient(symbol, interval)
                         
                         potential_opportunities.append({
-                            "decision": decision, "tactic_name": tactic_name, 
-                            "tactic_cfg": tactic_cfg, "score": adjusted_score, 
-                            "symbol": symbol, "interval": interval, "zone": market_zone
+                            "decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, 
+                            "score": adjusted_score, "symbol": symbol, "interval": interval, "zone": market_zone
                         })
         
         self._log_message("---[🔍 Quét Cơ Hội Mới 🔍]---")
@@ -722,7 +685,6 @@ class PaperTrader:
         entry_price = full_indicators.get('price')
         if not entry_price or entry_price <= 0: return
 
-        # Xác định SL/TP
         risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
         max_sl_pct = self.config.RISK_RULES["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval, 0.1)
         final_risk_dist = min(risk_dist_from_atr, entry_price * max_sl_pct)
@@ -735,84 +697,70 @@ class PaperTrader:
             tp_p = entry_price * (1 + max_tp_pct_cfg)
         if tp_p <= entry_price or sl_p >= entry_price or sl_p <= 0: return
 
-        # Quản lý vốn
         capital_pct = self.config.ZONE_BASED_POLICIES.get(zone, {}).get("CAPITAL_PCT", 0.03)
         invested_amount = equity * capital_pct
         current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in self.state.get("active_trades", []))
         if invested_amount > self.state['cash'] or (current_exposure_usd + invested_amount) > (equity * self.config.CAPITAL_MANAGEMENT["MAX_TOTAL_EXPOSURE_PCT"]) or invested_amount < 10:
-            self._log_message(f"    => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro. Bỏ qua.")
+            self._log_message("    => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro. Bỏ qua.")
             return
 
-        # Tạo lệnh mới
         new_trade = {
             "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
             "opened_by_tactic": opportunity['tactic_name'], "trade_type": "LONG", "entry_price": entry_price,
             "quantity": invested_amount / entry_price, "tp": tp_p, "sl": sl_p, "initial_sl": sl_p,
             "initial_entry": {"price": entry_price, "invested_usd": invested_amount},
-            "total_invested_usd": invested_amount, "entry_time": datetime.now(self.config.VIETNAM_TZ).isoformat(), 
-            "entry_score": opportunity['score'], "entry_zone": zone, "last_zone": zone, "dca_entries": [], 
-            "realized_pnl_usd": 0.0, "last_score": opportunity['score'], "peak_pnl_percent": 0.0, 
-            "tp1_hit": False, "is_in_warning_zone": False, "partial_closed_by_score": False, "profit_taken": False
+            "total_invested_usd": invested_amount, "entry_time": datetime.now(self.config.VIETNAM_TZ).isoformat(), "entry_score": opportunity['score'], 
+            "entry_zone": zone, "last_zone": zone, "dca_entries": [], "realized_pnl_usd": 0.0, 
+            "last_score": opportunity['score'], "peak_pnl_percent": 0.0, "tp1_hit": False, 
+            "is_in_warning_zone": False, "partial_closed_by_score": False, "profit_taken": False
         }
         self.state['cash'] -= invested_amount
         self.state['active_trades'].append(new_trade)
         self.session_events.append(f"🔥 {symbol}-{interval} ({opportunity['tactic_name']}): Vốn ${new_trade['total_invested_usd']:,.2f}")
 
-    # --- 4. Reporting & Summarizing ---
-    def _calculate_total_equity(self, realtime_prices: Optional[Dict[str, float]] = None) -> float:
-        """Tính toán tổng tài sản hiện tại (tiền mặt + giá trị các lệnh mở)."""
+    # --- 4. Reporting & Summarizing (Refactored in v8.3.2) ---
+    def _calculate_total_equity(self, realtime_prices: Optional[Dict[str, float]] = None) -> Optional[float]:
+        """Tính toán tổng tài sản. Trả về None nếu thiếu dữ liệu giá."""
         cash = self.state.get('cash', 0)
         value_of_open_positions = 0
+        
+        # Nếu không có realtime_prices, không thể tính chính xác
+        if realtime_prices is None:
+            return None
+
         for t in self.state.get('active_trades', []):
-            price_to_use = realtime_prices.get(t['symbol']) if realtime_prices else self.indicator_results.get(t['symbol'], {}).get(t['interval'], {}).get('price', t['entry_price'])
-            if price_to_use:
-                pnl_usd, _ = self._get_current_pnl(t, current_price=price_to_use)
-                value_of_open_positions += t.get('total_invested_usd', 0.0) + pnl_usd
-            else: # Fallback if price is not available
-                value_of_open_positions += t.get('total_invested_usd', 0.0)
+            price_to_use = realtime_prices.get(t['symbol'])
+            if price_to_use is None:
+                return None # An toàn là trên hết: thiếu giá -> không tính
+            pnl_usd, _ = self._get_current_pnl(t, current_price=price_to_use)
+            value_of_open_positions += t.get('total_invested_usd', 0.0) + pnl_usd
+            
         return cash + value_of_open_positions
 
-    def _build_report_text(self, realtime_prices: Dict[str, float], report_type: str) -> str:
-        """Xây dựng nội dung báo cáo để gửi đi."""
-        now_vn_str = datetime.now(self.config.VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
-        title = f"📊 **BÁO CÁO TỔNG KẾT (PAPER)** - `{now_vn_str}`" if report_type == "daily" else f"💡 **CẬP NHẬT ĐỘNG (PAPER)** - `{now_vn_str}`"
-        lines = [title, ""]
-        
-        equity = self._calculate_total_equity(realtime_prices)
-        
-        # Header
+    def _build_report_header(self, equity: float) -> str:
+        """Tạo phần header cho báo cáo."""
         initial_capital = self.state.get('initial_capital', self.config.INITIAL_CAPITAL)
         pnl_since_start = equity - initial_capital
         pnl_percent = (pnl_since_start / initial_capital) * 100 if initial_capital > 0 else 0
         pnl_icon = "🟢" if pnl_since_start >= 0 else "🔴"
-        lines.append(f"💰 Vốn BĐ: **${initial_capital:,.2f}** | 💵 Tiền mặt: **${self.state.get('cash', 0):,.2f}**")
-        lines.append(f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)**")
+        return (f"💰 Vốn BĐ: **${initial_capital:,.2f}** | 💵 Tiền mặt: **${self.state.get('cash', 0):,.2f}**\n"
+                f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)**")
 
-        # PnL Summary
+    def _build_pnl_summary_line(self, realtime_prices: Dict[str, float]) -> str:
+        """Tạo dòng tóm tắt PnL cho báo cáo."""
         df_history = pd.DataFrame(self.state.get('trade_history', []))
         total_trades = len(df_history)
         win_rate_str = "N/A"
         if total_trades > 0:
             winning_trades = len(df_history[df_history['pnl_usd'] > 0])
             win_rate_str = f"{winning_trades / total_trades * 100:.2f}% ({winning_trades}/{total_trades})"
+
         total_pnl_closed = df_history['pnl_usd'].sum() if total_trades > 0 else 0.0
         realized_partial_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in self.state.get('active_trades', []))
         unrealized_pnl = sum(self._get_current_pnl(t, current_price=realtime_prices.get(t['symbol']))[0] for t in self.state.get('active_trades', []))
-        lines.append(f"\n🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | 💎 PnL TP1: **${realized_partial_pnl:,.2f}** | 🌊 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**")
-
-        # Active Trades
-        active_trades = self.state.get('active_trades', [])
-        lines.append(f"\n--- **Vị thế đang mở ({len(active_trades)})** ---")
-        if not active_trades:
-            lines.append("  (Không có vị thế nào)")
-        else:
-            for trade in sorted(active_trades, key=lambda x: x['entry_time']):
-                current_price = realtime_prices.get(trade["symbol"])
-                if current_price:
-                    lines.append(self._build_trade_details_for_report(trade, current_price))
         
-        lines.append("\n====================================")
-        return "\n".join(lines)
+        return (f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | "
+                f"💎 PnL TP1: **${realized_partial_pnl:,.2f}** | 🌊 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**")
 
     def _build_trade_details_for_report(self, trade: Dict, realtime_price: float) -> str:
         """Tạo chuỗi chi tiết cho một lệnh đang mở trong báo cáo."""
@@ -822,22 +770,110 @@ class PaperTrader:
         dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
         tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
         tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
+        
         entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
         score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
         zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone', 'N/A')}" if trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
         tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
+        
         invested_usd, current_value = trade.get('total_invested_usd', 0.0), trade.get('total_invested_usd', 0.0) + pnl_usd
         
-        details1 = f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)**"
-        details2 = f"  Giữ:{holding_h:.1f}h{dca_info}{tp1_info}"
-        details3 = f"  Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}"
-        return f"{details1}\n   {details2}\n   {details3}"
+        return (f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)**\n"
+                f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}")
 
-    def _should_send_report(self, equity: float) -> Optional[str]:
+    def _format_closed_trade_line(self, trade_data: pd.Series) -> str:
+        """Helper function to format a single line for a closed trade in the history section."""
+        try:
+            entry_time = pd.to_datetime(trade_data['entry_time']).tz_convert(self.config.VIETNAM_TZ)
+            exit_time = pd.to_datetime(trade_data['exit_time']).tz_convert(self.config.VIETNAM_TZ)
+            hold_duration_h = (exit_time - entry_time).total_seconds() / 3600
+
+            tactics_list = trade_data.get('tactic_used', [])
+            tactics_str = ', '.join(map(str, tactics_list)) if isinstance(tactics_list, list) and tactics_list else trade_data.get('opened_by_tactic', 'N/A')
+
+            info_str = f"Tactic: {tactics_str}"
+            symbol_with_interval = f"{trade_data['symbol']}-{trade_data.get('interval', 'N/A')}"
+            pnl_info = f"${trade_data.get('pnl_usd', 0):.2f} ({trade_data.get('pnl_percent', 0):+.2f}%)"
+            return f"  • **{symbol_with_interval}** | PnL: `{pnl_info}` | {info_str} | Hold: {hold_duration_h:.1f}h"
+        except Exception as e:
+            return f"  • {trade_data.get('symbol', 'N/A')} - Lỗi báo cáo lịch sử: {e}"
+
+    def _build_dynamic_alert_text(self, realtime_prices: Dict[str, float], equity: float) -> str:
+        """Builds the concise, dynamic alert for quick updates."""
+        now_vn_str = datetime.now(self.config.VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
+        lines = [f"💡 **CẬP NHẬT ĐỘNG (PAPER)** - `{now_vn_str}`"]
+        lines.append(self._build_report_header(equity))
+        lines.append("\n" + self._build_pnl_summary_line(realtime_prices))
+        
+        active_trades = self.state.get('active_trades', [])
+        lines.append(f"\n--- **Vị thế đang mở ({len(active_trades)})** ---")
+        if not active_trades:
+            lines.append("  (Không có vị thế nào)")
+        else:
+            for trade in sorted(active_trades, key=lambda x: x['entry_time']):
+                lines.append(self._build_trade_details_for_report(trade, realtime_prices[trade["symbol"]]))
+                
+        lines.append("\n====================================")
+        return "\n".join(lines)
+
+    def _build_daily_summary_text(self, realtime_prices: Dict[str, float], equity: float) -> str:
+        """Builds the enhanced, detailed daily summary report."""
+        now_vn_str = datetime.now(self.config.VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
+        lines = [f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY (PAPER)** - `{now_vn_str}` 📊"]
+        
+        lines.append(self._build_report_header(equity))
+        lines.append("\n" + self._build_pnl_summary_line(realtime_prices))
+
+        lines.append("\n--- **Chi tiết trong phiên** ---")
+        lines.append(f"✨ Lệnh mới mở: {len(self.session_events)}")
+        if self.session_events: lines.extend([f"  - {msg}" for msg in self.session_events])
+
+        active_trades = self.state.get('active_trades', [])
+        lines.append(f"\n--- **Vị thế đang mở ({len(active_trades)})** ---")
+        if not active_trades:
+            lines.append("  (Không có vị thế nào)")
+        else:
+            for trade in sorted(active_trades, key=lambda x: x['entry_time']):
+                lines.append(self._build_trade_details_for_report(trade, realtime_prices[trade["symbol"]]))
+
+        lines.append("\n--- **Lịch sử giao dịch gần nhất** ---")
+        trade_history = self.state.get('trade_history', [])
+        if trade_history:
+            df_history = pd.DataFrame(trade_history)
+            if 'exit_time' in df_history.columns and not df_history['exit_time'].isnull().all():
+                df_history['exit_time_dt'] = pd.to_datetime(df_history['exit_time'])
+                df_history['pnl_usd'] = pd.to_numeric(df_history['pnl_usd'], errors='coerce').fillna(0.0)
+                
+                winning_trades = df_history[df_history['pnl_usd'] > 0]
+                losing_trades = df_history[df_history['pnl_usd'] <= 0]
+
+                lines.append("\n**✅ Top 5 lệnh lãi gần nhất**")
+                if not winning_trades.empty:
+                    for _, trade in winning_trades.sort_values(by='exit_time_dt', ascending=False).head(5).iterrows():
+                        lines.append(self._format_closed_trade_line(trade))
+                else:
+                    lines.append("  (Chưa có lệnh lãi)")
+
+                lines.append("\n**❌ Top 5 lệnh lỗ/hòa vốn gần nhất**")
+                if not losing_trades.empty:
+                    for _, trade in losing_trades.sort_values(by='exit_time_dt', ascending=False).head(5).iterrows():
+                        lines.append(self._format_closed_trade_line(trade))
+                else:
+                    lines.append("  (Chưa có lệnh lỗ/hòa vốn)")
+            else:
+                lines.append("  (Lịch sử giao dịch chưa có thời gian đóng lệnh để sắp xếp.)")
+        else:
+            lines.append("  (Chưa có lịch sử giao dịch)")
+
+        lines.append("\n====================================")
+        return "\n".join(lines)
+
+    def _should_send_report(self, equity: Optional[float]) -> Optional[str]:
         """Quyết định xem có nên gửi báo cáo hay không và loại báo cáo nào."""
+        if equity is None: return None
+
         now_vn = datetime.now(self.config.VIETNAM_TZ)
         
-        # Daily Summary Report
         last_summary_str = self.state.get('last_summary_sent_time')
         last_summary_dt = datetime.fromisoformat(last_summary_str).astimezone(self.config.VIETNAM_TZ) if last_summary_str else None
         for time_str in self.config.GENERAL.get("DAILY_SUMMARY_TIMES", []):
@@ -846,7 +882,6 @@ class PaperTrader:
             if now_vn >= scheduled_dt_today and (last_summary_dt is None or last_summary_dt < scheduled_dt_today):
                 return "daily"
 
-        # Dynamic Update Report
         dyn_cfg = self.config.DYNAMIC_ALERT
         if not dyn_cfg.get("ENABLED", False): return None
         
@@ -881,41 +916,46 @@ class PaperTrader:
         try:
             self.session_events = []
             
-            # Tính toán tài sản ban đầu cho phiên
-            equity = self._calculate_total_equity()
+            equity = self._calculate_total_equity() # Tính toán sơ bộ
+            if equity is None: equity = self.state.get('cash', self.config.INITIAL_CAPITAL) # Fallback
 
-            # Thực hiện các tác vụ chính
             self._run_heavy_tasks(equity)
             self._manage_open_positions()
             self._handle_stale_trades()
             self._handle_dca_opportunities(equity)
 
-            # Ghi log các sự kiện trong phiên
             if self.session_events:
                 self._log_message("---[🔔 Cập nhật sự kiện trong phiên 🔔]---")
                 for msg in self.session_events:
                     self._log_message(f"  {msg}")
             
-            # Lấy giá realtime để báo cáo chính xác nhất
+            # CRITICAL: Lấy giá realtime cho tất cả các lệnh đang mở
             active_symbols = list(set([t['symbol'] for t in self.state.get('active_trades', [])]))
             realtime_prices = {sym: price for sym in active_symbols if (price := self._get_realtime_price(sym)) is not None}
+            
+            # An toàn là trên hết: Chỉ tiếp tục nếu có đủ giá
+            if len(realtime_prices) != len(active_symbols):
+                missing = [s for s in active_symbols if s not in realtime_prices]
+                self._log_message(f"⚠️ Tạm dừng báo cáo do không lấy được giá cho: {', '.join(missing)}")
+            else:
+                final_equity = self._calculate_total_equity(realtime_prices=realtime_prices)
+                if final_equity is not None:
+                    report_type_to_send = self._should_send_report(final_equity)
+                    if report_type_to_send:
+                        self._log_message(f"📬 Gửi báo cáo loại: {report_type_to_send.upper()}")
+                        
+                        if report_type_to_send == "daily":
+                            report_content = self._build_daily_summary_text(realtime_prices, final_equity)
+                            self.state['last_summary_sent_time'] = datetime.now(self.config.VIETNAM_TZ).isoformat()
+                        else: # dynamic
+                            report_content = self._build_dynamic_alert_text(realtime_prices, final_equity)
+                        
+                        self._send_discord_message(report_content)
+                        
+                        initial_capital = self.state.get('initial_capital', 1)
+                        current_pnl_pct = ((final_equity - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
+                        self.state['last_dynamic_alert'] = {"timestamp": datetime.now(self.config.VIETNAM_TZ).isoformat(), "total_pnl_percent": current_pnl_pct}
 
-            # Tính toán tài sản cuối cùng và gửi báo cáo nếu cần
-            final_equity = self._calculate_total_equity(realtime_prices=realtime_prices)
-            report_type_to_send = self._should_send_report(final_equity)
-            if report_type_to_send:
-                self._log_message(f"📬 Gửi báo cáo loại: {report_type_to_send.upper()}")
-                report_content = self._build_report_text(realtime_prices, report_type_to_send)
-                self._send_discord_message(report_content)
-                if report_type_to_send == "daily":
-                    self.state['last_summary_sent_time'] = datetime.now(self.config.VIETNAM_TZ).isoformat()
-                
-                # Cập nhật trạng thái cho lần báo cáo động tiếp theo
-                initial_capital = self.state.get('initial_capital', 1)
-                current_pnl_pct = ((final_equity - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
-                self.state['last_dynamic_alert'] = {"timestamp": datetime.now(self.config.VIETNAM_TZ).isoformat(), "total_pnl_percent": current_pnl_pct}
-
-            # Dọn dẹp và lưu trạng thái
             if 'last_critical_error' in self.state: self.state['last_critical_error'] = {}
             self._save_state()
             self._log_message("✅ Phiên làm việc hoàn tất.\n" + "="*50)
@@ -947,7 +987,6 @@ class PaperTrader:
             response.raise_for_status()
             return float(response.json()['price'])
         except requests.exceptions.RequestException:
-            # Không log lỗi ở đây để tránh spam khi API có vấn đề tạm thời
             return None
 
 if __name__ == "__main__":

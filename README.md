@@ -215,6 +215,10 @@ rice_alert_analysis_document: |
   -   **Vấn đề "Lệnh Ma" (Ghost Trade):** Người dùng bán coin thủ công trên sàn, bot không biết và tiếp tục quản lý một lệnh không còn tồn tại.
   -   **Giải pháp:** Đầu mỗi phiên, bot đối soát bắt buộc: so sánh danh sách lệnh trong `state.json` với số dư thực tế trên sàn. Nếu số dư thực tế thấp hơn đáng kể (dựa trên ngưỡng `RECONCILIATION_QTY_THRESHOLD`), bot hiểu rằng lệnh đã bị can thiệp.
   -   **Hành động:** Bot tự động đóng "lệnh ma", ghi vào lịch sử với trạng thái `Closed (Desynced)` và loại bỏ khỏi danh sách theo dõi.
+  **Cơ chế nâng cấp mới nhất quản lý lệnh mô côi và lỗi giao dịch nhỏ**
+  -  **"MIN_ORDER_VALUE_USDT": 11.0, # Ngưỡng giá trị lệnh tối thiểu (để 11$ cho an toàn)**
+  -  **"OVERRIDE_COOLDOWN_SCORE": 7.5, # Điểm số tối thiểu để phá vỡ cooldown**
+  -  **"ORPHAN_ASSET_MIN_VALUE_USDT": 10.0, # Giá trị tối thiểu (USD) để báo cáo một tài sản mồ côi**
   
   ---
   
@@ -229,3 +233,4 @@ rice_alert_analysis_document: |
   3.  **Nâng cấp:** Tập trung nguồn lực vào việc nâng cấp các điểm yếu đã xác định (AI tuần tự, LLM cho tin tức) một cách có hệ thống.
   
   Tài liệu này cung cấp một bản đồ chi tiết của hệ thống, là cơ sở cho các bước tối ưu hóa và phát triển tiếp theo.
+

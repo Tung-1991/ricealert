@@ -2,18 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 Live Trade - The 4-Zone Strategy
-Version: 8.4.2 - Enhanced Reporting & Analytics
+Version: 8.6.0 - Ultimate Safety & Flexibility
 Date: 2025-08-03
 
-CHANGELOG (v8.4.2):
-- REPORTING OVERHAUL: Integrated the detailed reporting style from the legacy paper_trade script.
-  - The main "Daily Summary" report is now significantly more detailed, including:
-    - A session summary (newly opened/closed trades).
-    - A detailed list of currently open positions.
-    - A new "Recent Trade History" section showing the Top 5 recent winning trades and Top 5 recent losing/break-even trades.
-  - "Dynamic Alerts" remain concise for quick PnL updates.
-- CODE STRUCTURE: Refactored reporting functions into `build_dynamic_alert_text` and `build_daily_summary_text` for clarity and maintainability.
-- HELPER FUNCTIONS: Added `format_closed_trade_line` to create detailed one-line summaries for historical trades in the daily report.
+CHANGELOG (v8.6.0):
+- ROBUSTNESS (Orphan Asset Detection): The reconciliation process now detects assets present on Binance but missing from the state file ("orphan trades"). It sends a Discord alert if the asset's value exceeds a configurable threshold, prompting manual intervention via the control panel.
+- FLEXIBILITY (Dynamic Cooldown): Implemented a flexible cooldown mechanism. The bot can now override the standard trade cooldown period for a symbol if a new, exceptionally high-scoring opportunity (above `OVERRIDE_COOLDOWN_SCORE`) arises.
+- SAFETY (Minimum Order Size): Integrated checks to prevent failed orders due to size being below Binance's minimum threshold.
+  - DCA: Skips DCA attempts if the calculated investment amount is too small.
+  - Partial Take-Profit: If the remaining position value after a partial close would be too small ("dust"), the bot intelligently closes 100% of the position instead to avoid stranded assets.
+- PRECISION (SL Price Check): Added a real-time price fetch immediately before the Stop-Loss check to minimize intra-run latency, ensuring the most up-to-date price for critical exit decisions.
+- CONFIG: Added `MIN_ORDER_VALUE_USDT`, `OVERRIDE_COOLDOWN_SCORE`, and `ORPHAN_ASSET_MIN_VALUE_USDT` to GENERAL_CONFIG for enhanced control.
 """
 import os
 import sys
@@ -49,7 +48,7 @@ CACHE_DIR = os.path.join(LIVE_DATA_DIR, "indicator_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ==============================================================================
-# ================== ⚙️ TRUNG TÂM CẤU HÌNH (v8.4.2) ⚙️ ===================
+# ================== ⚙️ TRUNG TÂM CẤU HÌNH (v8.6.0) ⚙️ ===================
 # ==============================================================================
 TRADING_MODE: Literal["live", "testnet"] = "testnet"
 INITIAL_CAPITAL = 0.0
@@ -64,7 +63,11 @@ GENERAL_CONFIG = {
     "DEPOSIT_DETECTION_MIN_USD": 5.0,
     "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.005,
     "CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES": 45,
-    "RECONCILIATION_QTY_THRESHOLD": 0.95
+    "RECONCILIATION_QTY_THRESHOLD": 0.95,
+    # CÁC BIẾN MỚI CHO BẢN v8.6.0
+    "MIN_ORDER_VALUE_USDT": 11.0, # Ngưỡng giá trị lệnh tối thiểu (để 11$ cho an toàn)
+    "OVERRIDE_COOLDOWN_SCORE": 7.5, # Điểm số tối thiểu để phá vỡ cooldown
+    "ORPHAN_ASSET_MIN_VALUE_USDT": 10.0, # Giá trị tối thiểu (USD) để báo cáo một tài sản mồ côi
 }
 MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,
@@ -324,7 +327,7 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
     if os.path.exists(cache_filepath):
         try: existing_df = pd.read_parquet(cache_filepath)
         except Exception as e: log_error(f"Lỗi đọc file cache {cache_filepath}: {e}. Sẽ tải lại.")
-    
+
     if existing_df is not None and not existing_df.empty:
         last_ts = int(existing_df.index[-1].timestamp() * 1000)
         interval_ms = get_interval_in_milliseconds(interval)
@@ -349,16 +352,16 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
         except Exception as e:
             log_error(f"Lỗi lưu file cache {cache_filepath}: {e}")
         return final_df
-    
+
     return existing_df if existing_df is not None else None
 
 
 def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, state: Dict, close_pct: float = 1.0) -> bool:
     symbol = trade['symbol']
-    side = "SELL" 
+    side = "SELL"
     quantity_to_close = float(trade.get('quantity', 0)) * close_pct
     if quantity_to_close <= 0: return False
-    
+
     trade.setdefault('close_retry_count', 0)
     try:
         market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=quantity_to_close)
@@ -377,7 +380,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
 
     closed_qty = float(market_close_order['executedQty'])
     exit_price = float(market_close_order['cummulativeQuoteQty']) / closed_qty if closed_qty > 0 else trade['entry_price']
-    
+
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
 
@@ -408,6 +411,8 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
 def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
     active_trades = state.get("active_trades", [])[:]
     if not active_trades: return
+    
+    min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
 
     for trade in active_trades:
         symbol, tactic_name = trade['symbol'], trade.get('opened_by_tactic')
@@ -415,6 +420,11 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
         current_price = realtime_prices.get(symbol)
         if not current_price: continue
 
+        # Lấy lại giá mới nhất ngay trước khi kiểm tra SL để tăng độ chính xác
+        precise_price_for_sl = get_realtime_price(symbol)
+        if precise_price_for_sl is not None:
+            current_price = precise_price_for_sl # Cập nhật giá để các logic sau dùng giá mới nhất
+        
         if current_price <= trade['sl']:
             if close_trade_on_binance(bnc, trade, "SL", state): continue
         if current_price >= trade['tp']:
@@ -429,9 +439,17 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
         
         if trade.get('is_in_warning_zone', False) and not trade.get('partial_closed_by_score', False):
             if last_score < entry_score * (1 - ACTIVE_TRADE_MANAGEMENT_CONFIG.get('EARLY_CLOSE_RELATIVE_DROP_PCT', 0.35)):
-                if close_trade_on_binance(bnc, trade, f"EC_Rel_{last_score:.1f}", state, close_pct=ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)):
+                close_pct = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)
+                # Kiểm tra giá trị lệnh còn lại
+                remaining_value = (trade.get('quantity', 0) * (1 - close_pct)) * current_price
+                if remaining_value < min_order_value:
+                    log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) quá nhỏ. Đóng toàn bộ thay vì một phần.", state)
+                    close_pct = 1.0 # Ghi đè để đóng 100%
+                
+                if close_trade_on_binance(bnc, trade, f"EC_Rel_{last_score:.1f}", state, close_pct=close_pct):
                     trade['partial_closed_by_score'] = True
-                    trade['sl'] = trade['entry_price']
+                    if close_pct < 1.0: # Chỉ đặt SL về entry nếu không phải đóng toàn bộ
+                        trade['sl'] = trade['entry_price']
         
         _, pnl_percent = get_current_pnl(trade, realtime_price=current_price)
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
@@ -441,23 +459,39 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
         if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get("tp1_hit", False) and initial_risk_dist > 0:
             pnl_ratio = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio >= tactic_cfg.get("TP1_RR_RATIO", 1.0):
-                if close_trade_on_binance(bnc, trade, f"TP1_{tactic_cfg.get('TP1_RR_RATIO', 1.0):.1f}R", state, close_pct=tactic_cfg.get("TP1_PROFIT_PCT", 0.5)):
+                close_pct = tactic_cfg.get("TP1_PROFIT_PCT", 0.5)
+                # Kiểm tra giá trị lệnh còn lại
+                remaining_value = (trade.get('quantity', 0) * (1 - close_pct)) * current_price
+                if remaining_value < min_order_value:
+                    log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau TP1 quá nhỏ. Đóng toàn bộ.", state)
+                    close_pct = 1.0 # Ghi đè để đóng 100%
+
+                if close_trade_on_binance(bnc, trade, f"TP1_{tactic_cfg.get('TP1_RR_RATIO', 1.0):.1f}R", state, close_pct=close_pct):
                     trade['tp1_hit'] = True
-                    trade['sl'] = trade['entry_price']
+                    if close_pct < 1.0: # Chỉ đặt SL về entry nếu không phải đóng toàn bộ
+                        trade['sl'] = trade['entry_price']
 
         pp_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PROFIT_PROTECTION", {})
         if pp_config.get("ENABLED", False) and not trade.get('profit_taken', False) and trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.5):
             if (trade['peak_pnl_percent'] - pnl_percent) >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.0):
-                if close_trade_on_binance(bnc, trade, "Protect_Profit", state, close_pct=pp_config.get("PARTIAL_CLOSE_PCT", 0.7)):
+                close_pct = pp_config.get("PARTIAL_CLOSE_PCT", 0.7)
+                # Kiểm tra giá trị lệnh còn lại
+                remaining_value = (trade.get('quantity', 0) * (1 - close_pct)) * current_price
+                if remaining_value < min_order_value:
+                    log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau Profit-Protect quá nhỏ. Đóng toàn bộ.", state)
+                    close_pct = 1.0 # Ghi đè để đóng 100%
+
+                if close_trade_on_binance(bnc, trade, "Protect_Profit", state, close_pct=close_pct):
                     trade['profit_taken'] = True
-                    trade['sl'] = trade['entry_price']
+                    if close_pct < 1.0: # Chỉ đặt SL về entry nếu không phải đóng toàn bộ
+                        trade['sl'] = trade['entry_price']
 
         if tactic_cfg.get("USE_TRAILING_SL", False) and initial_risk_dist > 0:
             pnl_ratio_from_entry = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio_from_entry >= tactic_cfg.get("TRAIL_ACTIVATION_RR", float('inf')):
                 new_sl = current_price - (initial_risk_dist * tactic_cfg.get("TRAIL_DISTANCE_RR", 0.8))
                 if new_sl > trade['sl']:
-                    state.setdefault('temp_newly_closed_trades', []).append(f"� TSL {symbol}: SL mới {new_sl:.4f} (cũ {trade['sl']:.4f})")
+                    state.setdefault('temp_newly_closed_trades', []).append(f"⚙️ TSL {symbol}: SL mới {new_sl:.4f} (cũ {trade['sl']:.4f})")
                     trade['sl'] = new_sl
                     if "Trailing_SL_Active" not in trade.get('tactic_used', []):
                         trade.setdefault('tactic_used', []).append("Trailing_SL_Active")
@@ -484,6 +518,7 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
     current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
     exposure_limit = total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]
     now = datetime.now(VIETNAM_TZ)
+    min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
 
     for trade in state.get("active_trades", [])[:]:
         if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]: continue
@@ -499,6 +534,11 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         if get_advisor_decision(trade['symbol'], trade['interval'], indicator_results.get(trade["symbol"], {}).get(trade["interval"], {}), ADVISOR_BASE_CONFIG).get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
 
         dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * DCA_CONFIG["CAPITAL_MULTIPLIER"]
+        
+        if dca_investment < min_order_value:
+            log_message(f"⚠️ Bỏ qua DCA cho {trade['symbol']}: Vốn DCA dự tính ({dca_investment:,.2f}$) quá nhỏ.", state=state)
+            continue
+        
         if dca_investment <= 0 or dca_investment > available_usdt or (current_exposure_usd + dca_investment) > exposure_limit: continue
         
         try:
@@ -567,12 +607,13 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
     if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]: return
     potential_opportunities = []
     now_vn = datetime.now(VIETNAM_TZ)
+    cooldown_map = state.get('cooldown_until', {})
 
     for symbol in SYMBOLS_TO_SCAN:
         if any(t['symbol'] == symbol for t in state.get("active_trades", [])): continue
-        cooldown_map = state.get('cooldown_until', {})
-        if symbol in cooldown_map and now_vn < datetime.fromisoformat(cooldown_map[symbol]): continue
-
+        
+        is_in_cooldown = symbol in cooldown_map and now_vn < datetime.fromisoformat(cooldown_map[symbol])
+        
         for interval in INTERVALS_TO_SCAN:
             market_zone = determine_market_zone_with_scoring(symbol, interval)
             for tactic_name, tactic_cfg in TACTICS_LAB.items():
@@ -585,6 +626,15 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
                     
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
                     adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval)
+                    
+                    # Logic phá vỡ cooldown
+                    if is_in_cooldown:
+                        if adjusted_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
+                            log_message(f"🔥 {symbol} có điểm {adjusted_score:.2f}, vượt ngưỡng! Phá vỡ cooldown.", state)
+                            # Cho phép đi tiếp
+                        else:
+                            continue # Bỏ qua tactic này nếu không đủ điểm phá cooldown
+                    
                     potential_opportunities.append({"decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, "score": adjusted_score, "symbol": symbol, "interval": interval, "zone": market_zone})
     
     log_message("---[🔍 Quét Cơ Hội Mới 🔍]---", state=state)
@@ -634,9 +684,10 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
     capital_pct = ZONE_BASED_POLICIES.get(zone, {}).get("CAPITAL_PCT", 0.03)
     invested_amount = total_usdt_fund * capital_pct
     current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
+    min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
     
-    if invested_amount > available_usdt or (current_exposure_usd + invested_amount) > total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"] or invested_amount < 10:
-        log_message(f"  => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro cho {symbol}. Hủy cơ hội.", state=state)
+    if invested_amount > available_usdt or (current_exposure_usd + invested_amount) > total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"] or invested_amount < min_order_value:
+        log_message(f"  => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro cho {symbol} (Dự tính: ${invested_amount:.2f}). Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
 
@@ -704,7 +755,7 @@ def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type
     return 1.0
 
 # ==============================================================================
-# ==================== BÁO CÁO & VÒNG LẶP CHÍNH (v8.4.2) =======================
+# ==================== BÁO CÁO & VÒNG LẶP CHÍNH (v8.6.0) =======================
 # ==============================================================================
 
 def calculate_total_equity(state: Dict, total_usdt_on_binance: float, realtime_prices: Dict[str, Optional[float]]) -> Optional[float]:
@@ -925,10 +976,11 @@ def run_heavy_tasks(bnc: BinanceConnector, state: Dict, available_usdt: float, t
 
 
 def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
-    active_trades = state.get("active_trades", [])
-    if not active_trades:
-        return
-
+    """
+    Đối soát trạng thái giữa bot và Binance.
+    1. Dọn dẹp các lệnh trong state nhưng không còn trên sàn (đóng thủ công).
+    2. Phát hiện các tài sản "mồ côi" (có trên sàn nhưng không có trong state).
+    """
     try:
         balances = bnc.get_account_balance().get("balances", [])
         asset_balances = {item['asset']: float(item['free']) + float(item['locked']) for item in balances}
@@ -936,8 +988,11 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
         log_error("Không thể lấy số dư tài khoản để đối soát.", error_details=str(e), state=state)
         return
 
+    # --- Phần 1: Dọn dẹp các lệnh không đồng bộ (Desynced Trades) ---
+    active_trades = state.get("active_trades", [])
     trades_to_remove = []
     threshold = GENERAL_CONFIG["RECONCILIATION_QTY_THRESHOLD"]
+    
     for trade in active_trades:
         symbol_asset = trade['symbol'].replace("USDT", "")
         bot_quantity = float(trade.get('quantity', 0))
@@ -960,6 +1015,25 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
 
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
         log_message(f"---[✅ Đã dọn dẹp xong]---", state=state)
+
+    # --- Phần 2: Phát hiện tài sản mồ côi (Orphan Assets) ---
+    symbols_in_state = {t['symbol'] for t in state.get("active_trades", [])}
+    min_orphan_value = GENERAL_CONFIG["ORPHAN_ASSET_MIN_VALUE_USDT"]
+    
+    for asset_code, quantity in asset_balances.items():
+        if asset_code in ["USDT", "BNB"]: continue # Bỏ qua các coin cơ bản
+        
+        symbol_usdt = f"{asset_code}USDT"
+        if symbol_usdt in SYMBOLS_TO_SCAN and symbol_usdt not in symbols_in_state:
+            price = get_realtime_price(symbol_usdt)
+            if price:
+                asset_value_usdt = quantity * price
+                if asset_value_usdt > min_orphan_value:
+                    msg = (f"⚠️ PHÁT HIỆN TÀI SẢN MỒ CÔI: **{quantity:.6f} {asset_code}** (trị giá ~${asset_value_usdt:,.2f}). "
+                           f"Tài sản này có trên sàn nhưng không được quản lý bởi bot. "
+                           f"Vui lòng dùng Control Panel để 'nhận nuôi' hoặc xử lý thủ công.")
+                    log_error(msg, send_to_discord=True, force_discord=True, state=state)
+
 
 def run_session():
     if not acquire_lock():

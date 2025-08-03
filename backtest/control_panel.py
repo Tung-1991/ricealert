@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 Control Panel for Paper Trading
-Version: 1.3.0 - OOP Compatibility Fix
+Version: 1.3.1 - Enhanced Display Format
 Date: 2025-08-03
 
-CHANGELOG (v1.3.0):
-- FIX: Hoàn toàn tương thích với cấu trúc OOP của paper_trade.py v8.3.1.
-- FIX: Thay vì import các hàm riêng lẻ (gây lỗi), script giờ sẽ import và khởi tạo class PaperTrader.
-- REFACTOR: Các lời gọi hàm được thay thế bằng các lời gọi phương thức trên đối tượng trader (ví dụ: trader._close_trade_simulated()).
-- REFACTOR: Sử dụng trader._save_state() thay vì hàm save_state() cục bộ để đảm bảo tính nhất quán.
-- REFACTOR: Truy cập cấu hình thông qua class Config (ví dụ: Config.TACTICS_LAB).
-- NEW: Thêm hàm build_simple_header để tái tạo lại chức năng báo cáo tóm tắt.
+CHANGELOG (v1.3.1):
+- UI/UX: Overhauled the `view_open_trades` function for a much cleaner, more readable,
+  and professional multi-line display for each trade, similar to modern trading panels.
+- Readability: Each trade's info is now split into three logical lines:
+  1. Identification & Tactic Info.
+  2. PnL, Duration & Capital Info.
+  3. Key Price Levels (Entry, Current, TP, SL).
+- This change significantly improves at-a-glance diagnostics.
 """
 import os
 import sys
@@ -22,23 +23,21 @@ import requests
 import uuid
 import traceback
 
-# --- CẤU HÌNH ĐƯỜNG DẪN (Đã sửa) ---
+# --- CẤU HÌNH ĐƯỜNG DẪN ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-sys.path.append(PROJECT_ROOT) # Thêm thư mục gốc (ricealert) vào path
+sys.path.append(PROJECT_ROOT)
 
 try:
-    # Import class chính thay vì các hàm riêng lẻ để tương thích với OOP
     from paper_trade import PaperTrader, Config
 except ImportError as e:
-    sys.exit(f"Lỗi: Không thể import class `PaperTrader` hoặc `Config`.\nHãy chắc chắn file `paper_trade.py` tồn tại và không có lỗi cú pháp.\nLỗi chi tiết: {e}")
+    sys.exit(f"Lỗi: Không thể import class `PaperTrader` hoặc `Config`.\nLỗi chi tiết: {e}")
 
-# --- CÁC HẰNG SỐ VÀ CẤU HÌNH (Lấy từ class Config) ---
+# --- CÁC HẰNG SỐ VÀ CẤU HÌNH ---
 STATE_FILE = os.path.join(BASE_DIR, "paper_data", "paper_trade_state.json")
 ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 
-# Truy cập cấu hình thông qua class Config
 TACTICS = list(Config.TACTICS_LAB.keys())
 ZONES = Config.ZONES
 INTERVALS = Config.INTERVALS_TO_SCAN
@@ -95,9 +94,10 @@ def build_simple_header(trader, equity):
 # --- CÁC HÀM CHỨC NĂNG (Đã cập nhật để dùng PaperTrader) ---
 
 def view_open_trades():
+    """Hiển thị các lệnh đang mở với định dạng mới, chi tiết và dễ đọc."""
     print("\n--- DANH SÁCH LỆNH ĐANG MỞ (Real-time) ---")
     try:
-        trader = PaperTrader() # Khởi tạo trader, tự động tải state
+        trader = PaperTrader()
     except SystemExit as e:
         print(f"❌ Lỗi khi khởi tạo PaperTrader: {e}")
         return None
@@ -111,8 +111,11 @@ def view_open_trades():
     symbols_needed = list(set(trade['symbol'] for trade in active_trades))
     prices = {sym: get_current_price(sym) for sym in symbols_needed}
 
-    # Gọi phương thức từ đối tượng trader
     total_equity = trader._calculate_total_equity(realtime_prices=prices)
+    if total_equity is None:
+        print("⚠️ Không thể tính tổng tài sản do thiếu dữ liệu giá.")
+        total_equity = trader.state.get('cash', 0) # Fallback
+
     report_header = build_simple_header(trader, total_equity)
     print(report_header)
     print("-" * 80)
@@ -120,6 +123,7 @@ def view_open_trades():
     for i, trade in enumerate(active_trades):
         symbol = trade.get('symbol', 'N/A')
         current_price = prices.get(symbol)
+        
         if current_price is None:
             print(f"{i+1}. ⚠️ {symbol} - Không thể lấy giá hiện tại.")
             continue
@@ -131,7 +135,6 @@ def view_open_trades():
         dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
         tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
         tp1_info = " TP1✅" if trade.get('tp1_hit', False) else ""
-
         stale_info = ""
         if 'stale_override_until' in trade and datetime.now(VIETNAM_TZ) < datetime.fromisoformat(trade['stale_override_until']):
             stale_info = f" 🛡️Gia hạn"
@@ -140,15 +143,21 @@ def view_open_trades():
         score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
         zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone', 'N/A')}" if trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
         tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
-
-        line1 = f"{i+1}. {pnl_icon} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) | Giữ:{holding_hours:.1f}h{dca_info}{tp1_info}{stale_info}"
+        
         current_value = trade.get('total_invested_usd', 0) + pnl_usd
-        line2 = f"    Vốn:${trade.get('total_invested_usd', 0):,.2f} -> ${current_value:,.2f} | Entry:{trade.get('entry_price', 0):.4f} Cur:{current_price:.4f} TP:{trade.get('tp', 0):.4f} SL:{trade.get('sl', 0):.4f}{tsl_info}"
+
+        # Định dạng 3 dòng mới
+        line1 = f"{i+1}. {pnl_icon} {symbol}-{trade.get('interval', 'N/A')} {tactic_info}"
+        line2 = f"    PnL: {pnl_usd:+.2f} ({pnl_percent:+.2f}%) | Giữ: {holding_hours:.1f}h | Vốn: ${trade.get('total_invested_usd', 0):,.2f} -> ${current_value:,.2f}{dca_info}{tp1_info}{stale_info}"
+        line3 = f"    Entry: {trade.get('entry_price', 0):.4f} | Cur: {current_price:.4f} | TP: {trade.get('tp', 0):.4f} | SL: {trade.get('sl', 0):.4f}{tsl_info}"
 
         print(line1)
         print(line2)
+        print(line3)
+        
     print("-" * 80)
     return active_trades
+
 
 def close_manual_trades():
     print("\n--- Chức năng: Đóng lệnh thủ công ---")
@@ -156,7 +165,7 @@ def close_manual_trades():
     if not active_trades: return
 
     try:
-        trader = PaperTrader() # Khởi tạo lại để có state mới nhất
+        trader = PaperTrader()
         choice = input("\n👉 Nhập số thứ tự của các lệnh cần đóng (ví dụ: 1,3). Nhấn Enter để hủy: ")
         if not choice.strip():
             print("Hủy thao tác.")
@@ -181,15 +190,14 @@ def close_manual_trades():
             if current_price is None:
                 print(f"❌ Không thể đóng {trade['symbol']} vì không lấy được giá.")
                 continue
-            
-            # Gọi phương thức từ đối tượng trader. Nó sẽ tự cập nhật trader.state
+
             success = trader._close_trade_simulated(trade, "Manual Panel", current_price)
             if success:
                 print(f"✅ Đã đóng {trade['symbol']} thành công.")
             else:
                 print(f"❌ Đóng {trade['symbol']} thất bại.")
-        
-        trader._save_state() # Lưu lại state đã được thay đổi
+
+        trader._save_state()
         print("\n✅ Đã lưu lại trạng thái thành công!")
 
     except Exception as e:
@@ -214,7 +222,7 @@ def close_all_trades():
             if current_price is None:
                 print(f"❌ Không thể đóng {trade['symbol']} vì không lấy được giá. Bỏ qua.")
                 continue
-            
+
             if trader._close_trade_simulated(trade, "All Manual", current_price):
                 print(f"✅ Đóng {trade['symbol']} thành công.")
                 closed_count += 1
