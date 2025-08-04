@@ -66,6 +66,7 @@ GENERAL_CONFIG = {
     "MIN_ORDER_VALUE_USDT": 11.0,                # Giá trị lệnh tối thiểu (USD) để đặt lệnh trên sàn
     "OVERRIDE_COOLDOWN_SCORE": 7.5,              # Điểm số tối thiểu để phá vỡ thời gian nghỉ và vào lệnh ngay
     "ORPHAN_ASSET_MIN_VALUE_USDT": 10.0,         # Giá trị (USD) tối thiểu của một tài sản "mồ côi" để bot cảnh báo
+    "TOP_N_OPPORTUNITIES_TO_CHECK": 3,           # Số cơ hội hàng đầu để xem xét, mặc định là 3
 
     # --- ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) ---
     "DEPOSIT_DETECTION_MIN_USD": 10.0,            # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
@@ -735,17 +736,31 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
         log_message("  => Không tìm thấy cơ hội tiềm năng nào.", state=state)
         return
 
-    best_opportunity = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)[0]
-    entry_score_threshold = best_opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
+    sorted_opportunities = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)
 
-    log_message(f"  🏆 Cơ hội tốt nhất: {best_opportunity['symbol']}-{best_opportunity['interval']} | Zone: {best_opportunity['zone']} | Tactic: {best_opportunity['tactic_name']} | Điểm: {best_opportunity['score']:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
+    num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 3)
+    top_opportunities = sorted_opportunities[:num_to_check]
 
-    if best_opportunity['score'] >= entry_score_threshold:
-        log_message("      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...", state=state)
-        state['pending_trade_opportunity'] = best_opportunity
-        state['pending_trade_opportunity']['retry_count'] = 0
-    else:
-        log_message("      => 📉 Không đạt ngưỡng. Bỏ qua.", state=state)
+    log_message(f"---[🏆 Xem xét {len(top_opportunities)} cơ hội hàng đầu (tối đa {num_to_check})]--", state=state)
+    found_executable_trade = False
+
+    for i, opportunity in enumerate(top_opportunities):
+        score = opportunity['score']
+        entry_score_threshold = opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
+        
+        log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {opportunity['tactic_name']} | Điểm: {score:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
+
+        if score >= entry_score_threshold:
+            log_message("      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi. Dừng quét.", state=state)
+            state['pending_trade_opportunity'] = opportunity
+            state['pending_trade_opportunity']['retry_count'] = 0
+            found_executable_trade = True
+            break
+        else:
+            log_message("      => 📉 Không đạt ngưỡng. Xem xét cơ hội tiếp theo...", state=state)
+
+    if not found_executable_trade:
+        log_message(f"  => Không có cơ hội nào trong top {len(top_opportunities)} đạt ngưỡng vào lệnh. Chờ phiên sau.", state=state)
 
 
 def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
@@ -756,6 +771,8 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
     log_message(f"---[⚡ Chuẩn bị thực thi {symbol}-{interval} ⚡]---", state=state)
 
     tactic_cfg = opportunity['tactic_cfg']
+
+
     full_indicators = opportunity['decision'].get('full_indicators', {})
 
     realtime_price = get_realtime_price(symbol)
