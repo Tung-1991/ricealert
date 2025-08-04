@@ -21,15 +21,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 sys.path.append(PROJECT_ROOT)
 
+# ĐÂY LÀ KHỐI CODE ĐÚNG
 try:
     from binance_connector import BinanceConnector
+    # Sửa lại dòng này, chỉ import calculate_indicators
+    from indicator import calculate_indicators
     from live_trade import (
         TRADING_MODE, GENERAL_CONFIG, TACTICS_LAB,
         ZONES, INTERVALS_TO_SCAN, RISK_RULES_CONFIG,
-        # --- THÊM CÁC HÀM NÀY VÀO ---
         calculate_total_equity, build_dynamic_alert_text, build_daily_summary_text,
-        send_discord_message_chunks, ALERT_CONFIG
+        send_discord_message_chunks, ALERT_CONFIG,
+        determine_market_zone_with_scoring, get_mtf_adjustment_coefficient,
+        indicator_results,
+        # Thêm 2 hàm này vào import từ live_trade
+        get_price_data_with_cache, get_price_data
     )
+    from trade_advisor import get_advisor_decision, FULL_CONFIG as ADVISOR_BASE_CONFIG
 except ImportError as e:
     sys.exit(f"❌ Lỗi: Không thể import module cần thiết: {e}.")
 
@@ -193,9 +200,15 @@ def process_and_log_closed_trade(bnc, trade, reason, state) -> tuple[bool, float
 
 # --- CÁC CHỨC NĂNG MENU ---
 def show_full_dashboard(bnc: BinanceConnector):
-    state = load_state()
-    if not state: return
+    """Hiển thị dashboard toàn diện bao gồm báo cáo tài chính, lệnh đang mở và màn hình radar thị trường."""
     print("\n" + "="*80)
+    print(f"📊 BÁO CÁO TỔNG QUAN & RADAR THỊ TRƯỜNG - {datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')} 📊")
+    state = load_state()
+    if not state: 
+        print("❌ Không thể tải state.")
+        return
+
+    # --- Phần 1: Báo cáo tài chính (giữ nguyên) ---
     valid_trades, desynced_trades = reconcile_state(bnc)
     available_usdt, total_usdt = get_usdt_fund(bnc)
     prices = {s['symbol']: get_current_price(s['symbol']) for s in valid_trades}
@@ -204,16 +217,18 @@ def show_full_dashboard(bnc: BinanceConnector):
     initial_capital = state.get('initial_capital', equity or 1)
     pnl_total_usd = equity - initial_capital
     pnl_total_percent = (pnl_total_usd / initial_capital) * 100 if initial_capital > 0 else 0
-    print(f"📊 BÁO CÁO TỔNG KẾT (LIVE) - {datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')} 📊")
-    print(f"💰 Vốn BĐ: ${initial_capital:,.2f} | 💵 Tiền mặt (USDT): ${total_usdt:,.2f}")
+    
+    print(f"\n💰 Vốn BĐ: ${initial_capital:,.2f} | 💵 Tiền mặt (USDT): ${total_usdt:,.2f}")
     print(f"📊 Tổng TS: ${equity:,.2f} | 📈 PnL Tổng: {'🟢' if pnl_total_usd >= 0 else '🔴'} ${pnl_total_usd:,.2f} ({pnl_total_percent:+.2f}%)")
 
-    print("\n--- DANH SÁCH LỆNH ĐANG MỞ ---")
+    # --- Phần 2: Danh sách lệnh đang mở (giữ nguyên logic hiển thị đã sửa) ---
+    print("\n" + "---" * 10 + " 🛰️ DANH SÁCH LỆNH ĐANG MỞ 🛰️ " + "---" * 10)
     all_trades = sorted(valid_trades + desynced_trades, key=lambda t: t.get('entry_time', ''))
     if not all_trades:
         print("ℹ️ Không có lệnh nào đang mở.")
     else:
         for trade in all_trades:
+            # ... (Logic hiển thị lệnh mở đã hoàn thiện ở lần trước, giữ nguyên)
             is_desynced = any(t['trade_id'] == trade['trade_id'] for t in desynced_trades)
             symbol = trade.get('symbol', 'N/A')
             current_price = prices.get(symbol)
@@ -229,24 +244,72 @@ def show_full_dashboard(bnc: BinanceConnector):
                 price_info = f"Vốn:${invested_usd:,.2f} -> ${current_value:,.2f} | Entry:{entry_price:.4f} Cur:{current_price:.4f} TP:{trade.get('tp', 0):.4f} SL:{trade.get('sl', 0):.4f}"
             else:
                 price_info = f"Vốn:${trade.get('total_invested_usd', 0):,.2f} | Entry:{trade.get('entry_price', 0):.4f} (Không thể tính PnL)"
-
+            
             pnl_icon = "⚪️" if is_desynced else ("🟢" if pnl_usd >= 0 else "🔴")
             score_display = f"{trade.get('entry_score', 0.0):.1f}→{trade.get('last_score', 0.0):.1f}"
-
-            # Logic hiển thị zone thông minh hơn
-            entry_zone = trade.get('entry_zone', 'N/A')
-            last_zone = trade.get('last_zone') # Lấy last_zone, có thể là None
-            if last_zone and last_zone != entry_zone:
-                zone_display = f"{entry_zone}→{last_zone}"
-            else:
-                zone_display = entry_zone
-
+            entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
+            zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
             tactic_info = f"({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display})"
-
 
             print(f"{pnl_icon}{' ⚠️ DESYNC' if is_desynced else ''} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%)")
             print(f"   {price_info}")
+
+    # --- Phần 3: Màn hình Radar Thị trường (PHẦN MỚI) ---
+    print("\n" + "---" * 10 + " 📡 RADAR QUÉT THỊ TRƯỜNG 📡 " + "---" * 10)
+    symbols_to_scan = parse_env_variable("SYMBOLS_TO_SCAN")
+    symbols_in_trades = {t['symbol'] for t in all_trades}
+    
+    # Chỉ quét các symbol chưa có lệnh
+    symbols_for_radar = [s for s in symbols_to_scan if s not in symbols_in_trades]
+
+    if not symbols_for_radar:
+        print("ℹ️ Tất cả các coin trong danh sách đều đã có lệnh mở.")
+    else:
+        print(f"Đang phân tích {len(symbols_for_radar)} coin tiềm năng...")
+        # Sử dụng biến toàn cục indicator_results để tránh tính toán lại nếu không cần
+        global indicator_results
+        indicator_results.clear()
+        
+        # Tải dữ liệu và tính toán chỉ báo cho các coin cần quét
+        for symbol in symbols_for_radar:
+            indicator_results[symbol] = {}
+            for interval in ["1h", "4h", "1d"]: # Quét các khung thời gian chính
+                # Sử dụng cache để tăng tốc
+                df = get_price_data_with_cache(symbol, interval, GENERAL_CONFIG["DATA_FETCH_LIMIT"])
+                if df is not None and not df.empty:
+                    indicator_results[symbol][interval] = calculate_indicators(df.copy(), symbol, interval)
+
+        # Hiển thị kết quả
+        for symbol in symbols_for_radar:
+            print(f"\n--- {symbol} ---")
+            current_price = get_current_price(symbol)
+            price_str = f"${current_price:,.4f}" if current_price else "N/A"
+            print(f"  Giá hiện tại: {price_str}")
+
+            for interval in ["1h", "4h", "1d"]:
+                indicators = indicator_results.get(symbol, {}).get(interval)
+                if not indicators:
+                    print(f"  [{interval}]: Không có dữ liệu để phân tích.")
+                    continue
+                    
+                # Dùng chung logic với live_trade để đảm bảo nhất quán
+                zone = determine_market_zone_with_scoring(symbol, interval)
+                decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
+                score = decision.get("final_score", 0.0)
+                
+                # Tìm Tactic có điểm vào thấp nhất trong Zone này để hiển thị ngưỡng
+                relevant_tactics = [
+                    cfg['ENTRY_SCORE'] 
+                    for name, cfg in TACTICS_LAB.items() 
+                    if zone in (cfg['OPTIMAL_ZONE'] if isinstance(cfg['OPTIMAL_ZONE'], list) else [cfg['OPTIMAL_ZONE']])
+                ]
+                entry_threshold = min(relevant_tactics) if relevant_tactics else "N/A"
+
+                icon = "🟢" if score >= (entry_threshold if isinstance(entry_threshold, float) else 99) else ("🟡" if score >= 5.5 else "🔴")
+                print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | Score: {score:.2f} (Ngưỡng vào lệnh ~{entry_threshold})")
+
     print("="*80)
+
 
 def close_manual_trade(bnc: BinanceConnector):
     if not acquire_lock(): return
@@ -524,6 +587,78 @@ def manual_report(bnc: BinanceConnector):
     else:
         print("Không gửi hoặc chưa cấu hình webhook Discord.")
 
+def analyze_tactic_performance(trade_history: list) -> pd.DataFrame | None:
+    """Phân tích hiệu suất của từng Tactic từ lịch sử giao dịch."""
+    if not trade_history:
+        print("ℹ️ Lịch sử giao dịch trống, không có gì để phân tích.")
+        return None
+
+    df = pd.DataFrame(trade_history)
+
+    # Chỉ phân tích các lệnh đã có PnL và đã đóng
+    df = df[df['pnl_usd'].notna() & df['status'].str.contains('Closed', na=False)]
+    if df.empty:
+        print("ℹ️ Không có lệnh đã đóng nào có PnL để phân tích.")
+        return None
+
+    # Phân tích theo Tactic mở lệnh ban đầu
+    results = []
+    # Dùng groupby cho cột 'opened_by_tactic'
+    for tactic, group in df.groupby('opened_by_tactic'):
+        total_trades = len(group)
+        wins = group[group['pnl_usd'] > 0]
+        losses = group[group['pnl_usd'] <= 0]
+        
+        num_wins = len(wins)
+        
+        win_rate = (num_wins / total_trades) * 100 if total_trades > 0 else 0
+        total_pnl = group['pnl_usd'].sum()
+        
+        avg_win_pnl = wins['pnl_usd'].mean() if num_wins > 0 else 0
+        avg_loss_pnl = losses['pnl_usd'].mean() if len(losses) > 0 else 0
+        
+        # Payoff Ratio = (Lợi nhuận trung bình trên mỗi lệnh thắng) / (Thua lỗ trung bình trên mỗi lệnh lỗ)
+        payoff_ratio = abs(avg_win_pnl / avg_loss_pnl) if avg_loss_pnl != 0 else float('inf')
+
+        results.append({
+            "Tactic": tactic,
+            "Total Trades": total_trades,
+            "Win Rate (%)": win_rate,
+            "Total PnL ($)": total_pnl,
+            "Avg Win ($)": avg_win_pnl,
+            "Avg Loss ($)": avg_loss_pnl,
+            "Payoff Ratio": payoff_ratio
+        })
+
+    if not results:
+        return None
+        
+    # Sắp xếp theo Total PnL để biết Tactic nào hiệu quả nhất
+    performance_df = pd.DataFrame(results).sort_values(by="Total PnL ($)", ascending=False)
+    return performance_df
+
+def show_tactic_analysis():
+    """Hàm chính để chạy phân tích và hiển thị kết quả."""
+    print("\n" + "="*15, "📊 BẢNG PHÂN TÍCH HIỆU SUẤT TACTIC 📊", "="*15)
+    
+    # Tải lịch sử giao dịch trực tiếp từ file state của live trade
+    state = load_state()
+    trade_history = state.get("trade_history", []) if state else []
+    
+    performance_df = analyze_tactic_performance(trade_history)
+
+    if performance_df is not None:
+        # Lưu lại định dạng cũ để khôi phục
+        old_format = pd.options.display.float_format
+        # Định dạng output cho đẹp
+        pd.options.display.float_format = '{:,.2f}'.format
+        print(performance_df.to_string(index=False))
+        # Khôi phục định dạng cũ để không ảnh hưởng các hàm khác
+        pd.options.display.float_format = old_format
+    
+    print("="*67)
+
+
 def main_menu():
     try:
         with BinanceConnector(network=TRADING_MODE) as bnc:
@@ -539,6 +674,8 @@ def main_menu():
                 print("7. [Báo cáo] Xem 20 giao dịch cuối từ CSV")
                 print("8. [Dọn dẹp] Bán coin lẻ trên sàn (từ .env)")
                 print("9. [Báo cáo] Tạo và gửi báo cáo thủ công")
+                # --- DÒNG MỚI ---
+                print("10. [Phân tích] Phân tích Hiệu suất Tactic")
                 print("0. Thoát")
                 print("="*61)
                 choice = input("👉 Vui lòng chọn một chức năng: ")
@@ -551,10 +688,13 @@ def main_menu():
                 elif choice == '7': view_csv_history()
                 elif choice == '8': sell_manual_assets(bnc)
                 elif choice == '9': manual_report(bnc)
+                # --- DÒNG MỚI ---
+                elif choice == '10': show_tactic_analysis()
                 elif choice == '0': print("👋 Tạm biệt!"); break
                 else: print("⚠️ Lựa chọn không hợp lệ.")
     except Exception as e:
         print(f"\n🔥🔥🔥 Lỗi nghiêm trọng: {e}"); traceback.print_exc()
+
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, handle_exit_signals)

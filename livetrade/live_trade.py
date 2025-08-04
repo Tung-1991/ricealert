@@ -894,17 +894,50 @@ def build_report_header(state: Dict, equity: float, total_usdt: float, available
 
 def build_pnl_summary_line(state: Dict, realtime_prices: Dict[str, float]) -> str:
     trade_history = state.get('trade_history', [])
-    df_history = pd.DataFrame(trade_history) if trade_history else pd.DataFrame()
-    total_trades, win_rate_str = len(df_history), "N/A"
-    if total_trades > 0:
-        winning_trades = len(df_history[df_history['pnl_usd'] > 0])
-        win_rate_str = f"{winning_trades / total_trades * 100:.2f}% ({winning_trades}/{total_trades})"
+    
+    # --- Phần tính toán chính ---
+    total_pnl_closed = 0.0
+    win_rate_str = "N/A"
+    avg_win_str = "$0.00"
+    avg_loss_str = "$0.00"
 
-    total_pnl_closed = df_history['pnl_usd'].sum() if total_trades > 0 else 0.0
+    if trade_history:
+        df_history = pd.DataFrame(trade_history)
+        # Đảm bảo chỉ tính các lệnh đã đóng
+        closed_trades_df = df_history[df_history['status'].str.contains('Closed', na=False) & df_history['pnl_usd'].notna()]
+        
+        if not closed_trades_df.empty:
+            total_trades = len(closed_trades_df)
+            
+            # Tính Win Rate
+            winning_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] > 0]
+            num_wins = len(winning_trades_df)
+            win_rate_str = f"{num_wins / total_trades * 100:.2f}% ({num_wins}/{total_trades})"
+
+            # Tính tổng PnL đã đóng
+            total_pnl_closed = closed_trades_df['pnl_usd'].sum()
+            
+            # Tính AVG Lãi
+            if num_wins > 0:
+                avg_win_pnl = winning_trades_df['pnl_usd'].mean()
+                avg_win_str = f"${avg_win_pnl:,.2f}"
+
+            # Tính AVG Lỗ
+            losing_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] <= 0]
+            if not losing_trades_df.empty:
+                avg_loss_pnl = losing_trades_df['pnl_usd'].mean()
+                avg_loss_str = f"${avg_loss_pnl:,.2f}"
+
+    # --- Phần tính PnL đang mở và TP1 (giữ nguyên) ---
     realized_partial_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in state.get('active_trades', []))
     unrealized_pnl = sum(get_current_pnl(trade, realtime_price=realtime_prices.get(trade['symbol']))[0] for trade in state.get('active_trades', []))
 
-    return f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | 💎 PnL TP1: **${realized_partial_pnl:,.2f}** | 📈 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**"
+    # --- Tạo chuỗi kết quả ---
+    pnl_line_1 = f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | 📈 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**"
+    pnl_line_2 = f"🎯 AVG Lãi: **{avg_win_str}** | 🛡️ AVG Lỗ: **{avg_loss_str}** | 💎 PnL TP1: **${realized_partial_pnl:,.2f}**"
+    
+    return f"{pnl_line_1}\n{pnl_line_2}"
+
 
 def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     pnl_usd, pnl_pct = get_current_pnl(trade, realtime_price=realtime_price)
