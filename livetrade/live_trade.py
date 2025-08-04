@@ -37,7 +37,7 @@ load_dotenv(dotenv_path=dotenv_path)
 sys.path.append(PROJECT_ROOT)
 try:
     from binance_connector import BinanceConnector
-    from indicator import get_price_data, calculate_indicators
+    from indicator import calculate_indicators
     from trade_advisor import get_advisor_decision, FULL_CONFIG as ADVISOR_BASE_CONFIG
 except ImportError as e:
     sys.exit(f"Lỗi: Không thể import module cần thiết: {e}.")
@@ -50,7 +50,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # ==============================================================================
 # ================== ⚙️ TRUNG TÂM CẤU HÌNH (v8.6.1) ⚙️ ===================
 # ==============================================================================
-TRADING_MODE: Literal["live", "testnet"] = "testnet" # Chế độ chạy: "live" (tiền thật) hoặc "testnet" (tiền ảo)
+TRADING_MODE: Literal["live", "testnet"] = "live" # Chế độ chạy: "live" (tiền thật) hoặc "testnet" (tiền ảo)
 
 # --- CẤU HÌNH CHUNG ---
 GENERAL_CONFIG = {
@@ -247,6 +247,16 @@ def release_lock():
     except OSError as e: log_error(f"Lỗi khi giải phóng file lock: {e}")
 
 # --- CÁC HÀM TIỆN ÍCH ---
+def format_price_dynamically(price: Optional[float]) -> str:
+    """Định dạng giá một cách linh hoạt dựa trên giá trị của nó."""
+    if price is None:
+        return "N/A"
+    if price >= 1.0:
+        return f"{price:,.4f}"
+    else:
+        return f"{price:,.8f}"
+
+
 def log_message(message: str, state: Optional[Dict] = None):
     if state is not None: state['session_has_events'] = True
     timestamp = datetime.now(VIETNAM_TZ).strftime('%Y-%m-%d %H:%M:%S')
@@ -367,6 +377,37 @@ def get_interval_in_milliseconds(interval: str) -> Optional[int]:
     except (ValueError, IndexError): return None
     return None
 
+def get_price_data(symbol: str, interval: str, limit: int = 200, startTime: int = None) -> Optional[pd.DataFrame]:
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    if startTime:
+        params['startTime'] = startTime
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if not data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data, columns=["timestamp","open","high","low","close","volume","close_time","quote_asset_volume","number_of_trades","taker_buy_base_vol","taker_buy_quote_vol","ignore"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df.set_index("timestamp", inplace=True)
+        
+        cols_to_convert = ["open", "high", "low", "close", "volume"]
+        df[cols_to_convert] = df[cols_to_convert].astype(float)
+        
+        return df
+
+    except requests.exceptions.RequestException as e:
+        log_error(f"Lỗi mạng khi lấy dữ liệu giá cho {symbol}-{interval}", error_details=str(e))
+        return None
+    except Exception as e:
+        log_error(f"Lỗi không xác định khi lấy dữ liệu giá cho {symbol}-{interval}", error_details=traceback.format_exc())
+        return None
+
+
 def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
     cache_filepath = os.path.join(CACHE_DIR, f"{symbol}-{interval}.parquet")
     existing_df = None
@@ -410,9 +451,12 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
 
     trade.setdefault('close_retry_count', 0)
     try:
+        formatted_quantity = bnc._format_quantity(symbol, quantity_to_close)
         market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=quantity_to_close)
         trade['close_retry_count'] = 0
     except Exception as e:
+
+
         trade['close_retry_count'] += 1
         log_error(f"Lỗi kết nối khi đóng lệnh {symbol} (Lần thử #{trade['close_retry_count']})", error_details=str(e), state=state)
         if trade['close_retry_count'] >= GENERAL_CONFIG.get("CLOSE_TRADE_RETRY_LIMIT", 3):
@@ -441,6 +485,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         })
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
+        state['trade_history'] = state['trade_history'][-100:] 
         state.setdefault('cooldown_until', {})[symbol] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
         export_trade_history_to_csv([trade])
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
@@ -560,34 +605,38 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
     min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
 
     for trade in state.get("active_trades", [])[:]:
+        symbol = trade.get("symbol")
+        if not symbol: continue
+
         if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]: continue
         if trade.get('last_dca_time') and (now - datetime.fromisoformat(trade.get('last_dca_time'))).total_seconds() / 3600 < DCA_CONFIG['DCA_COOLDOWN_HOURS']: continue
 
-        current_price = realtime_prices.get(trade["symbol"])
+        current_price = realtime_prices.get(symbol)
         if not current_price or current_price <= 0: continue
 
         last_entry_price = trade['dca_entries'][-1]['price'] if trade.get('dca_entries') else trade['initial_entry']['price']
         price_drop_pct = ((current_price - last_entry_price) / last_entry_price) * 100
 
         if price_drop_pct > DCA_CONFIG["TRIGGER_DROP_PCT"]: continue
-        if get_advisor_decision(trade['symbol'], trade['interval'], indicator_results.get(trade["symbol"], {}).get(trade["interval"], {}), ADVISOR_BASE_CONFIG).get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
+        if get_advisor_decision(symbol, trade['interval'], indicator_results.get(symbol, {}).get(trade["interval"], {}), ADVISOR_BASE_CONFIG).get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
 
         dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * DCA_CONFIG["CAPITAL_MULTIPLIER"]
 
         if dca_investment < min_order_value:
-            log_message(f"⚠️ Bỏ qua DCA cho {trade['symbol']}: Vốn DCA dự tính ({dca_investment:,.2f}$) quá nhỏ.", state=state)
+            log_message(f"⚠️ Bỏ qua DCA cho {symbol}: Vốn DCA dự tính ({dca_investment:,.2f}$) quá nhỏ.", state=state)
             continue
 
         if dca_investment <= 0 or dca_investment > available_usdt or (current_exposure_usd + dca_investment) > exposure_limit: continue
 
         try:
-            state.setdefault('temp_newly_closed_trades', []).append(f"🎯 Thử DCA cho {trade['symbol']}...")
-            market_dca_order = bnc.place_market_order(symbol=trade['symbol'], side="BUY", quote_order_qty=round(dca_investment, 2))
+            state.setdefault('temp_newly_closed_trades', []).append(f"🎯 Thử DCA cho {symbol}...")
+            market_dca_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(dca_investment, 2))
             if not (market_dca_order and market_dca_order.get('status') == 'FILLED'):
                 raise Exception("Lệnh Market DCA không khớp.")
 
-            dca_qty, dca_cost = float(market_dca_order['executedQty']), float(market_dca_order['cummulativeQuoteQty'])
-            dca_price = dca_cost / dca_qty
+            dca_qty = float(market_dca_order['executedQty'])
+            dca_cost = float(market_dca_order['cummulativeQuoteQty'])
+            dca_price = dca_cost / dca_qty if dca_qty > 0 else 0
             trade.setdefault('dca_entries', []).append({"price": dca_price, "quantity": dca_qty, "invested_usd": dca_cost, "timestamp": now.isoformat()})
 
             new_total_qty = float(trade['quantity']) + dca_qty
@@ -595,18 +644,25 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
             new_avg_price = new_total_cost / new_total_qty if new_total_qty > 0 else 0
 
             initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
+            
+            raw_new_sl = new_avg_price - initial_risk_dist
+            raw_new_tp = new_avg_price + (initial_risk_dist * TACTICS_LAB[trade['opened_by_tactic']]['RR'])
+            
+            final_new_sl = float(bnc._format_price(symbol, raw_new_sl))
+            final_new_tp = float(bnc._format_price(symbol, raw_new_tp))
+
             trade.update({
                 'entry_price': new_avg_price,
                 'total_invested_usd': new_total_cost,
                 'quantity': new_total_qty,
-                'sl': new_avg_price - initial_risk_dist,
-                'tp': new_avg_price + (initial_risk_dist * TACTICS_LAB[trade['opened_by_tactic']]['RR']),
+                'sl': final_new_sl,
+                'tp': final_new_tp,
                 'last_dca_time': now.isoformat()
             })
             trade.setdefault('tactic_used', []).append(f"DCA_{len(trade.get('dca_entries', []))}")
-            state.setdefault('temp_newly_closed_trades', []).append(f"  => ✅ DCA thành công {trade['symbol']} với ${dca_cost:,.2f}")
+            state.setdefault('temp_newly_closed_trades', []).append(f"  => ✅ DCA thành công {symbol} với ${dca_cost:,.2f}")
         except Exception as e:
-            log_error(f"Lỗi nghiêm trọng khi DCA {trade['symbol']}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
+            log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
@@ -682,7 +738,7 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
     best_opportunity = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)[0]
     entry_score_threshold = best_opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
 
-    log_message(f"  🏆 Cơ hội tốt nhất: {best_opportunity['symbol']}-{best_opportunity['interval']} | Tactic: {best_opportunity['tactic_name']} | Điểm: {best_opportunity['score']:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
+    log_message(f"  🏆 Cơ hội tốt nhất: {best_opportunity['symbol']}-{best_opportunity['interval']} | Zone: {best_opportunity['zone']} | Tactic: {best_opportunity['tactic_name']} | Điểm: {best_opportunity['score']:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
 
     if best_opportunity['score'] >= entry_score_threshold:
         log_message("      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi...", state=state)
@@ -745,6 +801,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state['temp_money_spent_on_trades'] += float(market_order['cummulativeQuoteQty'])
         filled_qty = float(market_order['executedQty'])
         avg_price = float(market_order['cummulativeQuoteQty']) / filled_qty
+
         sl_p = avg_price - final_risk_dist
         tp_p = avg_price + (final_risk_dist * tactic_cfg.get("RR", 2.0))
 
@@ -759,13 +816,25 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
             "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
             "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": avg_price,
             "quantity": filled_qty, "tp": tp_p, "sl": sl_p, "initial_sl": sl_p,
-            "initial_entry": {"price": avg_price, "quantity": filled_qty, "invested_usd": float(market_order['cummulativeQuoteQty'])},
+            "initial_entry": {
+                "price": avg_price,
+                "quantity": filled_qty,
+                "invested_usd": float(market_order['cummulativeQuoteQty'])
+            },
             "total_invested_usd": float(market_order['cummulativeQuoteQty']),
-            "entry_time": datetime.now(VIETNAM_TZ).isoformat(), "entry_score": opportunity['score'],
-            "entry_zone": zone, "last_zone": zone, "binance_market_order_id": market_order['orderId'],
-            "dca_entries": [], "realized_pnl_usd": 0.0, "last_score": opportunity['score'],
-            "peak_pnl_percent": 0.0, "tp1_hit": False, "close_retry_count": 0
+            "entry_time": datetime.now(VIETNAM_TZ).isoformat(),
+            "entry_score": opportunity['score'],
+            "entry_zone": zone,
+            "last_zone": zone,
+            "binance_market_order_id": market_order['orderId'],
+            "dca_entries": [],
+            "realized_pnl_usd": 0.0,
+            "last_score": opportunity['score'],
+            "peak_pnl_percent": 0.0,
+            "tp1_hit": False,
+            "close_retry_count": 0
         }
+
 
         state['active_trades'].append(new_trade)
         state.setdefault('temp_newly_opened_trades', []).append(f"🔥 {symbol}-{interval} ({tactic_name}): Mua với vốn ${new_trade['total_invested_usd']:,.2f}")
@@ -944,19 +1013,31 @@ def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     icon = "🟢" if pnl_usd >= 0 else "🔴"
     holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
     dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-    tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
+    
+    sl_price = trade['sl']
+    # === SỬA DÒNG NÀY ===
+    tsl_info = f" TSL:{format_price_dynamically(sl_price)}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
+    
     tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
 
     entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
     score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
-    zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone', 'N/A')}" if trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
+    
+    entry_zone = trade.get('entry_zone', 'N/A')
+    last_zone = trade.get('last_zone')
+    zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
     tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
 
     invested_usd = trade.get('total_invested_usd', 0.0)
     current_value = trade.get('total_invested_usd', 0.0) + pnl_usd
 
-    return (f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}\n"
-            f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{trade['entry_price']:.4f} Cur:{realtime_price:.4f} TP:{trade['tp']:.4f} SL:{trade['sl']:.4f}{tsl_info}")
+    # === SỬA DÒNG NÀY === (Thêm dấu cách trước tsl_info cho đẹp)
+    line1 = f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}"
+    line2 = f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{format_price_dynamically(trade['entry_price'])} Cur:{format_price_dynamically(realtime_price)} TP:{format_price_dynamically(trade['tp'])} SL:{format_price_dynamically(sl_price)}{tsl_info}"
+    
+    return f"{line1}\n{line2}"
+
+
 
 def format_closed_trade_line(trade_data: pd.Series) -> str:
     try:

@@ -54,7 +54,7 @@
     "trend_sideway",
     "trend_uptrend"
   ],
-  "trained_at": "2025-07-31T20:10:27.550114+00:00",
+  "trained_at": "2025-08-04T17:23:44.319779+00:00",
   "atr_factor_threshold": 0.65,
   "future_offset": 4
 }
