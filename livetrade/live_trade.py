@@ -66,10 +66,10 @@ GENERAL_CONFIG = {
     "MIN_ORDER_VALUE_USDT": 11.0,                # Giá trị lệnh tối thiểu (USD) để đặt lệnh trên sàn
     "OVERRIDE_COOLDOWN_SCORE": 7.5,              # Điểm số tối thiểu để phá vỡ thời gian nghỉ và vào lệnh ngay
     "ORPHAN_ASSET_MIN_VALUE_USDT": 10.0,         # Giá trị (USD) tối thiểu của một tài sản "mồ côi" để bot cảnh báo
-    
+
     # --- ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) ---
-    "DEPOSIT_DETECTION_MIN_USD": 5.0,            # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
-    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.005,    # Ngưỡng % tối thiểu để phát hiện bạn Nạp/Rút tiền (0.5%)
+    "DEPOSIT_DETECTION_MIN_USD": 10.0,            # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
+    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.01,    # Ngưỡng % tối thiểu để phát hiện bạn Nạp/Rút tiền (0.5%)
     "AUTO_COMPOUND_THRESHOLD_PCT": 10.0,         # Ngưỡng lãi (%) để bot tự động tái đầu tư (nâng Vốn BĐ)
     "AUTO_DELEVERAGE_THRESHOLD_PCT": -10.0,      # Ngưỡng lỗ (%) để bot tự động giảm rủi ro (hạ Vốn BĐ)
     "CAPITAL_ADJUSTMENT_COOLDOWN_HOURS": 72,     # Thời gian (giờ) chờ giữa các lần tự động điều chỉnh Vốn BĐ
@@ -214,6 +214,18 @@ SESSION_TEMP_KEYS = ['temp_newly_opened_trades', 'temp_newly_closed_trades', 'te
 
 # --- CÁC HÀM KHÓA FILE (FILE LOCKING) ---
 def acquire_lock(timeout=55):
+    # Tự động xóa lock file nếu nó tồn tại quá 5 phút (có thể do crash)
+    LOCK_STALE_MINUTES = 5
+    if os.path.exists(LOCK_FILE):
+        try:
+            file_mod_time = os.path.getmtime(LOCK_FILE)
+            if (time.time() - file_mod_time) / 60 > LOCK_STALE_MINUTES:
+                log_message(f"⚠️ Phát hiện file lock tồn tại hơn {LOCK_STALE_MINUTES} phút. Tự động xóa.")
+                release_lock()
+        except Exception as e:
+            log_error(f"Lỗi khi kiểm tra file lock bị kẹt: {e}")
+
+    # Logic cũ giữ nguyên
     start_time = time.time()
     while os.path.exists(LOCK_FILE):
         if time.time() - start_time > timeout:
@@ -227,6 +239,7 @@ def acquire_lock(timeout=55):
         with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
         return True
     except IOError: return False
+
 
 def release_lock():
     try:
@@ -800,75 +813,71 @@ def calculate_total_equity(state: Dict, total_usdt_on_binance: float, realtime_p
         value_of_open_positions += float(trade.get('quantity', 0)) * price
     return total_usdt_on_binance + value_of_open_positions
 
+
 def manage_dynamic_capital(state: Dict, total_usdt_at_start: float, current_equity: Optional[float]):
     """
-    Hàm lõi để quản lý vốn một cách tự động và năng động.
-    - Thiết lập vốn ban đầu lần đầu chạy.
-    - Phát hiện Nạp/Rút tiền thủ công.
-    - Tự động Tái đầu tư (Compound) khi lãi.
-    - Tự động Giảm rủi ro (De-leverage) khi lỗ.
+    Hàm quản lý vốn dựa trên EQUITY. Đơn giản và chống lỗi.
     """
     now_dt = datetime.now(VIETNAM_TZ)
-    
-    # 1. Thiết lập vốn ban đầu cho lần chạy đầu tiên
-    if state.get('initial_capital', 0.0) <= 0 and total_usdt_at_start > 0:
-        state['initial_capital'] = total_usdt_at_start
-        state['last_capital_adjustment_time'] = now_dt.isoformat()
-        log_message(f"🌱 Thiết lập Vốn BĐ ban đầu: ${state['initial_capital']:,.2f}", state=state)
+
+    # --- BƯỚC 1: SET VỐN BAN ĐẦU ---
+    if state.get('initial_capital', 0.0) <= 0:
+        if current_equity and current_equity > 0:
+            state['initial_capital'] = current_equity
+            log_message(f"🌱 Thiết lập Vốn BĐ ban đầu: ${state['initial_capital']:,.2f}", state=state)
+            state['last_capital_adjustment_time'] = now_dt.isoformat()
         return
 
-    # 2. Phát hiện Nạp/Rút tiền
-    prev_usdt = state.get("usdt_balance_end_of_last_session", 0.0)
-    if prev_usdt > 0:
-        money_spent = state.get("money_spent_on_trades_last_session", 0.0)
-        pnl_closed = state.get("pnl_closed_last_session", 0.0)
-        net_deposit = total_usdt_at_start - prev_usdt + money_spent - pnl_closed
+    # --- BƯỚC 2: KIỂM TRA NẠP RÚT DỰA TRÊN EQUITY ---
+    # Tổng tài sản phiên trước
+    prev_equity = state.get("equity_end_of_last_session", 0.0)
+    # Lãi/lỗ của các lệnh đã đóng trong phiên trước
+    pnl_closed_last_session = state.get("pnl_closed_last_session", 0.0)
+    # Lãi/lỗ của các lệnh đang mở thay đổi trong phiên trước
+    pnl_open_change_last_session = state.get("pnl_open_change_last_session", 0.0)
 
-        threshold_pct = GENERAL_CONFIG.get("DEPOSIT_DETECTION_THRESHOLD_PCT", 0.005)
-        min_threshold_usd = GENERAL_CONFIG.get("DEPOSIT_DETECTION_MIN_USD", 5.0)
-        dynamic_threshold = max(min_threshold_usd, total_usdt_at_start * threshold_pct)
-        
-        if abs(net_deposit) > dynamic_threshold:
-            log_message(f"💵 Phát hiện Nạp/Rút ròng: ${net_deposit:,.2f}", state=state)
-            old_capital = state.get("initial_capital", 0.0)
-            state["initial_capital"] = old_capital + net_deposit
+    # Tổng PnL của phiên trước
+    total_pnl_last_session = pnl_closed_last_session + pnl_open_change_last_session
+
+    if prev_equity > 0 and current_equity is not None:
+        # Tổng tài sản đáng lẽ phải có nếu không nạp/rút
+        expected_equity = prev_equity + total_pnl_last_session
+        # Chênh lệch chính là tiền nạp/rút
+        net_deposit = current_equity - expected_equity
+
+        threshold = max(GENERAL_CONFIG["DEPOSIT_DETECTION_MIN_USD"], prev_equity * GENERAL_CONFIG["DEPOSIT_DETECTION_THRESHOLD_PCT"])
+
+        if abs(net_deposit) > threshold:
+            log_message(f"💵 Phát hiện Nạp/Rút ròng (dựa trên Equity): ${net_deposit:,.2f}", state=state)
+            state["initial_capital"] = state.get("initial_capital", 0.0) + net_deposit
             state['last_capital_adjustment_time'] = now_dt.isoformat()
-            log_message(f"   Vốn BĐ được cập nhật từ ${old_capital:,.2f} -> ${state['initial_capital']:,.2f}", state=state)
-            return # Đã điều chỉnh do nạp/rút, không cần làm gì thêm
-    
-    # 3. Kiểm tra thời gian chờ (cooldown) trước khi điều chỉnh vốn dựa trên hiệu suất
+            log_message(f"   Vốn BĐ được cập nhật: ${state['initial_capital']:,.2f}", state=state)
+            return
+
+    # --- BƯỚC 3: ĐIỀU CHỈNH THEO HIỆU SUẤT (giữ nguyên) ---
     last_adj_str = state.get('last_capital_adjustment_time')
     cooldown_hours = GENERAL_CONFIG.get("CAPITAL_ADJUSTMENT_COOLDOWN_HOURS", 72)
-    if last_adj_str:
-        hours_since_last_adj = (now_dt - datetime.fromisoformat(last_adj_str)).total_seconds() / 3600
-        if hours_since_last_adj < cooldown_hours:
-            return # Chưa đến lúc điều chỉnh, thoát
+    if last_adj_str and (now_dt - datetime.fromisoformat(last_adj_str)).total_seconds() / 3600 < cooldown_hours:
+        return
 
-    # 4. Tự động Tái đầu tư / Giảm rủi ro dựa trên hiệu suất
     if current_equity is None: return
-
     initial_capital = state.get("initial_capital", 0.0)
     if initial_capital <= 0: return
 
-    compound_threshold = GENERAL_CONFIG.get("AUTO_COMPOUND_THRESHOLD_PCT", 1000)
-    deleverage_threshold = GENERAL_CONFIG.get("AUTO_DELEVERAGE_THRESHOLD_PCT", -1000)
     growth_pct = (current_equity / initial_capital - 1) * 100
+    compound_threshold = GENERAL_CONFIG.get("AUTO_COMPOUND_THRESHOLD_PCT", 10.0)
+    deleverage_threshold = GENERAL_CONFIG.get("AUTO_DELEVERAGE_THRESHOLD_PCT", -10.0)
 
-    # Kịch bản TĂNG TRƯỞNG (Compound)
-    if growth_pct >= compound_threshold:
-        log_message(f"📈 TĂNG TRƯỞNG TỐT ({growth_pct:+.2f}%)! Tự động Tái đầu tư (Compounding).", state=state)
+    if growth_pct >= compound_threshold or growth_pct <= deleverage_threshold:
+        log_message(f"💰 Hiệu suất đạt ngưỡng ({growth_pct:+.2f}%). Cập nhật Vốn BĐ bằng Tổng TS hiện tại.", state=state)
         log_message(f"   Vốn BĐ cũ: ${initial_capital:,.2f}", state=state)
         state["initial_capital"] = current_equity
         state['last_capital_adjustment_time'] = now_dt.isoformat()
         log_message(f"   Vốn BĐ MỚI: ${state['initial_capital']:,.2f}", state=state)
-    
-    # Kịch bản SỤT GIẢM (De-leverage)
-    elif growth_pct <= deleverage_threshold:
-        log_message(f"🚨 SỤT GIẢM TÀI KHOẢN ({growth_pct:+.2f}%)! Tự động Giảm thiểu Rủi ro (De-leveraging).", state=state)
-        log_message(f"   Vốn BĐ cũ: ${initial_capital:,.2f}", state=state)
-        state["initial_capital"] = current_equity
-        state['last_capital_adjustment_time'] = now_dt.isoformat()
-        log_message(f"   Vốn BĐ MỚI: ${state['initial_capital']:,.2f}", state=state)
+
+
+
+
 
 # ==============================================================================
 # ==================== BÁO CÁO & HÀM TIỆN ÍCH KHÁC =======================
@@ -1051,9 +1060,10 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
     except Exception as e:
         log_error("Không thể lấy số dư tài khoản để đối soát.", error_details=str(e), state=state)
         return
+
     active_trades = state.get("active_trades", [])
     trades_to_remove = []
-    threshold = GENERAL_CONFIG["RECONCILIATION_QTY_THRESHOLD"]
+    threshold = GENERAL_CONFIG.get("RECONCILIATION_QTY_THRESHOLD", 0.95)
     for trade in active_trades:
         symbol_asset = trade['symbol'].replace("USDT", "")
         bot_quantity = float(trade.get('quantity', 0))
@@ -1070,23 +1080,39 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
             trade['exit_time'] = datetime.now(VIETNAM_TZ).isoformat()
             trade['pnl_usd'] = 0
             trade['pnl_percent'] = 0
-            state['trade_history'].append(trade)
+            state.setdefault('trade_history', []).append(trade)
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
         log_message(f"---[✅ Đã dọn dẹp xong]---", state=state)
+
     symbols_in_state = {t['symbol'] for t in state.get("active_trades", [])}
-    min_orphan_value = GENERAL_CONFIG["ORPHAN_ASSET_MIN_VALUE_USDT"]
+    min_orphan_value = GENERAL_CONFIG.get("ORPHAN_ASSET_MIN_VALUE_USDT", 10.0)
+    now = datetime.now(VIETNAM_TZ)
+    state.setdefault('orphan_asset_alerts', {})
+
     for asset_code, quantity in asset_balances.items():
-        if asset_code in ["USDT", "BNB"]: continue
+        if asset_code in ["USDT", "BNB"] or quantity <= 0: continue
+
         symbol_usdt = f"{asset_code}USDT"
+
         if symbol_usdt in SYMBOLS_TO_SCAN and symbol_usdt not in symbols_in_state:
             price = get_realtime_price(symbol_usdt)
             if price:
                 asset_value_usdt = quantity * price
                 if asset_value_usdt > min_orphan_value:
-                    msg = (f"⚠️ PHÁT HIỆN TÀI SẢN MỒ CÔI: **{quantity:.6f} {asset_code}** (trị giá ~${asset_value_usdt:,.2f}). "
-                           f"Tài sản này có trên sàn nhưng không được quản lý bởi bot. "
-                           f"Vui lòng dùng Control Panel để 'nhận nuôi' hoặc xử lý thủ công.")
-                    log_error(msg, send_to_discord=True, force_discord=True, state=state)
+                    last_alert_time_str = state['orphan_asset_alerts'].get(asset_code)
+                    should_alert = True
+                    if last_alert_time_str:
+                        last_alert_time = datetime.fromisoformat(last_alert_time_str)
+                        if (now - last_alert_time).total_seconds() < 6 * 3600:
+                            should_alert = False
+
+                    if should_alert:
+                        msg = (f"⚠️ PHÁT HIỆN TÀI SẢN MỒ CÔI: **{quantity:.6f} {asset_code}** (trị giá ~${asset_value_usdt:,.2f}). "
+                               f"Vui lòng dùng Control Panel (Chức năng 8) để bán hoặc xử lý thủ công.")
+                        log_error(msg, send_to_discord=True, force_discord=True, state=state)
+                        state['orphan_asset_alerts'][asset_code] = now.isoformat()
+
+
 
 
 # ==============================================================================
@@ -1120,8 +1146,17 @@ def run_session():
             # --- BƯỚC 2: TÍNH TOÁN EQUITY & QUẢN LÝ VỐN NĂNG ĐỘNG ---
             active_symbols_for_equity = list(set([t['symbol'] for t in state.get('active_trades', [])]))
             realtime_prices_at_start = {sym: get_realtime_price(sym) for sym in active_symbols_for_equity if sym}
-            
+
             current_equity = calculate_total_equity(state, total_usdt_at_start, realtime_prices_at_start)
+            
+            # =====>>> ĐIỂM SỬA CHÍNH <<<=====
+            if current_equity is None:
+                log_message("⚠️ Không thể tính Equity do lỗi API giá. Tạm dừng phiên để đảm bảo an toàn.", state=state)
+                save_json_file(STATE_FILE, state)
+                # Thoát khỏi hàm run_session() ngay lập tức, khối finally vẫn sẽ chạy để giải phóng lock
+                return
+            # =====>>> KẾT THÚC ĐIỂM SỬA <<<=====
+            
             manage_dynamic_capital(state, total_usdt_at_start, current_equity)
 
             # --- BƯỚC 3: CÁC TÁC VỤ NẶNG THEO LỊCH ---
@@ -1136,7 +1171,7 @@ def run_session():
                     state["last_indicator_refresh"] = now_vn.isoformat()
                 else:
                     log_message("⏳ Tạm hoãn tác vụ nặng do có lệnh đang chờ thực thi.", state=state)
-            
+
             # --- BƯỚC 4: THỰC THI & QUẢN LÝ LỆNH ---
             if state.get('pending_trade_opportunity'):
                 execute_trade_opportunity(bnc, state, available_usdt, total_usdt_at_start)
@@ -1144,7 +1179,7 @@ def run_session():
             active_symbols = list(set([t['symbol'] for t in state.get('active_trades', [])]))
             if active_symbols:
                 current_prices_for_mgmt = {s: realtime_prices_at_start.get(s) or get_realtime_price(s) for s in active_symbols if s}
-                
+
                 if all(price is not None for price in current_prices_for_mgmt.values()):
                     check_and_manage_open_positions(bnc, state, current_prices_for_mgmt)
                     handle_stale_trades(bnc, state, current_prices_for_mgmt)
@@ -1180,9 +1215,15 @@ def run_session():
 
             if 'last_critical_error' in state: state.pop('last_critical_error', None)
 
-            state["usdt_balance_end_of_last_session"] = final_total_usdt
             state["pnl_closed_last_session"] = state['temp_pnl_from_closed_trades']
-            state["money_spent_on_trades_last_session"] = state['temp_money_spent_on_trades']
+            # Xử lý trường hợp current_equity có thể bị None ở phép tính này
+            if current_equity is not None and final_equity is not None:
+                 state["pnl_open_change_last_session"] = (final_equity - current_equity) - state['temp_pnl_from_closed_trades'] + state['temp_money_spent_on_trades']
+            else:
+                 state["pnl_open_change_last_session"] = 0.0
+
+            state["equity_end_of_last_session"] = final_equity
+
             save_json_file(STATE_FILE, state)
 
     except Exception as e:
@@ -1208,6 +1249,7 @@ def run_session():
             log_entry = f"[{timestamp}] (LiveTrade) ---[✅ Kết thúc phiên]---"
             print(log_entry)
             with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
+
 
 if __name__ == "__main__":
     run_session()
