@@ -470,7 +470,9 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         return False
 
     closed_qty = float(market_close_order['executedQty'])
-    exit_price = float(market_close_order['cummulativeQuoteQty']) / closed_qty if closed_qty > 0 else trade['entry_price']
+    money_gained = float(market_close_order['cummulativeQuoteQty'])
+    exit_price = money_gained / closed_qty if closed_qty > 0 else trade['entry_price']
+    state['money_gained_from_trades_last_session'] += money_gained
 
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
@@ -637,6 +639,7 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
 
             dca_qty = float(market_dca_order['executedQty'])
             dca_cost = float(market_dca_order['cummulativeQuoteQty'])
+            state['money_spent_on_trades_last_session'] += dca_cost
             dca_price = dca_cost / dca_qty if dca_qty > 0 else 0
             trade.setdefault('dca_entries', []).append({"price": dca_price, "quantity": dca_qty, "invested_usd": dca_cost, "timestamp": now.isoformat()})
 
@@ -814,8 +817,11 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
 
         if not (market_order and float(market_order.get('executedQty', 0)) > 0):
             raise Exception("Lệnh Market không khớp hoặc không có thông tin trả về.")
+   
+        cost_of_trade = float(market_order['cummulativeQuoteQty'])
+        state['money_spent_on_trades_last_session'] += cost_of_trade
 
-        state['temp_money_spent_on_trades'] += float(market_order['cummulativeQuoteQty'])
+
         filled_qty = float(market_order['executedQty'])
         avg_price = float(market_order['cummulativeQuoteQty']) / filled_qty
 
@@ -900,11 +906,16 @@ def calculate_total_equity(state: Dict, total_usdt_on_binance: float, realtime_p
     return total_usdt_on_binance + value_of_open_positions
 
 
-def manage_dynamic_capital(state: Dict, total_usdt_at_start: float, current_equity: Optional[float]):
+# HÀM MỚI (thay thế hoàn toàn hàm cũ)
+def manage_dynamic_capital(state: Dict, bnc: BinanceConnector, current_equity: Optional[float]):
     """
-    Hàm quản lý vốn dựa trên EQUITY. Đơn giản và chống lỗi.
+    Hàm quản lý vốn thông minh hơn, phân biệt Nạp/Rút và PnL.
+    Version: 8.7.0
     """
     now_dt = datetime.now(VIETNAM_TZ)
+
+    # Lấy số dư USDT hiện tại để dùng cho toàn bộ hàm
+    _, total_usdt_now = get_usdt_fund(bnc)
 
     # --- BƯỚC 1: SET VỐN BAN ĐẦU ---
     if state.get('initial_capital', 0.0) <= 0:
@@ -912,55 +923,48 @@ def manage_dynamic_capital(state: Dict, total_usdt_at_start: float, current_equi
             state['initial_capital'] = current_equity
             log_message(f"🌱 Thiết lập Vốn BĐ ban đầu: ${state['initial_capital']:,.2f}", state=state)
             state['last_capital_adjustment_time'] = now_dt.isoformat()
+            # Khởi tạo các biến kế toán USDT
+            state['usdt_balance_end_of_last_session'] = total_usdt_now
+            state['money_spent_on_trades_last_session'] = 0.0
+            state['money_gained_from_trades_last_session'] = 0.0
         return
 
-    # --- BƯỚC 2: KIỂM TRA NẠP RÚT DỰA TRÊN EQUITY ---
-    # Tổng tài sản phiên trước
-    prev_equity = state.get("equity_end_of_last_session", 0.0)
-    # Lãi/lỗ của các lệnh đã đóng trong phiên trước
-    pnl_closed_last_session = state.get("pnl_closed_last_session", 0.0)
-    # Lãi/lỗ của các lệnh đang mở thay đổi trong phiên trước
-    pnl_open_change_last_session = state.get("pnl_open_change_last_session", 0.0)
-
-    # Tổng PnL của phiên trước
-    total_pnl_last_session = pnl_closed_last_session + pnl_open_change_last_session
-
-    if prev_equity > 0 and current_equity is not None:
-        # Tổng tài sản đáng lẽ phải có nếu không nạp/rút
-        expected_equity = prev_equity + total_pnl_last_session
-        # Chênh lệch chính là tiền nạp/rút
-        net_deposit = current_equity - expected_equity
-
-        threshold = max(GENERAL_CONFIG["DEPOSIT_DETECTION_MIN_USD"], prev_equity * GENERAL_CONFIG["DEPOSIT_DETECTION_THRESHOLD_PCT"])
-
+    # --- BƯỚC 2: PHÁT HIỆN NẠP/RÚT DỰA TRÊN DÒNG TIỀN USDT ---
+    usdt_balance_prev_session = state.get("usdt_balance_end_of_last_session", 0.0)
+    money_spent_prev_session = state.get("money_spent_on_trades_last_session", 0.0)
+    money_gained_prev_session = state.get("money_gained_from_trades_last_session", 0.0)
+    
+    if usdt_balance_prev_session > 0:
+        expected_usdt = usdt_balance_prev_session - money_spent_prev_session + money_gained_prev_session
+        net_deposit = total_usdt_now - expected_usdt
+        threshold = max(GENERAL_CONFIG["DEPOSIT_DETECTION_MIN_USD"], state.get("initial_capital", 1) * GENERAL_CONFIG["DEPOSIT_DETECTION_THRESHOLD_PCT"])
         if abs(net_deposit) > threshold:
-            log_message(f"💵 Phát hiện Nạp/Rút ròng (dựa trên Equity): ${net_deposit:,.2f}", state=state)
+            log_message(f"💵 Phát hiện Nạp/Rút ròng (dựa trên USDT): ${net_deposit:,.2f}", state=state)
             state["initial_capital"] = state.get("initial_capital", 0.0) + net_deposit
             state['last_capital_adjustment_time'] = now_dt.isoformat()
             log_message(f"   Vốn BĐ được cập nhật: ${state['initial_capital']:,.2f}", state=state)
-            return
 
-    # --- BƯỚC 3: ĐIỀU CHỈNH THEO HIỆU SUẤT (giữ nguyên) ---
+    # --- BƯỚC 3: ĐIỀU CHỈNH THEO HIỆU SUẤT (PnL) ---
     last_adj_str = state.get('last_capital_adjustment_time')
     cooldown_hours = GENERAL_CONFIG.get("CAPITAL_ADJUSTMENT_COOLDOWN_HOURS", 72)
-    if last_adj_str and (now_dt - datetime.fromisoformat(last_adj_str)).total_seconds() / 3600 < cooldown_hours:
-        return
+    if not (last_adj_str and (now_dt - datetime.fromisoformat(last_adj_str)).total_seconds() / 3600 < cooldown_hours):
+        if current_equity is not None:
+            initial_capital = state.get("initial_capital", 0.0)
+            if initial_capital > 0:
+                growth_pct = (current_equity / initial_capital - 1) * 100
+                compound_threshold = GENERAL_CONFIG.get("AUTO_COMPOUND_THRESHOLD_PCT", 10.0)
+                deleverage_threshold = GENERAL_CONFIG.get("AUTO_DELEVERAGE_THRESHOLD_PCT", -10.0)
+                if growth_pct >= compound_threshold or growth_pct <= deleverage_threshold:
+                    log_message(f"💰 Hiệu suất đạt ngưỡng ({growth_pct:+.2f}%). Cập nhật Vốn BĐ bằng Tổng TS hiện tại.", state=state)
+                    log_message(f"   Vốn BĐ cũ: ${initial_capital:,.2f}", state=state)
+                    state["initial_capital"] = current_equity
+                    state['last_capital_adjustment_time'] = now_dt.isoformat()
+                    log_message(f"   Vốn BĐ MỚI: ${state['initial_capital']:,.2f}", state=state)
 
-    if current_equity is None: return
-    initial_capital = state.get("initial_capital", 0.0)
-    if initial_capital <= 0: return
-
-    growth_pct = (current_equity / initial_capital - 1) * 100
-    compound_threshold = GENERAL_CONFIG.get("AUTO_COMPOUND_THRESHOLD_PCT", 10.0)
-    deleverage_threshold = GENERAL_CONFIG.get("AUTO_DELEVERAGE_THRESHOLD_PCT", -10.0)
-
-    if growth_pct >= compound_threshold or growth_pct <= deleverage_threshold:
-        log_message(f"💰 Hiệu suất đạt ngưỡng ({growth_pct:+.2f}%). Cập nhật Vốn BĐ bằng Tổng TS hiện tại.", state=state)
-        log_message(f"   Vốn BĐ cũ: ${initial_capital:,.2f}", state=state)
-        state["initial_capital"] = current_equity
-        state['last_capital_adjustment_time'] = now_dt.isoformat()
-        log_message(f"   Vốn BĐ MỚI: ${state['initial_capital']:,.2f}", state=state)
-
+    # --- BƯỚC 4: CẬP NHẬT CÁC BIẾN KẾ TOÁN USDT CHO PHIÊN SAU ---
+    state['usdt_balance_end_of_last_session'] = total_usdt_now
+    state['money_spent_on_trades_last_session'] = 0.0 # Reset
+    state['money_gained_from_trades_last_session'] = 0.0 # Reset
 
 
 
@@ -1268,11 +1272,15 @@ def run_session():
             state['temp_money_spent_on_trades'], state['temp_pnl_from_closed_trades'] = 0.0, 0.0
             state['session_has_events'] = False
 
+            state.setdefault('money_spent_on_trades_last_session', 0.0)
+            state.setdefault('money_gained_from_trades_last_session', 0.0)
+            state.setdefault('temp_pnl_from_closed_trades', 0.0)
+
             # --- BƯỚC 1: ĐỐI SOÁT & LẤY DỮ LIỆU CƠ BẢN ---
             reconcile_positions_with_binance(bnc, state)
             available_usdt, total_usdt_at_start = get_usdt_fund(bnc)
             if total_usdt_at_start == 0.0 and not state.get("active_trades"):
-                return # Không có vốn và không có lệnh mở, không cần chạy
+                return
 
             # --- BƯỚC 2: TÍNH TOÁN EQUITY & QUẢN LÝ VỐN NĂNG ĐỘNG ---
             active_symbols_for_equity = list(set([t['symbol'] for t in state.get('active_trades', [])]))
@@ -1280,15 +1288,12 @@ def run_session():
 
             current_equity = calculate_total_equity(state, total_usdt_at_start, realtime_prices_at_start)
             
-            # =====>>> ĐIỂM SỬA CHÍNH <<<=====
             if current_equity is None:
                 log_message("⚠️ Không thể tính Equity do lỗi API giá. Tạm dừng phiên để đảm bảo an toàn.", state=state)
                 save_json_file(STATE_FILE, state)
-                # Thoát khỏi hàm run_session() ngay lập tức, khối finally vẫn sẽ chạy để giải phóng lock
                 return
-            # =====>>> KẾT THÚC ĐIỂM SỬA <<<=====
             
-            manage_dynamic_capital(state, total_usdt_at_start, current_equity)
+            manage_dynamic_capital(state, bnc, current_equity)
 
             # --- BƯỚC 3: CÁC TÁC VỤ NẶNG THEO LỊCH ---
             now_vn = datetime.now(VIETNAM_TZ)
@@ -1346,14 +1351,10 @@ def run_session():
 
             if 'last_critical_error' in state: state.pop('last_critical_error', None)
 
-            state["pnl_closed_last_session"] = state['temp_pnl_from_closed_trades']
-            # Xử lý trường hợp current_equity có thể bị None ở phép tính này
-            if current_equity is not None and final_equity is not None:
-                 state["pnl_open_change_last_session"] = (final_equity - current_equity) - state['temp_pnl_from_closed_trades'] + state['temp_money_spent_on_trades']
-            else:
-                 state["pnl_open_change_last_session"] = 0.0
+            state.pop('pnl_closed_last_session', None)
+            state.pop('pnl_open_change_last_session', None)
+            state.pop('equity_end_of_last_session', None)
 
-            state["equity_end_of_last_session"] = final_equity
 
             save_json_file(STATE_FILE, state)
 
@@ -1380,6 +1381,7 @@ def run_session():
             log_entry = f"[{timestamp}] (LiveTrade) ---[✅ Kết thúc phiên]---"
             print(log_entry)
             with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
+
 
 
 if __name__ == "__main__":

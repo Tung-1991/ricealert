@@ -269,3 +269,112 @@ Mỗi khi bot được kích hoạt (ví dụ: mỗi phút qua cron job), nó s�
   3.  **Nâng cấp:** Tập trung nguồn lực vào việc nâng cấp các điểm yếu đã xác định (AI tuần tự, LLM cho tin tức) một cách có hệ thống.
   
   Tài liệu này cung cấp một bản đồ chi tiết của hệ thống, là cơ sở cho các bước tối ưu hóa và phát triển tiếp theo.
+
+
+
+Chắc chắn rồi. Đây là giải thích chi tiết toàn bộ Trung tâm Cấu hình của bot, chia thành từng phần cho dễ hiểu.
+
+---
+
+### **PHẦN 1: CẤU HÌNH CƠ BẢN & VẬN HÀNH**
+
+Đây là những cài đặt chung nhất, quyết định cách bot chạy và tương tác.
+
+#### `TRADING_MODE`
+*   **"live"**: Chạy bằng tiền thật trên tài khoản Binance chính.
+*   **"testnet"**: Chạy bằng tiền ảo trên môi trường thử nghiệm của Binance. Dùng để kiểm tra chiến thuật mà không sợ mất tiền.
+
+#### `GENERAL_CONFIG` (Cấu hình chung)
+*   `DATA_FETCH_LIMIT: 300`: Mỗi lần phân tích, bot sẽ tải về 300 nến gần nhất để tính toán các chỉ báo.
+*   `DAILY_SUMMARY_TIMES: ["08:10", "20:10"]`: Các mốc giờ (Việt Nam) trong ngày bot sẽ tự động gửi báo cáo tổng kết chi tiết ra Discord.
+*   `TRADE_COOLDOWN_HOURS: 1`: Sau khi đóng một lệnh (lời hay lỗ), bot sẽ **không** mở lệnh mới cho chính đồng coin đó trong vòng 1 giờ. Giúp tránh việc vào lại ngay một thị trường đang biến động khó lường.
+*   `CRON_JOB_INTERVAL_MINUTES: 1`: **Rất quan trọng**. Số này phải khớp với tần suất bạn đặt trên hệ thống crontab (VD: `*/1 * * * *`). Nó báo cho bot biết là nó được chạy 1 phút/lần.
+*   `HEAVY_REFRESH_MINUTES: 15`: Tần suất (phút) để bot thực hiện một tác vụ "nặng": quét **toàn bộ thị trường** để tìm cơ hội mới. Giữa các lần quét nặng này, bot chỉ tập trung quản lý các lệnh đang mở.
+*   `PENDING_TRADE_RETRY_LIMIT: 3`: Nếu bot quyết định vào một lệnh MUA nhưng gặp lỗi (VD: mạng lag), nó sẽ thử lại tối đa 3 lần trước khi hủy bỏ cơ hội đó.
+*   `CLOSE_TRADE_RETRY_LIMIT: 3`: Tương tự, nếu lệnh BÁN (chốt lời/cắt lỗ) bị lỗi, nó sẽ thử lại 3 lần. Nếu vẫn thất bại, nó sẽ gửi cảnh báo khẩn cấp.
+*   `CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES: 45`: Nếu bot gặp một lỗi nghiêm trọng lặp đi lặp lại, nó sẽ chỉ gửi cảnh báo ra Discord 45 phút/lần để tránh spam.
+*   `RECONCILIATION_QTY_THRESHOLD: 0.95`: Dùng để phát hiện bạn có can thiệp thủ công hay không. Ví dụ: bot ghi nhận đang giữ 1 ETH, nhưng trên sàn chỉ còn 0.9 ETH (< 95%). Bot sẽ hiểu là lệnh đã bị bán thủ công và tự động xóa lệnh đó khỏi bộ nhớ.
+*   `MIN_ORDER_VALUE_USDT: 11.0`: Giá trị lệnh tối thiểu (tính bằng USD) mà sàn Binance cho phép. Bất kỳ lệnh nào tính ra nhỏ hơn số này sẽ được tự động nâng lên mức này.
+*   `OVERRIDE_COOLDOWN_SCORE: 7.5`: Điểm số "đặc biệt". Nếu một cơ hội có điểm cao hơn 7.5, nó sẽ được phép phá vỡ `TRADE_COOLDOWN_HOURS` và vào lệnh ngay.
+*   `ORPHAN_ASSET_MIN_VALUE_USDT: 10.0`: Phát hiện "tài sản mồ côi". Nếu bot thấy trong ví của bạn có một đồng coin nào đó (trị giá trên 10$) mà nó không quản lý, nó sẽ cảnh báo để bạn xử lý.
+*   `TOP_N_OPPORTUNITIES_TO_CHECK: 3`: **(Cái này ta vừa thêm)** Thay vì chỉ xem xét cơ hội tốt nhất, bot sẽ xem xét top 3 cơ hội có điểm cao nhất. Nó sẽ lấy cơ hội đầu tiên trong top 3 mà vượt qua được ngưỡng vào lệnh của chính nó.
+
+---
+
+### **PHẦN 2: QUẢN LÝ VỐN & RỦI RO**
+
+Đây là các quy tắc về tiền bạc, cách bot bảo vệ vốn và tăng trưởng.
+
+#### `ĐỘNG CƠ VỐN NĂNG ĐỘNG` (Trong GENERAL_CONFIG)
+*   `DEPOSIT_DETECTION_MIN_USD: 10.0` & `_PCT: 0.01`: Cách bot nhận biết bạn nạp/rút tiền. Nếu tổng tài sản thay đổi bất thường (lớn hơn 10$ VÀ lớn hơn 1% tổng vốn) mà không phải do lời/lỗ, bot sẽ hiểu là có giao dịch nạp/rút và tự động cập nhật lại Vốn Ban Đầu.
+*   `AUTO_COMPOUND_THRESHOLD_PCT: 10.0`: **Tự độngทบ lãi.** Khi tổng tài sản tăng 10% so với Vốn Ban Đầu, bot sẽ tự động nâng Vốn Ban Đầu lên bằng với tổng tài sản hiện tại. Điều này làm cho các lệnh sau này có kích thước lớn hơn.
+*   `AUTO_DELEVERAGE_THRESHOLD_PCT: -10.0`: **Tự động giảm rủi ro.** Ngược lại, khi tổng tài sản giảm 10% (thua lỗ), bot sẽ tự động hạ Vốn Ban Đầu xuống. Điều này làm các lệnh sau này có kích thước nhỏ hơn để bảo toàn vốn.
+*   `CAPITAL_ADJUSTMENT_COOLDOWN_HOURS: 72`: Sau mỗi lần tự động điều chỉnh vốn (dù là tăng hay giảm), bot sẽ chờ 72 giờ (3 ngày) trước khi có thể điều chỉnh lần nữa, giúp vốn ổn định.
+
+#### `RISK_RULES_CONFIG` (Luật Rủi Ro)
+*   `MAX_ACTIVE_TRADES: 12`: Số lệnh tối đa được phép mở cùng một lúc.
+*   `MAX_SL_PERCENT_BY_TIMEFRAME`: Giới hạn mức cắt lỗ tối đa cho phép để tránh rủi ro quá lớn. Ví dụ, lệnh 1h không được có SL xa hơn 6% giá vào lệnh.
+*   `MAX_TP_PERCENT_BY_TIMEFRAME`: Giới hạn mức chốt lời tối đa để tránh kỳ vọng phi thực tế.
+*   `STALE_TRADE_RULES`: Xử lý các lệnh "ì" (lâu không chạy). Ví dụ, một lệnh khung 1h đã mở 48 tiếng mà lãi chưa được 25% so với kỳ vọng thì sẽ bị xem xét đóng.
+*   `STAY_OF_EXECUTION_SCORE: 6.8`: "Ân xá" cho lệnh "ì". Nếu một lệnh "ì" nhưng điểm tín hiệu hiện tại của nó vẫn cao (trên 6.8), bot sẽ tạm thời không đóng nó.
+
+#### `CAPITAL_MANAGEMENT_CONFIG` (Quản lý vốn tổng thể)
+*   `MAX_TOTAL_EXPOSURE_PCT: 0.75`: **Cái phanh an toàn cuối cùng.** Tổng số tiền bạn đã bỏ vào các lệnh đang mở sẽ không bao giờ được vượt quá 75% tổng số USDT bạn có. Luôn giữ lại 25% tiền mặt để phòng thân.
+
+---
+
+### **PHẦN 3: CHIẾN THUẬT GIAO DỊCH (TRÁI TIM CỦA BOT)**
+
+Đây là phần cốt lõi, định nghĩa cách bot phân tích, ra quyết định và hành động.
+
+#### `MTF_ANALYSIS_CONFIG` (Phân tích Đa Khung Thời Gian)
+*   Bot sẽ xem xét xu hướng ở các khung thời gian lớn hơn (4h, 1d) để đánh giá tín hiệu ở khung nhỏ (1h).
+*   `BONUS_COEFFICIENT: 1.15`: Nếu khung lớn cùng xu hướng, điểm tín hiệu sẽ được nhân với 1.15 (thưởng điểm).
+*   `PENALTY_COEFFICIENT: 0.85`: Nếu khung lớn ngược xu hướng, điểm sẽ bị nhân với 0.85 (phạt điểm).
+*   ... và các hệ số phạt khác cho các trường hợp xấu hơn.
+
+#### `4-ZONE MODEL` (Mô hình 4 Vùng)
+Bot chia thị trường làm 4 loại "thời tiết":
+*   `LEADING` (Tiên phong): Thị trường đang tích lũy, chuẩn bị có biến động mạnh.
+*   `COINCIDENT` (Trùng hợp): Biến động đang xảy ra (ví dụ: breakout).
+*   `LAGGING` (Trễ): Xu hướng đã rất rõ ràng.
+*   `NOISE` (Nhiễu): Thị trường đi ngang, không rõ xu hướng.
+
+#### `ZONE_BASED_POLICIES` (Chính sách theo Vùng)
+**Cực kỳ quan trọng.** Bot sẽ quyết định dùng **bao nhiêu % vốn** cho một lệnh dựa vào "thời tiết" của thị trường:
+*   `LEADING_ZONE` (Dò mìn): Dùng 5.5% vốn.
+*   `COINCIDENT_ZONE` (Quyết đoán): Dùng 6.5% vốn (nhiều nhất).
+*   `LAGGING_ZONE` (An toàn): Dùng 6.0% vốn.
+*   `NOISE_ZONE` (Siêu cẩn thận): Dùng 5.0% vốn.
+
+#### `TACTICS_LAB` (Thư viện các Chiến thuật)
+Đây là "bộ não" của các chiến thuật. Mỗi chiến thuật có luật chơi riêng:
+*   **`Breakout_Hunter`**: Săn các cú phá vỡ.
+    *   `OPTIMAL_ZONE`: Hoạt động tốt nhất ở vùng `LEADING` và `COINCIDENT`.
+    *   `ENTRY_SCORE: 7.0`: Điểm tín hiệu phải từ 7.0 trở lên mới vào lệnh.
+    *   `RR: 2.5`: Tỷ lệ Lời/Lỗ mục tiêu là 2.5.
+    *   `ATR_SL_MULTIPLIER: 1.8`: Đặt Stoploss bằng 1.8 lần chỉ báo ATR.
+    *   `USE_TRAILING_SL: True`: Bật chế độ tự động dời Stoploss lên khi có lời.
+    *   ... và các chiến thuật khác (`Dip_Hunter`, `AI_Aggressor`...) với các quy tắc tương tự.
+
+---
+
+### **PHẦN 4: QUẢN LÝ LỆNH ĐANG MỞ & HÀNH ĐỘNG PHỤ**
+
+#### `ACTIVE_TRADE_MANAGEMENT_CONFIG` (Quản lý lệnh đang mở)
+*   `EARLY_CLOSE_ABSOLUTE_THRESHOLD: 4.8`: Nếu điểm tín hiệu của một lệnh đang mở tụt xuống dưới 4.8, bot sẽ đóng lệnh đó ngay lập tức để tránh lỗ nặng hơn.
+*   `EARLY_CLOSE_RELATIVE_DROP_PCT: 0.27`: Nếu điểm tín hiệu tụt 27% so với lúc vào lệnh, bot sẽ bán một phần (50%) của lệnh đó để giảm rủi ro.
+*   `PROFIT_PROTECTION`: **Bảo vệ lợi nhuận.**
+    *   Khi lệnh đã lời được `3.5%`, tính năng này được kích hoạt.
+    *   Nếu sau đó lợi nhuận bị sụt giảm `2.0%` từ đỉnh, bot sẽ tự động bán `70%` lệnh để chốt lời.
+
+#### `DCA_CONFIG` (Trung bình giá)
+*   `ENABLED: True`: Bật/tắt tính năng DCA.
+*   `MAX_DCA_ENTRIES: 2`: Cho phép DCA tối đa 2 lần cho một lệnh.
+*   `TRIGGER_DROP_PCT: -5.0`: Khi giá giảm 5% so với lần vào lệnh gần nhất, bot sẽ xem xét DCA.
+*   `SCORE_MIN_THRESHOLD: 6.5`: Chỉ DCA nếu điểm tín hiệu hiện tại vẫn còn tốt (trên 6.5). Không "bơm tiền" cho một lệnh đã xấu đi.
+*   `CAPITAL_MULTIPLIER: 0.75`: Lần DCA sẽ dùng số vốn bằng 75% so với lần vào lệnh trước đó.
+*   `DCA_COOLDOWN_HOURS: 8`: Chờ ít nhất 8 tiếng giữa các lần DCA.
+
+#### `DYNAMIC_ALERT_CONFIG` & `ALERT_CONFIG` (Cảnh báo)
+*   Các cài đặt để bot gửi thông báo cập nhật tình hình ra Discord, điều chỉnh tần suất để không bị spam.
