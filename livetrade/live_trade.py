@@ -79,8 +79,8 @@ GENERAL_CONFIG = {
 # --- PHÂN TÍCH ĐA KHUNG THỜI GIAN (MTF) ---
 MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,                             # Bật/Tắt tính năng phân tích đa khung thời gian
-    "BONUS_COEFFICIENT": 1.05,                   # Hệ số thưởng điểm khi các khung lớn hơn cùng xu hướng (x1.15)
-    "PENALTY_COEFFICIENT": 0.8,                  # Hệ số phạt điểm khi có khung lớn hơn ngược xu hướng (x0.85)
+    "BONUS_COEFFICIENT": 1.01,                   # Hệ số thưởng điểm khi các khung lớn hơn cùng xu hướng (x1.15)
+    "PENALTY_COEFFICIENT": 0.80,                 # Hệ số phạt điểm khi có khung lớn hơn ngược xu hướng (x0.85)
     "SEVERE_PENALTY_COEFFICIENT": 0.75,          # Hệ số phạt nặng khi tất cả khung lớn hơn đều ngược xu hướng (x0.70)
     "SIDEWAYS_PENALTY_COEFFICIENT": 0.85,        # Hệ số phạt nhẹ khi khung lớn hơn đi ngang (x0.90)
 }
@@ -692,7 +692,8 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
     if not potential_opportunities:
         log_message("  => Không tìm thấy cơ hội tiềm năng nào.", state=state)
         return
-    sorted_opportunities = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)
+    timeframe_priority = {"1h": 0, "4h": 1, "1d": 2}
+    sorted_opportunities = sorted(potential_opportunities, key=lambda x: (x['score'], timeframe_priority.get(x['interval'], 0)), reverse=True)
     num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 3)
     top_opportunities = sorted_opportunities[:num_to_check]
     log_message(f"---[🏆 Xem xét {len(top_opportunities)} cơ hội hàng đầu (tối đa {num_to_check})]--", state=state)
