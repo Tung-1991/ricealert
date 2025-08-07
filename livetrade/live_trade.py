@@ -187,7 +187,7 @@ TACTICS_LAB = {
         "TRAIL_DISTANCE_RR": 0.8, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5
     },
     "Balanced_Trader": {
-        "OPTIMAL_ZONE": LAGGING_ZONE, "NOTES": "Chiến binh chủ lực, đi theo xu hướng rõ ràng.",
+        "OPTIMAL_ZONE": LAGGING_ZONE, COINCIDENT_ZONE], "NOTES": "Chiến binh chủ lực, đi theo xu hướng rõ ràng.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, "ENTRY_SCORE": 6.3, "RR": 1.8,
         "ATR_SL_MULTIPLIER": 2.8, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2,
         "TRAIL_DISTANCE_RR": 1.0, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.2, "TP1_PROFIT_PCT": 0.5

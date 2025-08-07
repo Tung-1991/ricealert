@@ -5,7 +5,7 @@ BASE_DIR=$(dirname "$(readlink -f "$0")")
 
 # Đường dẫn đến môi trường ảo và file python
 VENV_ACTIVATE="$BASE_DIR/venv/bin/activate"
-CONTROL_PANEL_SCRIPT="$BASE_DIR/livetrade/control_live_panel.py"
+CONTROL_PANEL_SCRIPT="$BASE_DIR/livetrade/control_live.py"
 
 # Kiểm tra xem file activate có tồn tại không
 if [ ! -f "$VENV_ACTIVATE" ]; then
