@@ -187,7 +187,7 @@ TACTICS_LAB = {
         "TRAIL_DISTANCE_RR": 0.8, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5
     },
     "Balanced_Trader": {
-        "OPTIMAL_ZONE": LAGGING_ZONE, COINCIDENT_ZONE], "NOTES": "Chiến binh chủ lực, đi theo xu hướng rõ ràng.",
+        "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE], "NOTES": "Chiến binh chủ lực, đi theo xu hướng rõ ràng.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, "ENTRY_SCORE": 6.3, "RR": 1.8,
         "ATR_SL_MULTIPLIER": 2.8, "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.2,
         "TRAIL_DISTANCE_RR": 1.0, "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.2, "TP1_PROFIT_PCT": 0.5
@@ -447,24 +447,53 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
 def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, state: Dict, close_pct: float = 1.0) -> bool:
     symbol = trade['symbol']
     side = "SELL"
-    quantity_to_close = float(trade.get('quantity', 0)) * close_pct
-    if quantity_to_close <= 0: return False
+    
+    qty_in_state = float(trade.get('quantity', 0))
+    final_quantity_to_sell = 0.0
 
+    try:
+        # Lấy số lượng thực tế trên sàn
+        asset_code = symbol.replace("USDT", "")
+        balances = bnc.get_account_balance().get("balances", [])
+        asset_on_binance = next((b for b in balances if b["asset"] == asset_code), None)
+        
+        if asset_on_binance and float(asset_on_binance.get('free', 0)) > 0:
+            qty_on_binance = float(asset_on_binance['free'])
+            log_message(f"ℹ️ Đối soát {symbol}: Bot ghi {qty_in_state:.8f}, Sàn có {qty_on_binance:.8f}", state)
+            
+            # LOGIC CỐT LÕI: LUÔN BÁN SỐ LƯỢNG NHỎ HƠN ĐỂ ĐẢM BẢO AN TOÀN
+            # Điều này xử lý cả 2 trường hợp:
+            # 1. Sai số phí: qty_on_binance < qty_in_state -> Bán qty_on_binance
+            # 2. Mua thêm: qty_on_binance > qty_in_state -> Bán qty_in_state
+            final_quantity_to_sell = min(qty_in_state, qty_on_binance) * close_pct
+            
+        else:
+            # Nếu không lấy được số dư, tin vào sổ sách của bot
+            final_quantity_to_sell = qty_in_state * close_pct
+            log_message(f"⚠️ Không lấy được số dư {symbol}, tạm dùng số lượng bot ghi nhận.", state)
+            
+    except Exception as e:
+        log_error(f"Lỗi khi lấy số dư {symbol}. Tạm dùng số lượng bot ghi nhận.", error_details=str(e), state=state)
+        final_quantity_to_sell = qty_in_state * close_pct
+
+    if final_quantity_to_sell <= 0:
+        log_message(f"⚠️ Bỏ qua đóng lệnh {symbol} vì số lượng tính toán là zero hoặc âm.", state=state)
+        return False
+
+    # Từ đây, phần còn lại của hàm giữ nguyên, chỉ cần đảm bảo nó dùng `final_quantity_to_sell`
     trade.setdefault('close_retry_count', 0)
     try:
-        formatted_quantity = bnc._format_quantity(symbol, quantity_to_close)
-        market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=quantity_to_close)
+        market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=final_quantity_to_sell)
         trade['close_retry_count'] = 0
     except Exception as e:
-
-
         trade['close_retry_count'] += 1
         log_error(f"Lỗi kết nối khi đóng lệnh {symbol} (Lần thử #{trade['close_retry_count']})", error_details=str(e), state=state)
         if trade['close_retry_count'] >= GENERAL_CONFIG.get("CLOSE_TRADE_RETRY_LIMIT", 3):
             log_error(message=f"Không thể đóng lệnh {symbol} sau {trade['close_retry_count']} lần thử. CẦN CAN THIỆP THỦ CÔNG!", error_details=traceback.format_exc(), send_to_discord=True, force_discord=True, state=state)
             trade['close_retry_count'] = 0
         return False
-
+    
+    # ... (toàn bộ code xử lý sau khi đóng lệnh thành công giữ nguyên)
     if not (market_close_order and float(market_close_order.get('executedQty', 0)) > 0):
         log_error(f"Lệnh đóng {symbol} được gửi nhưng không khớp. Kiểm tra trên sàn.", state=state)
         return False
@@ -477,8 +506,8 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
 
-    if close_pct >= 0.999: # Full close
-        pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100
+    if close_pct >= 0.999:
+        pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100 if trade['entry_price'] > 0 else 0
         trade.update({
             'status': f'Closed ({reason})',
             'exit_price': exit_price,
@@ -488,18 +517,23 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         })
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
-        state['trade_history'] = state['trade_history'][-100:] 
+        state['trade_history'] = state['trade_history'][-100:]
         state.setdefault('cooldown_until', {})[symbol] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
         export_trade_history_to_csv([trade])
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
-    else: # Partial close
+    else:
         trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_usd
-        trade['total_invested_usd'] *= (1 - close_pct)
+        if 'total_invested_usd' in trade and trade['total_invested_usd'] > 0:
+            original_qty = qty_in_state
+            closed_ratio = closed_qty / original_qty if original_qty > 0 else 0
+            trade['total_invested_usd'] *= (1 - closed_ratio)
+
         trade['quantity'] -= closed_qty
         trade.setdefault('tactic_used', []).append(f"Partial_Close_{reason}")
         state.setdefault('temp_newly_closed_trades', []).append(f"💰 {symbol} (Đóng {close_pct*100:.0f}% - {reason}): PnL ${pnl_usd:,.2f}")
 
     return True
+
 
 
 def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
@@ -1058,28 +1092,50 @@ def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     
     return f"{line1}\n{line2}"
 
-
-
 def format_closed_trade_line(trade_data: pd.Series) -> str:
     try:
+        # --- Lấy dữ liệu cơ bản ---
+        symbol_with_interval = f"{trade_data.get('symbol', 'N/A')}-{trade_data.get('interval', 'N/A')}"
+        pnl_usd = trade_data.get('pnl_usd', 0)
+        pnl_percent = trade_data.get('pnl_percent', 0)
+        pnl_icon = "✅" if pnl_usd >= 0 else "❌"
+        
+        entry_price_str = format_price_dynamically(trade_data.get('entry_price'))
+        exit_price_str = format_price_dynamically(trade_data.get('exit_price'))
+        
         entry_time = pd.to_datetime(trade_data['entry_time']).tz_convert(VIETNAM_TZ)
         exit_time = pd.to_datetime(trade_data['exit_time']).tz_convert(VIETNAM_TZ)
         hold_duration_h = (exit_time - entry_time).total_seconds() / 3600
-        tactics_list_str = trade_data.get('tactic_used', '[]')
-        try:
-            tactics_list = json.loads(tactics_list_str) if isinstance(tactics_list_str, str) else tactics_list_str
-            if isinstance(tactics_list, list) and tactics_list:
-                tactics_str = ', '.join(map(str, [t for t in tactics_list if pd.notna(t)]))
-            else:
-                tactics_str = trade_data.get('opened_by_tactic', 'N/A')
-        except (json.JSONDecodeError, TypeError):
-             tactics_str = trade_data.get('opened_by_tactic', 'N/A')
-        info_str = f"Tactic: {tactics_str}"
-        symbol_with_interval = f"{trade_data['symbol']}-{trade_data.get('interval', 'N/A')}"
-        pnl_info = f"${trade_data.get('pnl_usd', 0):.2f} ({trade_data.get('pnl_percent', 0):+.2f}%)"
-        return f"  • **{symbol_with_interval}** | PnL: `{pnl_info}` | {info_str} | Hold: {hold_duration_h:.1f}h"
+
+        # --- Lấy dữ liệu phân tích (Zone và Score) ---
+        entry_zone = trade_data.get('entry_zone', 'N/A')
+        # last_zone là zone ngay trước khi đóng lệnh
+        last_zone = trade_data.get('last_zone', 'N/A')
+        zone_display = f"Zone: {entry_zone} -> {last_zone}"
+
+        entry_score = trade_data.get('entry_score', 0.0)
+        # last_score là điểm ngay trước khi đóng lệnh
+        last_score = trade_data.get('last_score', 0.0)
+        score_icon = "📉" if last_score < entry_score else ("📈" if last_score > entry_score else "")
+        score_display = f"Score: {entry_score:.1f} -> {last_score:.1f}{score_icon}"
+
+        # --- Xử lý Tactic ---
+        main_tactic = trade_data.get('opened_by_tactic', 'N/A')
+        reason_closed = trade_data.get('status', 'Closed').split('(')[-1].replace(')', '').strip()
+        tactic_display = f"{main_tactic} -> {reason_closed}"
+
+        # --- Tạo chuỗi hiển thị 3 dòng cực kỳ chi tiết ---
+        line1 = f"  • {pnl_icon} **{symbol_with_interval}** | PnL: **${pnl_usd:,.2f} ({pnl_percent:+.2f}%)**"
+        line2 = f"    `Entry: {entry_price_str} -> Exit: {exit_price_str} | Hold: {hold_duration_h:.1f}h`"
+        line3 = f"    `{zone_display} | {score_display} | {tactic_display}`"
+        
+        return f"{line1}\n{line2}\n{line3}"
+        
     except Exception as e:
         return f"  • {trade_data.get('symbol', 'N/A')} - Lỗi báo cáo lịch sử: {e}"
+
+
+
 
 def build_dynamic_alert_text(state: Dict, total_usdt: float, available_usdt: float, realtime_prices: Dict[str, float], equity: float) -> str:
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
@@ -1360,19 +1416,28 @@ def run_session():
 
     except Exception as e:
         error_msg = str(e)
+        # Tạo một "dấu hiệu lỗi" ngắn gọn, chỉ chứa phần cốt lõi
+        error_signature = error_msg.split(' for url:')[0] if ' for url:' in error_msg else error_msg[:100]
+
         last_error = state.get('last_critical_error', {})
         now_ts = time.time()
-        cooldown_seconds = GENERAL_CONFIG.get("CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES", 30) * 60
+        cooldown_seconds = GENERAL_CONFIG.get("CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES", 45) * 60
         should_alert_discord = True
-        if last_error.get('message') == error_msg:
+
+        # So sánh dựa trên "dấu hiệu lỗi" thay vì toàn bộ thông điệp
+        if last_error.get('signature') == error_signature:
             if (now_ts - last_error.get('timestamp', 0)) < cooldown_seconds:
                 should_alert_discord = False
+                log_message(f"ℹ️ Lỗi tương tự đã xảy ra gần đây. Tạm dừng gửi cảnh báo Discord.", state=state)
 
         log_error(f"LỖI TOÀN CỤC NGOÀI DỰ KIẾN", error_details=traceback.format_exc(), send_to_discord=should_alert_discord, state=state)
 
         if state:
-            state['last_critical_error'] = {'message': error_msg, 'timestamp': now_ts}
+            # Lưu lại "dấu hiệu lỗi" để so sánh lần sau
+            if should_alert_discord:
+                 state['last_critical_error'] = {'signature': error_signature, 'timestamp': now_ts}
             save_json_file(STATE_FILE, state)
+
 
     finally:
         release_lock()

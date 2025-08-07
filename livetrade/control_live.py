@@ -280,15 +280,20 @@ def show_full_dashboard(bnc: BinanceConnector):
             print(f"   {price_info}")
 
     if input("\n👉 Hiển thị Radar thị trường? (y/n): ").lower() != 'y': print("="*80); return
-    print("\n" + "---" * 10 + " 📡 RADAR QUÉT THỊ TRƯỜNG 📡 " + "---" * 10)
+    print("\n" + "---" * 10 + " 📡 RADAR QUÉT THỊ TRƯỜNG (v2.0 - Đã nâng cấp) 📡 " + "---" * 10)
     refresh_market_data_for_panel()
     symbols_to_scan = parse_env_variable("SYMBOLS_TO_SCAN")
     symbols_in_trades = {t['symbol'] for t in all_trades}
-    symbols_for_radar = [s for s in symbols_to_scan if s not in symbols_in_trades]
-    if not symbols_for_radar: print("ℹ️ Tất cả các coin trong danh sách đều đã có lệnh mở.")
+
+    # === THAY ĐỔI LỚN #1: Bỏ bộ lọc, quét tất cả các symbol trong .env ===
+    # symbols_for_radar = [s for s in symbols_to_scan if s not in symbols_in_trades] # <- DÒNG CŨ BỊ XÓA
+    if not symbols_to_scan: # <- DÒNG MỚI (thay cho symbols_for_radar)
+        print("ℹ️ Không có symbol nào trong .env để quét.")
     else:
-        for symbol in symbols_for_radar:
-            print(f"\n--- {symbol} ---")
+        for symbol in symbols_to_scan: # <- DÒNG MỚI
+            # === THAY ĐỔI LỚN #2: Thêm tag [MỞ] nếu có lệnh ===
+            trade_status_tag = " [MỞ]" if symbol in symbols_in_trades else ""
+            print(f"\n--- {symbol}{trade_status_tag} ---")
             price_str = "N/A"
             temp_indicators = indicator_results.get(symbol, {}).get("1h")
             if temp_indicators and temp_indicators.get('price'): price_str = format_price_dynamically(temp_indicators.get('price'))
@@ -297,20 +302,43 @@ def show_full_dashboard(bnc: BinanceConnector):
                 indicators = indicator_results.get(symbol, {}).get(interval)
                 if not indicators: print(f"  [{interval}]: Không có dữ liệu để phân tích."); continue
                 zone = determine_market_zone_with_scoring(symbol, interval)
-                best_score_for_zone, best_tactic_for_zone, entry_threshold = 0, "N/A", "N/A"
+
+                # === THAY ĐỔI LỚN #3: Logic tính toán và hiển thị điểm chi tiết hơn ===
+                best_raw_score, best_adj_score, best_tactic, entry_threshold, mtf_coeff = 0, 0, "N/A", "N/A", 1.0
+
                 for tactic_name, tactic_cfg in TACTICS_LAB.items():
                     optimal_zones = tactic_cfg.get("OPTIMAL_ZONE", [])
                     if not isinstance(optimal_zones, list): optimal_zones = [optimal_zones]
                     if zone in optimal_zones:
                         decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
-                        adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval)
-                        if adjusted_score > best_score_for_zone:
-                            best_score_for_zone, best_tactic_for_zone, entry_threshold = adjusted_score, tactic_name, tactic_cfg.get("ENTRY_SCORE", "N/A")
-                if best_score_for_zone == 0:
+                        raw_score = decision.get("final_score", 0.0)
+                        temp_mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
+                        adjusted_score = raw_score * temp_mtf_coeff
+                        
+                        # So sánh dựa trên điểm đã điều chỉnh
+                        if adjusted_score > best_adj_score:
+                            best_raw_score = raw_score
+                            best_adj_score = adjusted_score
+                            best_tactic = tactic_name
+                            entry_threshold = tactic_cfg.get("ENTRY_SCORE", "N/A")
+                            mtf_coeff = temp_mtf_coeff
+
+                if best_raw_score == 0: # Fallback nếu không có tactic nào phù hợp zone
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
-                    best_score_for_zone = decision.get("final_score", 0.0)
-                icon = "🟢" if isinstance(entry_threshold, (int, float)) and best_score_for_zone >= entry_threshold else ("🟡" if best_score_for_zone >= 5.5 else "🔴")
-                print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | Score: {best_score_for_zone:.2f} (Tactic: {best_tactic_for_zone}, Ngưỡng: {entry_threshold})")
+                    best_raw_score = decision.get("final_score", 0.0)
+                    mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
+                    best_adj_score = best_raw_score * mtf_coeff
+                    best_tactic = "Default"
+                
+                # So sánh điểm ĐÃ ĐIỀU CHỈNH với ngưỡng
+                is_strong_signal = isinstance(entry_threshold, (int, float)) and best_adj_score >= entry_threshold
+                icon = "🟢" if is_strong_signal else ("🟡" if best_adj_score >= 5.5 else "🔴")
+
+                # Xây dựng chuỗi hiển thị mới
+                mtf_display = f"x{mtf_coeff:.2f}"
+                score_display = f"Gốc: {best_raw_score:.2f} | Cuối: {best_adj_score:.2f} (MTF {mtf_display})"
+                print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | {score_display} | Tactic: {best_tactic} (Ngưỡng: {entry_threshold})")
+
     print("="*80)
 
 def view_csv_history():
