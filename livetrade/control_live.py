@@ -160,15 +160,60 @@ def reconcile_state(bnc: BinanceConnector, state: dict):
 
 def write_trades_to_csv(closed_trades: list):
     if not closed_trades: return
+    
+    # Đảm bảo CSV_HEADER được cập nhật nếu có thêm trường mới
+    all_keys = set()
+    for trade in closed_trades:
+        all_keys.update(trade.keys())
+    
+    # Tạo header động nhưng vẫn giữ thứ tự ưu tiên của CSV_HEADER
+    final_header = list(CSV_HEADER)
+    for key in all_keys:
+        if key not in final_header:
+            final_header.append(key)
+
     try:
-        with open(TRADE_HISTORY_CSV_FILE, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_HEADER, extrasaction='ignore')
-            if f.tell() == 0: writer.writeheader()
+        # Sử dụng 'a' để ghi tiếp, và 'w' nếu file chưa tồn tại
+        # Kiểm tra header để tránh ghi lặp lại hoặc sai
+        file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE)
+        write_header = not file_exists
+        
+        if file_exists:
+            try:
+                # Đọc header hiện có, nếu khác thì sẽ ghi đè file
+                with open(TRADE_HISTORY_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    existing_header = next(reader)
+                    if set(existing_header) != set(final_header):
+                        print("⚠️ Header của file CSV đã thay đổi. Sẽ ghi đè file.")
+                        write_header = True
+            except (StopIteration, Exception): # File rỗng hoặc lỗi
+                 write_header = True
+
+        mode = 'w' if write_header else 'a'
+        
+        with open(TRADE_HISTORY_CSV_FILE, mode, newline='', encoding='utf-8') as f:
+            # Dùng DictWriter để đảm bảo các giá trị được đặt vào đúng cột
+            writer = csv.DictWriter(f, fieldnames=final_header, extrasaction='ignore', quoting=csv.QUOTE_ALL)
+            
+            if write_header:
+                writer.writeheader()
+            
             for trade in closed_trades:
-                trade_to_write = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in trade.items()}
+                # Chuyển đổi các dict/list thành chuỗi JSON trước khi ghi
+                trade_to_write = {}
+                for key, value in trade.items():
+                    if isinstance(value, (dict, list)):
+                        trade_to_write[key] = json.dumps(value)
+                    else:
+                        trade_to_write[key] = value
                 writer.writerow(trade_to_write)
+                
         print(f"✍️  Đã ghi thành công {len(closed_trades)} lệnh vào file CSV.")
-    except Exception as e: print(f"❌ Lỗi nghiêm trọng khi ghi file CSV: {e}")
+    except Exception as e:
+        print(f"❌ Lỗi nghiêm trọng khi ghi file CSV: {e}")
+        traceback.print_exc()
+
 
 # --- CÁC HÀM XỬ LÝ GIAO DỊCH CÓ GHI SỔ SÁCH (ACCOUNTING SYNC) ---
 
@@ -344,16 +389,62 @@ def show_full_dashboard(bnc: BinanceConnector):
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
-        if not os.path.exists(TRADE_HISTORY_CSV_FILE): print("ℹ️ Không tìm thấy file trade_history.csv."); return
-        df = pd.read_csv(TRADE_HISTORY_CSV_FILE)
-        if df.empty: print("ℹ️ File lịch sử trống."); return
-        cols = ['exit_time', 'symbol', 'opened_by_tactic', 'pnl_usd', 'pnl_percent', 'holding_duration_hours']
-        df_display = df[[c for c in cols if c in df.columns]].copy()
-        df_display['exit_time'] = pd.to_datetime(df_display['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
-        df_display['pnl_usd'] = df_display['pnl_usd'].map('${:,.2f}'.format)
-        df_display['pnl_percent'] = df_display['pnl_percent'].map('{:,.2f}%'.format)
-        print(df_display.sort_values(by='exit_time', ascending=False).head(20).to_string(index=False))
-    except Exception as e: print(f"⚠️ Lỗi khi đọc file CSV: {e}")
+        if not os.path.exists(TRADE_HISTORY_CSV_FILE):
+            print("ℹ️ Không tìm thấy file trade_history.csv.")
+            return
+        
+        df = pd.read_csv(TRADE_HISTORY_CSV_FILE, engine='python', quotechar='"', skipinitialspace=True)
+        if df.empty:
+            print("ℹ️ File lịch sử trống.")
+            return
+
+        cols_to_display = [
+            'exit_time', 'symbol', 'interval', 'total_invested_usd', 
+            'pnl_usd', 'pnl_percent', 'holding_duration_hours',
+            'entry_score', 'last_score', 'entry_zone', 'last_zone',
+            'opened_by_tactic', 'status'
+        ]
+        
+        existing_cols = [c for c in cols_to_display if c in df.columns]
+        df_display = df[existing_cols].copy()
+
+        # --- ĐỊNH DẠNG DỮ LIỆU ---
+        df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], format='mixed', errors='coerce').dt.strftime('%m-%d %H:%M')
+        if 'total_invested_usd' in df_display.columns:
+            df_display['total_invested_usd'] = df_display['total_invested_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):.2f}")
+        if 'pnl_usd' in df_display.columns:
+            df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):+.2f}")
+        if 'pnl_percent' in df_display.columns:
+            df_display['pnl_percent'] = df_display['pnl_percent'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):+.2f}%")
+        if 'entry_score' in df_display.columns:
+            df_display['entry_score'] = df_display['entry_score'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.1f}")
+        if 'last_score' in df_display.columns:
+            df_display['last_score'] = df_display['last_score'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.1f}")
+            df_display['Score'] = df_display['entry_score'].astype(str) + '→' + df_display['last_score'].astype(str)
+            df_display.drop(columns=['entry_score', 'last_score'], inplace=True)
+        if 'entry_zone' in df_display.columns and 'last_zone' in df_display.columns:
+            df_display['Zone'] = df_display['entry_zone'].astype(str) + '→' + df_display['last_zone'].astype(str)
+            df_display.drop(columns=['entry_zone', 'last_zone'], inplace=True)
+            
+        # --- ĐÂY LÀ PHẦN SỬA LỖI HIỂN THỊ ---
+        # Đổi tên các cột dài thành tên ngắn hơn
+        df_display.rename(columns={
+            'total_invested_usd': 'Vốn',
+            'pnl_percent': 'PnL %',
+            'holding_duration_hours': 'Hold (h)',
+            'opened_by_tactic': 'Tactic',
+            'exit_time': 'Time Close'
+        }, inplace=True)
+        
+        final_order = [c for c in ['Time Close', 'symbol', 'interval', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status'] if c in df_display.columns]
+        df_display = df_display[final_order]
+
+        print(df_display.sort_values(by='Time Close', ascending=False).head(20).to_string(index=False))
+
+    except Exception as e:
+        print(f"⚠️ Lỗi khi đọc file CSV: {e}")
+        traceback.print_exc()
+
 
 def manual_report(bnc: BinanceConnector):
     print("\n" + "📜" * 10 + " TẠO BÁO CÁO THỦ CÔNG " + "📜" * 10)

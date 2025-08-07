@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 Live Trade - The 4-Zone Strategy
-Version: 8.6.1 - Dynamic Capital Engine
+Version: 8.7.0 - Dynamic Capital Engine
 Date: 2025-08-04
 
-CHANGELOG (v8.6.1):
+CHANGELOG (v8.7.0):
 - FEATURE (Dynamic Capital Engine): Implemented a fully autonomous capital management system. The bot now automatically adjusts its core capital base (`initial_capital`) based on performance, eliminating the need for manual intervention.
   - Auto-Compounding: When total equity grows beyond a configurable percentage (`AUTO_COMPOUND_THRESHOLD_PCT`) of the current capital base, the bot raises the capital base to reinvest profits and scale up position sizes.
   - Auto-Deleveraging: Conversely, during a drawdown, if equity falls below a threshold (`AUTO_DELEVERAGE_THRESHOLD_PCT`), the bot reduces the capital base to decrease position sizes and preserve capital.
@@ -56,7 +56,7 @@ TRADING_MODE: Literal["live", "testnet"] = "live" # Chế độ chạy: "live" (
 GENERAL_CONFIG = {
     "DATA_FETCH_LIMIT": 300,                     # Số lượng nến tối đa để tải về cho mỗi lần phân tích
     "DAILY_SUMMARY_TIMES": ["08:10", "20:10"],   # Các mốc thời gian trong ngày để gửi báo cáo tổng kết
-    "TRADE_COOLDOWN_HOURS": 1,                   # Thời gian (giờ) nghỉ giao dịch một đồng coin sau khi đóng lệnh
+    "TRADE_COOLDOWN_HOURS": 3,                   # Thời gian (giờ) nghỉ giao dịch một đồng coin sau khi đóng lệnh
     "CRON_JOB_INTERVAL_MINUTES": 1,              # Tần suất chạy bot (phút), phải khớp với crontab
     "HEAVY_REFRESH_MINUTES": 15,                 # Tần suất (phút) để quét lại toàn bộ thị trường tìm cơ hội mới
     "PENDING_TRADE_RETRY_LIMIT": 3,              # Số lần thử lại tối đa nếu một lệnh mua mới thất bại
@@ -69,8 +69,8 @@ GENERAL_CONFIG = {
     "TOP_N_OPPORTUNITIES_TO_CHECK": 3,           # Số cơ hội hàng đầu để xem xét, mặc định là 3
 
     # --- ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) ---
-    "DEPOSIT_DETECTION_MIN_USD": 10.0,            # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
-    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.01,    # Ngưỡng % tối thiểu để phát hiện bạn Nạp/Rút tiền (0.5%)
+    "DEPOSIT_DETECTION_MIN_USD": 10.0,           # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
+    "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.01,     # Ngưỡng % tối thiểu để phát hiện bạn Nạp/Rút tiền (0.5%)
     "AUTO_COMPOUND_THRESHOLD_PCT": 10.0,         # Ngưỡng lãi (%) để bot tự động tái đầu tư (nâng Vốn BĐ)
     "AUTO_DELEVERAGE_THRESHOLD_PCT": -10.0,      # Ngưỡng lỗ (%) để bot tự động giảm rủi ro (hạ Vốn BĐ)
     "CAPITAL_ADJUSTMENT_COOLDOWN_HOURS": 72,     # Thời gian (giờ) chờ giữa các lần tự động điều chỉnh Vốn BĐ
@@ -79,10 +79,10 @@ GENERAL_CONFIG = {
 # --- PHÂN TÍCH ĐA KHUNG THỜI GIAN (MTF) ---
 MTF_ANALYSIS_CONFIG = {
     "ENABLED": True,                             # Bật/Tắt tính năng phân tích đa khung thời gian
-    "BONUS_COEFFICIENT": 1.15,                   # Hệ số thưởng điểm khi các khung lớn hơn cùng xu hướng (x1.15)
-    "PENALTY_COEFFICIENT": 0.85,                 # Hệ số phạt điểm khi có khung lớn hơn ngược xu hướng (x0.85)
-    "SEVERE_PENALTY_COEFFICIENT": 0.70,          # Hệ số phạt nặng khi tất cả khung lớn hơn đều ngược xu hướng (x0.70)
-    "SIDEWAYS_PENALTY_COEFFICIENT": 0.90,        # Hệ số phạt nhẹ khi khung lớn hơn đi ngang (x0.90)
+    "BONUS_COEFFICIENT": 1.05,                   # Hệ số thưởng điểm khi các khung lớn hơn cùng xu hướng (x1.15)
+    "PENALTY_COEFFICIENT": 0.8,                  # Hệ số phạt điểm khi có khung lớn hơn ngược xu hướng (x0.85)
+    "SEVERE_PENALTY_COEFFICIENT": 0.75,          # Hệ số phạt nặng khi tất cả khung lớn hơn đều ngược xu hướng (x0.70)
+    "SIDEWAYS_PENALTY_COEFFICIENT": 0.85,        # Hệ số phạt nhẹ khi khung lớn hơn đi ngang (x0.90)
 }
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
@@ -143,31 +143,21 @@ ALERT_CONFIG = {
 # ==============================================================================
 # ================= 🚀 CORE STRATEGY v8.0.0: 4-ZONE MODEL 🚀 =================
 # ==============================================================================
-# Định nghĩa 4 vùng thị trường dựa trên các chỉ báo
+#Định nghĩa 4 vùng thị trường dựa trên các chỉ báo
 LEADING_ZONE = "LEADING"    # Vùng Tiên phong: Thị trường chuẩn bị có biến động
 COINCIDENT_ZONE = "COINCIDENT"  # Vùng Trùng hợp: Biến động đang xảy ra
 LAGGING_ZONE = "LAGGING"    # Vùng Trễ: Xu hướng đã rõ ràng
 NOISE_ZONE = "NOISE"      # Vùng Nhiễu: Thị trường không có xu hướng
 ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 
-# Quy định tỷ lệ vốn (%) sẽ sử dụng cho mỗi vùng thị trường
 ZONE_BASED_POLICIES = {
-    LEADING_ZONE: {"NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng.", "CAPITAL_PCT": 0.055}, # Vùng Tiên phong: vào 5.5% Vốn BĐ
-    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.065}, # Vùng Trùng hợp: vào 6.5% Vốn BĐ
-    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.06}, # Vùng Trễ: vào 6.0% Vốn BĐ
-    NOISE_ZONE: {"NOTES": "Nguy hiểm, chỉ vào lệnh siêu nhỏ khi có tín hiệu VÀNG.", "CAPITAL_PCT": 0.05}  # Vùng Nhiễu: vào 5.0% Vốn BĐ
+    LEADING_ZONE: {"NOTES": "Vốn nhỏ để 'dò mìn' cơ hội tiềm năng.", "CAPITAL_PCT": 0.045},
+    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.065},
+    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.055},
+    NOISE_ZONE: {"NOTES": "Nguy hiểm, chỉ vào lệnh siêu nhỏ khi có tín hiệu VÀNG.", "CAPITAL_PCT": 0.035}
 }
 
-# Thư viện các chiến thuật giao dịch chi tiết
 TACTICS_LAB = {
-    # Mỗi chiến thuật có các tham số riêng:
-    # OPTIMAL_ZONE: Vùng thị trường tối ưu để áp dụng chiến thuật
-    # WEIGHTS: Trọng số của các yếu tố (kỹ thuật, bối cảnh, AI)
-    # ENTRY_SCORE: Điểm tín hiệu tối thiểu để vào lệnh
-    # RR: Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward)
-    # ATR_SL_MULTIPLIER: Hệ số nhân với chỉ báo ATR để đặt Stop Loss
-    # USE_TRAILING_SL: Bật/Tắt tính năng Stop Loss động (dời SL theo giá)
-    # ENABLE_PARTIAL_TP: Bật/Tắt tính năng chốt lời một phần
     "Breakout_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], "NOTES": "Săn đột phá từ nền giá siết chặt.",
         "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2}, "ENTRY_SCORE": 7.0, "RR": 2.5,
@@ -215,7 +205,6 @@ SESSION_TEMP_KEYS = ['temp_newly_opened_trades', 'temp_newly_closed_trades', 'te
 
 # --- CÁC HÀM KHÓA FILE (FILE LOCKING) ---
 def acquire_lock(timeout=55):
-    # Tự động xóa lock file nếu nó tồn tại quá 5 phút (có thể do crash)
     LOCK_STALE_MINUTES = 5
     if os.path.exists(LOCK_FILE):
         try:
@@ -225,8 +214,6 @@ def acquire_lock(timeout=55):
                 release_lock()
         except Exception as e:
             log_error(f"Lỗi khi kiểm tra file lock bị kẹt: {e}")
-
-    # Logic cũ giữ nguyên
     start_time = time.time()
     while os.path.exists(LOCK_FILE):
         if time.time() - start_time > timeout:
@@ -240,7 +227,6 @@ def acquire_lock(timeout=55):
         with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
         return True
     except IOError: return False
-
 
 def release_lock():
     try:
@@ -256,7 +242,6 @@ def format_price_dynamically(price: Optional[float]) -> str:
         return f"{price:,.4f}"
     else:
         return f"{price:,.8f}"
-
 
 def log_message(message: str, state: Optional[Dict] = None):
     if state is not None: state['session_has_events'] = True
@@ -354,18 +339,24 @@ def export_trade_history_to_csv(closed_trades: List[Dict]):
     if not closed_trades: return
     try:
         df = pd.DataFrame(closed_trades)
+        full_columns_list = [
+            "trade_id", "symbol", "interval", "status",
+            "opened_by_tactic", "tactic_used", "trade_type",
+            "entry_price", "exit_price", "tp", "sl",
+            "total_invested_usd", "pnl_usd", "pnl_percent",
+            "entry_time", "exit_time", "holding_duration_hours",
+            "entry_score", "last_score", "entry_zone", "last_zone",
+            "dca_entries", "realized_pnl_usd"
+        ]
+        for col in full_columns_list:
+            if col not in df.columns:
+                df[col] = None
+        df = df[full_columns_list]
         df['entry_time'] = pd.to_datetime(df['entry_time']).dt.tz_convert(VIETNAM_TZ)
-        if 'exit_time' in df.columns:
-            df['exit_time'] = pd.to_datetime(df['exit_time']).dt.tz_convert(VIETNAM_TZ)
-            df['holding_duration_hours'] = round((df['exit_time'] - df['entry_time']).dt.total_seconds() / 3600, 2)
-        cols = ["trade_id", "symbol", "interval", "status", "opened_by_tactic", "tactic_used", "trade_type", "entry_price", "exit_price", "tp", "sl", "total_invested_usd", "pnl_usd", "pnl_percent", "entry_time", "exit_time", "holding_duration_hours", "entry_score", "dca_entries"]
-        df = df[[c for c in cols if c in df.columns]]
-        header_mismatch = False
-        if os.path.exists(TRADE_HISTORY_CSV_FILE):
-            try:
-                if set(pd.read_csv(TRADE_HISTORY_CSV_FILE, nrows=0).columns.tolist()) != set(df.columns.tolist()): header_mismatch = True
-            except Exception: header_mismatch = True
-        df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a' if os.path.exists(TRADE_HISTORY_CSV_FILE) and not header_mismatch else 'w', header=not os.path.exists(TRADE_HISTORY_CSV_FILE) or header_mismatch, index=False, encoding="utf-8")
+        df['exit_time'] = pd.to_datetime(df['exit_time']).dt.tz_convert(VIETNAM_TZ)
+        df['holding_duration_hours'] = round((df['exit_time'] - df['entry_time']).dt.total_seconds() / 3600, 2)
+        file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE)
+        df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a', header=not file_exists, index=False, encoding="utf-8")
     except Exception as e:
         log_error(f"Lỗi xuất lịch sử giao dịch ra CSV", error_details=traceback.format_exc())
 
@@ -383,24 +374,18 @@ def get_price_data(symbol: str, interval: str, limit: int = 200, startTime: int 
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     if startTime:
         params['startTime'] = startTime
-    
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        
         if not data:
             return pd.DataFrame()
-
         df = pd.DataFrame(data, columns=["timestamp","open","high","low","close","volume","close_time","quote_asset_volume","number_of_trades","taker_buy_base_vol","taker_buy_quote_vol","ignore"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df.set_index("timestamp", inplace=True)
-        
         cols_to_convert = ["open", "high", "low", "close", "volume"]
         df[cols_to_convert] = df[cols_to_convert].astype(float)
-        
         return df
-
     except requests.exceptions.RequestException as e:
         log_error(f"Lỗi mạng khi lấy dữ liệu giá cho {symbol}-{interval}", error_details=str(e))
         return None
@@ -408,19 +393,16 @@ def get_price_data(symbol: str, interval: str, limit: int = 200, startTime: int 
         log_error(f"Lỗi không xác định khi lấy dữ liệu giá cho {symbol}-{interval}", error_details=traceback.format_exc())
         return None
 
-
 def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
     cache_filepath = os.path.join(CACHE_DIR, f"{symbol}-{interval}.parquet")
     existing_df = None
     if os.path.exists(cache_filepath):
         try: existing_df = pd.read_parquet(cache_filepath)
         except Exception as e: log_error(f"Lỗi đọc file cache {cache_filepath}: {e}. Sẽ tải lại.")
-
     if existing_df is not None and not existing_df.empty:
         last_ts = int(existing_df.index[-1].timestamp() * 1000)
         interval_ms = get_interval_in_milliseconds(interval)
         if not interval_ms: return existing_df
-
         start_time = last_ts + interval_ms
         if int(datetime.now(timezone.utc).timestamp() * 1000) > start_time:
             new_data = get_price_data(symbol, interval, limit=limit, startTime=start_time)
@@ -431,7 +413,6 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
         final_df = combined.tail(limit).copy()
     else:
         final_df = get_price_data(symbol, interval, limit=limit)
-
     if final_df is not None and not final_df.empty:
         try:
             for col in final_df.select_dtypes(include=['float64']).columns:
@@ -440,47 +421,30 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
         except Exception as e:
             log_error(f"Lỗi lưu file cache {cache_filepath}: {e}")
         return final_df
-
     return existing_df if existing_df is not None else None
-
 
 def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, state: Dict, close_pct: float = 1.0) -> bool:
     symbol = trade['symbol']
     side = "SELL"
-    
     qty_in_state = float(trade.get('quantity', 0))
     final_quantity_to_sell = 0.0
-
     try:
-        # Lấy số lượng thực tế trên sàn
         asset_code = symbol.replace("USDT", "")
         balances = bnc.get_account_balance().get("balances", [])
         asset_on_binance = next((b for b in balances if b["asset"] == asset_code), None)
-        
         if asset_on_binance and float(asset_on_binance.get('free', 0)) > 0:
             qty_on_binance = float(asset_on_binance['free'])
             log_message(f"ℹ️ Đối soát {symbol}: Bot ghi {qty_in_state:.8f}, Sàn có {qty_on_binance:.8f}", state)
-            
-            # LOGIC CỐT LÕI: LUÔN BÁN SỐ LƯỢNG NHỎ HƠN ĐỂ ĐẢM BẢO AN TOÀN
-            # Điều này xử lý cả 2 trường hợp:
-            # 1. Sai số phí: qty_on_binance < qty_in_state -> Bán qty_on_binance
-            # 2. Mua thêm: qty_on_binance > qty_in_state -> Bán qty_in_state
             final_quantity_to_sell = min(qty_in_state, qty_on_binance) * close_pct
-            
         else:
-            # Nếu không lấy được số dư, tin vào sổ sách của bot
             final_quantity_to_sell = qty_in_state * close_pct
             log_message(f"⚠️ Không lấy được số dư {symbol}, tạm dùng số lượng bot ghi nhận.", state)
-            
     except Exception as e:
         log_error(f"Lỗi khi lấy số dư {symbol}. Tạm dùng số lượng bot ghi nhận.", error_details=str(e), state=state)
         final_quantity_to_sell = qty_in_state * close_pct
-
     if final_quantity_to_sell <= 0:
         log_message(f"⚠️ Bỏ qua đóng lệnh {symbol} vì số lượng tính toán là zero hoặc âm.", state=state)
         return False
-
-    # Từ đây, phần còn lại của hàm giữ nguyên, chỉ cần đảm bảo nó dùng `final_quantity_to_sell`
     trade.setdefault('close_retry_count', 0)
     try:
         market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=final_quantity_to_sell)
@@ -492,20 +456,15 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
             log_error(message=f"Không thể đóng lệnh {symbol} sau {trade['close_retry_count']} lần thử. CẦN CAN THIỆP THỦ CÔNG!", error_details=traceback.format_exc(), send_to_discord=True, force_discord=True, state=state)
             trade['close_retry_count'] = 0
         return False
-    
-    # ... (toàn bộ code xử lý sau khi đóng lệnh thành công giữ nguyên)
     if not (market_close_order and float(market_close_order.get('executedQty', 0)) > 0):
         log_error(f"Lệnh đóng {symbol} được gửi nhưng không khớp. Kiểm tra trên sàn.", state=state)
         return False
-
     closed_qty = float(market_close_order['executedQty'])
     money_gained = float(market_close_order['cummulativeQuoteQty'])
     exit_price = money_gained / closed_qty if closed_qty > 0 else trade['entry_price']
     state['money_gained_from_trades_last_session'] += money_gained
-
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
-
     if close_pct >= 0.999:
         pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100 if trade['entry_price'] > 0 else 0
         trade.update({
@@ -518,7 +477,10 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
         state['trade_history'] = state['trade_history'][-100:]
-        state.setdefault('cooldown_until', {})[symbol] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
+        trade_interval = trade.get('interval', '1h')
+        cooldown_dict = state.setdefault('cooldown_until', {})
+        symbol_cooldowns = cooldown_dict.setdefault(symbol, {})
+        symbol_cooldowns[trade_interval] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
         export_trade_history_to_csv([trade])
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
     else:
@@ -527,43 +489,32 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
             original_qty = qty_in_state
             closed_ratio = closed_qty / original_qty if original_qty > 0 else 0
             trade['total_invested_usd'] *= (1 - closed_ratio)
-
         trade['quantity'] -= closed_qty
         trade.setdefault('tactic_used', []).append(f"Partial_Close_{reason}")
         state.setdefault('temp_newly_closed_trades', []).append(f"💰 {symbol} (Đóng {close_pct*100:.0f}% - {reason}): PnL ${pnl_usd:,.2f}")
-
     return True
-
-
 
 def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
     active_trades = state.get("active_trades", [])[:]
     if not active_trades: return
-
     min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
-
     for trade in active_trades:
         symbol, tactic_name = trade['symbol'], trade.get('opened_by_tactic')
         tactic_cfg = TACTICS_LAB.get(tactic_name, {})
         current_price = realtime_prices.get(symbol)
         if not current_price: continue
-
         precise_price_for_sl = get_realtime_price(symbol)
         if precise_price_for_sl is not None:
             current_price = precise_price_for_sl
-
         if current_price <= trade['sl']:
             if close_trade_on_binance(bnc, trade, "SL", state): continue
         if current_price >= trade['tp']:
             if close_trade_on_binance(bnc, trade, "TP", state): continue
-
         last_score, entry_score = trade.get('last_score', 5.0), trade.get('entry_score', 5.0)
         if last_score < ACTIVE_TRADE_MANAGEMENT_CONFIG['EARLY_CLOSE_ABSOLUTE_THRESHOLD']:
             if close_trade_on_binance(bnc, trade, f"EC_Abs_{last_score:.1f}", state): continue
-
         if last_score < entry_score and not trade.get('is_in_warning_zone', False):
             trade['is_in_warning_zone'] = True
-
         if trade.get('is_in_warning_zone', False) and not trade.get('partial_closed_by_score', False):
             if last_score < entry_score * (1 - ACTIVE_TRADE_MANAGEMENT_CONFIG.get('EARLY_CLOSE_RELATIVE_DROP_PCT', 0.35)):
                 close_pct = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PARTIAL_EARLY_CLOSE_PCT", 0.5)
@@ -571,16 +522,12 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                 if remaining_value < min_order_value:
                     log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) quá nhỏ. Đóng toàn bộ thay vì một phần.", state)
                     close_pct = 1.0
-
                 if close_trade_on_binance(bnc, trade, f"EC_Rel_{last_score:.1f}", state, close_pct=close_pct):
                     trade['partial_closed_by_score'] = True
                     if close_pct < 1.0: trade['sl'] = trade['entry_price']
-
         _, pnl_percent = get_current_pnl(trade, realtime_price=current_price)
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
-
         initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
-
         if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get("tp1_hit", False) and initial_risk_dist > 0:
             pnl_ratio = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio >= tactic_cfg.get("TP1_RR_RATIO", 1.0):
@@ -589,11 +536,9 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                 if remaining_value < min_order_value:
                     log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau TP1 quá nhỏ. Đóng toàn bộ.", state)
                     close_pct = 1.0
-
                 if close_trade_on_binance(bnc, trade, f"TP1_{tactic_cfg.get('TP1_RR_RATIO', 1.0):.1f}R", state, close_pct=close_pct):
                     trade['tp1_hit'] = True
                     if close_pct < 1.0: trade['sl'] = trade['entry_price']
-
         pp_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PROFIT_PROTECTION", {})
         if pp_config.get("ENABLED", False) and not trade.get('profit_taken', False) and trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.5):
             if (trade['peak_pnl_percent'] - pnl_percent) >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.0):
@@ -602,11 +547,9 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                 if remaining_value < min_order_value:
                     log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau Profit-Protect quá nhỏ. Đóng toàn bộ.", state)
                     close_pct = 1.0
-
                 if close_trade_on_binance(bnc, trade, "Protect_Profit", state, close_pct=close_pct):
                     trade['profit_taken'] = True
                     if close_pct < 1.0: trade['sl'] = trade['entry_price']
-
         if tactic_cfg.get("USE_TRAILING_SL", False) and initial_risk_dist > 0:
             pnl_ratio_from_entry = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio_from_entry >= tactic_cfg.get("TRAIL_ACTIVATION_RR", float('inf')):
@@ -617,22 +560,18 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                     if "Trailing_SL_Active" not in trade.get('tactic_used', []):
                         trade.setdefault('tactic_used', []).append("Trailing_SL_Active")
 
-
 def handle_stale_trades(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
     now_aware = datetime.now(VIETNAM_TZ)
     for trade in state.get("active_trades", [])[:]:
         if 'stale_override_until' in trade and now_aware < datetime.fromisoformat(trade['stale_override_until']):
             continue
-
         rules = RISK_RULES_CONFIG["STALE_TRADE_RULES"].get(trade.get("interval"))
         if not rules: continue
-
         holding_hours = (now_aware - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
         if holding_hours > rules["HOURS"]:
             _, pnl_pct = get_current_pnl(trade, realtime_price=realtime_prices.get(trade['symbol']))
             if pnl_pct < rules["PROGRESS_THRESHOLD_PCT"] and trade.get('last_score', 5.0) < RISK_RULES_CONFIG["STALE_TRADE_RULES"]["STAY_OF_EXECUTION_SCORE"]:
                 close_trade_on_binance(bnc, trade, "Stale", state)
-
 
 def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float, realtime_prices: Dict[str, float]):
     if not DCA_CONFIG["ENABLED"]: return
@@ -640,55 +579,40 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
     exposure_limit = total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]
     now = datetime.now(VIETNAM_TZ)
     min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
-
     for trade in state.get("active_trades", [])[:]:
         symbol = trade.get("symbol")
         if not symbol: continue
-
         if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]: continue
         if trade.get('last_dca_time') and (now - datetime.fromisoformat(trade.get('last_dca_time'))).total_seconds() / 3600 < DCA_CONFIG['DCA_COOLDOWN_HOURS']: continue
-
         current_price = realtime_prices.get(symbol)
         if not current_price or current_price <= 0: continue
-
         last_entry_price = trade['dca_entries'][-1]['price'] if trade.get('dca_entries') else trade['initial_entry']['price']
         price_drop_pct = ((current_price - last_entry_price) / last_entry_price) * 100
-
         if price_drop_pct > DCA_CONFIG["TRIGGER_DROP_PCT"]: continue
         if get_advisor_decision(symbol, trade['interval'], indicator_results.get(symbol, {}).get(trade["interval"], {}), ADVISOR_BASE_CONFIG).get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
-
         dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * DCA_CONFIG["CAPITAL_MULTIPLIER"]
-
         if dca_investment < min_order_value:
             log_message(f"⚠️ Bỏ qua DCA cho {symbol}: Vốn DCA dự tính ({dca_investment:,.2f}$) quá nhỏ.", state=state)
             continue
-
         if dca_investment <= 0 or dca_investment > available_usdt or (current_exposure_usd + dca_investment) > exposure_limit: continue
-
         try:
             state.setdefault('temp_newly_closed_trades', []).append(f"🎯 Thử DCA cho {symbol}...")
             market_dca_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(dca_investment, 2))
             if not (market_dca_order and market_dca_order.get('status') == 'FILLED'):
                 raise Exception("Lệnh Market DCA không khớp.")
-
             dca_qty = float(market_dca_order['executedQty'])
             dca_cost = float(market_dca_order['cummulativeQuoteQty'])
             state['money_spent_on_trades_last_session'] += dca_cost
             dca_price = dca_cost / dca_qty if dca_qty > 0 else 0
             trade.setdefault('dca_entries', []).append({"price": dca_price, "quantity": dca_qty, "invested_usd": dca_cost, "timestamp": now.isoformat()})
-
             new_total_qty = float(trade['quantity']) + dca_qty
             new_total_cost = trade['total_invested_usd'] + dca_cost
             new_avg_price = new_total_cost / new_total_qty if new_total_qty > 0 else 0
-
             initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
-            
             raw_new_sl = new_avg_price - initial_risk_dist
             raw_new_tp = new_avg_price + (initial_risk_dist * TACTICS_LAB[trade['opened_by_tactic']]['RR'])
-            
             final_new_sl = float(bnc._format_price(symbol, raw_new_sl))
             final_new_tp = float(bnc._format_price(symbol, raw_new_tp))
-
             trade.update({
                 'entry_price': new_avg_price,
                 'total_invested_usd': new_total_cost,
@@ -702,91 +626,84 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         except Exception as e:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
-
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
     df = price_dataframes.get(symbol, {}).get(interval)
     if not indicators or df is None or df.empty: return NOISE_ZONE
-
     scores = {LEADING_ZONE: 0, COINCIDENT_ZONE: 0, LAGGING_ZONE: 0, NOISE_ZONE: 0}
     adx, bb_width, rsi_14, trend = indicators.get('adx', 20), indicators.get('bb_width', 0), indicators.get('rsi_14', 50), indicators.get('trend', "sideways")
-
     if adx < 20: scores[NOISE_ZONE] += 3
     if 'ema_50' in df.columns and np.sign(df['close'].iloc[-30:] - df['ema_50'].iloc[-30:]).diff().ne(0).sum() > 4:
         scores[NOISE_ZONE] += 2
-
     if adx > 25: scores[LAGGING_ZONE] += 2.5
     if trend == "uptrend": scores[LAGGING_ZONE] += 2
     if 'ema_20' in df.columns and 'ema_50' in df.columns and not df['ema_20'].isna().all() and not df['ema_50'].isna().all():
         if trend == "uptrend" and df['ema_20'].iloc[-1] > df['ema_50'].iloc[-1] and df['ema_20'].iloc[-10] > df['ema_50'].iloc[-10]:
             scores[LAGGING_ZONE] += 1.5
-
     if 'bb_width' in df.columns and not df['bb_width'].isna().all() and bb_width < df['bb_width'].iloc[-100:].quantile(0.20):
         scores[LEADING_ZONE] += 2.5
     htf_trend = indicator_results.get(symbol, {}).get('4h' if interval == '1h' else '1d', {}).get('trend', 'sideway')
     if htf_trend == 'uptrend' and rsi_14 < 45: scores[LEADING_ZONE] += 2
-
     if indicators.get('breakout_signal', "none") != "none": scores[COINCIDENT_ZONE] += 3
     if indicators.get('macd_cross', "neutral") not in ["neutral", "no_cross"]: scores[COINCIDENT_ZONE] += 2
     if indicators.get('vol_ma20', 1) > 0 and indicators.get('volume', 0) > indicators.get('vol_ma20', 1) * 2:
         scores[COINCIDENT_ZONE] += 1.5
-
     if adx > 28: scores[LEADING_ZONE] -= 2
-
     return max(scores, key=scores.get) if scores and any(v > 0 for v in scores.values()) else NOISE_ZONE
 
-
 def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
-    if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]: return
+    if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]:
+        return
     potential_opportunities = []
     now_vn = datetime.now(VIETNAM_TZ)
     cooldown_map = state.get('cooldown_until', {})
-
+    timeframe_levels = {"1h": 1, "4h": 2, "1d": 3}
     for symbol in SYMBOLS_TO_SCAN:
-        if any(t['symbol'] == symbol for t in state.get("active_trades", [])): continue
-
-        is_in_cooldown = symbol in cooldown_map and now_vn < datetime.fromisoformat(cooldown_map[symbol])
-
+        if any(t['symbol'] == symbol for t in state.get("active_trades", [])):
+            continue
+        symbol_cooldowns = cooldown_map.get(symbol, {})
         for interval in INTERVALS_TO_SCAN:
+            is_in_cooldown = False
+            cooldown_source = None
+            for source_tf, source_level in timeframe_levels.items():
+                if source_level >= timeframe_levels[interval]:
+                    if source_tf in symbol_cooldowns and now_vn < datetime.fromisoformat(symbol_cooldowns[source_tf]):
+                        is_in_cooldown = True
+                        cooldown_source = source_tf
+                        break
             market_zone = determine_market_zone_with_scoring(symbol, interval)
             for tactic_name, tactic_cfg in TACTICS_LAB.items():
                 optimal_zones = tactic_cfg.get("OPTIMAL_ZONE", [])
-                if not isinstance(optimal_zones, list): optimal_zones = [optimal_zones]
-
+                if not isinstance(optimal_zones, list):
+                    optimal_zones = [optimal_zones]
                 if market_zone in optimal_zones:
                     indicators = indicator_results.get(symbol, {}).get(interval)
-                    if not (indicators and indicators.get('price', 0) > 0): continue
-
+                    if not (indicators and indicators.get('price', 0) > 0):
+                        continue
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
                     adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval)
-
                     if is_in_cooldown:
                         if adjusted_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
-                            log_message(f"🔥 {symbol} có điểm {adjusted_score:.2f}, vượt ngưỡng! Phá vỡ cooldown.", state)
+                            log_message(f"🔥 {symbol}-{interval} có điểm {adjusted_score:.2f}, phá vỡ cooldown từ {cooldown_source}.", state)
                         else:
                             continue
-
                     potential_opportunities.append({"decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, "score": adjusted_score, "symbol": symbol, "interval": interval, "zone": market_zone})
-
     log_message("---[🔍 Quét Cơ Hội Mới 🔍]---", state=state)
     if not potential_opportunities:
         log_message("  => Không tìm thấy cơ hội tiềm năng nào.", state=state)
         return
-
     sorted_opportunities = sorted(potential_opportunities, key=lambda x: x['score'], reverse=True)
-
     num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 3)
     top_opportunities = sorted_opportunities[:num_to_check]
-
     log_message(f"---[🏆 Xem xét {len(top_opportunities)} cơ hội hàng đầu (tối đa {num_to_check})]--", state=state)
     found_executable_trade = False
-
     for i, opportunity in enumerate(top_opportunities):
         score = opportunity['score']
         entry_score_threshold = opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
-        
-        log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {opportunity['tactic_name']} | Điểm: {score:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
-
+        adjusted_score = opportunity['score']
+        raw_score = opportunity['decision'].get('final_score', 0.0)
+        mtf_coeff = adjusted_score / raw_score if raw_score > 0 else 1.0
+        log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {opportunity['tactic_name']} | Gốc: {raw_score:.2f} | Cuối: {adjusted_score:.2f} (MTF x{mtf_coeff:.2f}) (Ngưỡng: {entry_score_threshold})", state=state)
         if score >= entry_score_threshold:
             log_message("      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi. Dừng quét.", state=state)
             state['pending_trade_opportunity'] = opportunity
@@ -795,7 +712,6 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
             break
         else:
             log_message("      => 📉 Không đạt ngưỡng. Xem xét cơ hội tiếp theo...", state=state)
-
     if not found_executable_trade:
         log_message(f"  => Không có cơ hội nào trong top {len(top_opportunities)} đạt ngưỡng vào lệnh. Chờ phiên sau.", state=state)
 
@@ -803,72 +719,52 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
 def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
     opportunity = state.get('pending_trade_opportunity')
     if not opportunity: return
-
     symbol, interval, tactic_name, zone = opportunity['symbol'], opportunity['interval'], opportunity['tactic_name'], opportunity['zone']
     log_message(f"---[⚡ Chuẩn bị thực thi {symbol}-{interval} ⚡]---", state=state)
-
     tactic_cfg = opportunity['tactic_cfg']
-
-
     full_indicators = opportunity['decision'].get('full_indicators', {})
-
     realtime_price = get_realtime_price(symbol)
     if not realtime_price or realtime_price <= 0:
         log_error(f"Không thể lấy giá realtime cho {symbol} để thực thi. Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
-
     entry_price_estimate = realtime_price
     risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
     max_sl_pct = RISK_RULES_CONFIG["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval, 0.1)
     final_risk_dist = min(risk_dist_from_atr, entry_price_estimate * max_sl_pct)
-
     if final_risk_dist <= 0:
         log_error(f"Tính toán risk_dist cho {symbol} không hợp lệ. Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
-
     capital_pct = ZONE_BASED_POLICIES.get(zone, {}).get("CAPITAL_PCT", 0.03)
-    # LƯU Ý QUAN TRỌNG: Sử dụng 'initial_capital' từ state, vốn đã được điều chỉnh bởi động cơ vốn.
     stable_capital_base = state.get('initial_capital', total_usdt_fund)
     invested_amount = stable_capital_base * capital_pct
     log_message(f"  ... Tính vốn dựa trên nền tảng Vốn BĐ năng động: ${stable_capital_base:,.2f}", state=state)
     current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
     min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
-
     if invested_amount < min_order_value:
         log_message(f"  ⚠️ Vốn tính toán (${invested_amount:.2f}) nhỏ hơn mức tối thiểu. Tăng lên mức tối thiểu là ${min_order_value}.", state=state)
         invested_amount = min_order_value
-
     if invested_amount > available_usdt or (current_exposure_usd + invested_amount) > total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]:
         log_message(f"  => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro cho {symbol} (Sau khi điều chỉnh: ${invested_amount:.2f}). Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
-
     try:
         log_message(f"  => 🔥 Gửi lệnh MUA {symbol} với ${invested_amount:,.2f} (Vùng: {zone}, Vốn: {capital_pct*100:.1f}%)", state=state)
         market_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(invested_amount, 2))
-
         if not (market_order and float(market_order.get('executedQty', 0)) > 0):
             raise Exception("Lệnh Market không khớp hoặc không có thông tin trả về.")
-   
         cost_of_trade = float(market_order['cummulativeQuoteQty'])
         state['money_spent_on_trades_last_session'] += cost_of_trade
-
-
         filled_qty = float(market_order['executedQty'])
         avg_price = float(market_order['cummulativeQuoteQty']) / filled_qty
-
         sl_p = avg_price - final_risk_dist
         tp_p = avg_price + (final_risk_dist * tactic_cfg.get("RR", 2.0))
-
         max_tp_pct_cfg = RISK_RULES_CONFIG["MAX_TP_PERCENT_BY_TIMEFRAME"].get(interval)
         if max_tp_pct_cfg is not None and tp_p > avg_price * (1 + max_tp_pct_cfg):
             tp_p = avg_price * (1 + max_tp_pct_cfg)
-
         if tp_p <= avg_price or sl_p >= avg_price or sl_p <= 0:
             raise Exception(f"SL/TP không hợp lệ: TP={tp_p}, SL={sl_p}, AvgPrice={avg_price}")
-
         new_trade = {
             "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
             "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": avg_price,
@@ -891,12 +787,9 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
             "tp1_hit": False,
             "close_retry_count": 0
         }
-
-
         state['active_trades'].append(new_trade)
         state.setdefault('temp_newly_opened_trades', []).append(f"🔥 {symbol}-{interval} ({tactic_name}): Mua với vốn ${new_trade['total_invested_usd']:,.2f}")
         state.pop('pending_trade_opportunity', None)
-
     except Exception as e:
         retry_count = opportunity.get('retry_count', 0) + 1
         state['pending_trade_opportunity']['retry_count'] = retry_count
@@ -905,29 +798,46 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
             log_error(f"Không thể mở lệnh {symbol} sau {retry_count} lần thử. Hủy bỏ.", send_to_discord=True, force_discord=True, state=state)
             state.pop('pending_trade_opportunity', None)
 
-
 def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
-    if not MTF_ANALYSIS_CONFIG["ENABLED"]: return 1.0
+    if not MTF_ANALYSIS_CONFIG["ENABLED"]:
+        return 1.0
     trends = {tf: indicator_results.get(symbol, {}).get(tf, {}).get("trend", "sideways") for tf in ALL_TIME_FRAMES}
-    cfg, fav, unfav = MTF_ANALYSIS_CONFIG, "uptrend", "downtrend"
-
+    cfg = MTF_ANALYSIS_CONFIG
+    fav_trend = "uptrend" if trade_type == "LONG" else "downtrend"
+    unfav_trend = "downtrend" if trade_type == "LONG" else "uptrend"
+    
     if target_interval == "1h":
-        htf1, htf2 = trends["4h"], trends["1d"]
-        if htf1 == unfav and htf2 == unfav: return cfg["SEVERE_PENALTY_COEFFICIENT"]
-        if htf1 == unfav or htf2 == unfav: return cfg["PENALTY_COEFFICIENT"]
-        if htf1 == fav and htf2 == fav: return cfg["BONUS_COEFFICIENT"]
-        if htf1 == "sideways" or htf2 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+        trend_4h = trends.get("4h", "sideways")
+        trend_1d = trends.get("1d", "sideways")
+        if trend_4h == unfav_trend and trend_1d == unfav_trend:
+            return cfg["SEVERE_PENALTY_COEFFICIENT"]
+        if trend_4h == unfav_trend or trend_1d == unfav_trend:
+            return cfg["PENALTY_COEFFICIENT"]
+        # LUẬT MỚI: Chỉ thưởng khi CẢ HAI cùng ủng hộ
+        if trend_4h == fav_trend and trend_1d == fav_trend:
+            return cfg["BONUS_COEFFICIENT"]
+        # Mặc định, nếu không rơi vào các trường hợp trên, nghĩa là có sự không chắc chắn -> PHẠT
+        return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+
     elif target_interval == "4h":
-        htf1 = trends["1d"]
-        if htf1 == unfav: return cfg["PENALTY_COEFFICIENT"]
-        if htf1 == fav: return cfg["BONUS_COEFFICIENT"]
-        if htf1 == "sideways": return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+        trend_1d = trends.get("1d", "sideways")
+        if trend_1d == unfav_trend:
+            return cfg["PENALTY_COEFFICIENT"]
+        if trend_1d == fav_trend:
+            return cfg["BONUS_COEFFICIENT"]
+        # Mặc định, nếu 1d không ủng hộ rõ ràng -> PHẠT
+        return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
+
+    elif target_interval == "1d":
+        return 1.0
+    
     return 1.0
+
+
 
 # ==============================================================================
 # ==================== ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) =======================
 # ==============================================================================
-
 def calculate_total_equity(state: Dict, total_usdt_on_binance: float, realtime_prices: Dict[str, Optional[float]]) -> Optional[float]:
     """Tính toán tổng tài sản hiện tại (equity)."""
     value_of_open_positions = 0.0
@@ -935,39 +845,29 @@ def calculate_total_equity(state: Dict, total_usdt_on_binance: float, realtime_p
         price = realtime_prices.get(trade['symbol'])
         if price is None:
             log_message(f"⚠️ Không thể tính equity vì thiếu giá của {trade['symbol']}", state)
-            return None # Trả về None nếu thiếu giá
+            return None
         value_of_open_positions += float(trade.get('quantity', 0)) * price
     return total_usdt_on_binance + value_of_open_positions
 
-
-# HÀM MỚI (thay thế hoàn toàn hàm cũ)
 def manage_dynamic_capital(state: Dict, bnc: BinanceConnector, current_equity: Optional[float]):
     """
     Hàm quản lý vốn thông minh hơn, phân biệt Nạp/Rút và PnL.
     Version: 8.7.0
     """
     now_dt = datetime.now(VIETNAM_TZ)
-
-    # Lấy số dư USDT hiện tại để dùng cho toàn bộ hàm
     _, total_usdt_now = get_usdt_fund(bnc)
-
-    # --- BƯỚC 1: SET VỐN BAN ĐẦU ---
     if state.get('initial_capital', 0.0) <= 0:
         if current_equity and current_equity > 0:
             state['initial_capital'] = current_equity
             log_message(f"🌱 Thiết lập Vốn BĐ ban đầu: ${state['initial_capital']:,.2f}", state=state)
             state['last_capital_adjustment_time'] = now_dt.isoformat()
-            # Khởi tạo các biến kế toán USDT
             state['usdt_balance_end_of_last_session'] = total_usdt_now
             state['money_spent_on_trades_last_session'] = 0.0
             state['money_gained_from_trades_last_session'] = 0.0
         return
-
-    # --- BƯỚC 2: PHÁT HIỆN NẠP/RÚT DỰA TRÊN DÒNG TIỀN USDT ---
     usdt_balance_prev_session = state.get("usdt_balance_end_of_last_session", 0.0)
     money_spent_prev_session = state.get("money_spent_on_trades_last_session", 0.0)
     money_gained_prev_session = state.get("money_gained_from_trades_last_session", 0.0)
-    
     if usdt_balance_prev_session > 0:
         expected_usdt = usdt_balance_prev_session - money_spent_prev_session + money_gained_prev_session
         net_deposit = total_usdt_now - expected_usdt
@@ -977,8 +877,6 @@ def manage_dynamic_capital(state: Dict, bnc: BinanceConnector, current_equity: O
             state["initial_capital"] = state.get("initial_capital", 0.0) + net_deposit
             state['last_capital_adjustment_time'] = now_dt.isoformat()
             log_message(f"   Vốn BĐ được cập nhật: ${state['initial_capital']:,.2f}", state=state)
-
-    # --- BƯỚC 3: ĐIỀU CHỈNH THEO HIỆU SUẤT (PnL) ---
     last_adj_str = state.get('last_capital_adjustment_time')
     cooldown_hours = GENERAL_CONFIG.get("CAPITAL_ADJUSTMENT_COOLDOWN_HOURS", 72)
     if not (last_adj_str and (now_dt - datetime.fromisoformat(last_adj_str)).total_seconds() / 3600 < cooldown_hours):
@@ -994,19 +892,13 @@ def manage_dynamic_capital(state: Dict, bnc: BinanceConnector, current_equity: O
                     state["initial_capital"] = current_equity
                     state['last_capital_adjustment_time'] = now_dt.isoformat()
                     log_message(f"   Vốn BĐ MỚI: ${state['initial_capital']:,.2f}", state=state)
-
-    # --- BƯỚC 4: CẬP NHẬT CÁC BIẾN KẾ TOÁN USDT CHO PHIÊN SAU ---
     state['usdt_balance_end_of_last_session'] = total_usdt_now
-    state['money_spent_on_trades_last_session'] = 0.0 # Reset
-    state['money_gained_from_trades_last_session'] = 0.0 # Reset
-
-
-
+    state['money_spent_on_trades_last_session'] = 0.0
+    state['money_gained_from_trades_last_session'] = 0.0
 
 # ==============================================================================
 # ==================== BÁO CÁO & HÀM TIỆN ÍCH KHÁC =======================
 # ==============================================================================
-
 def build_report_header(state: Dict, equity: float, total_usdt: float, available_usdt: float) -> str:
     initial_capital = state.get('initial_capital', total_usdt)
     if initial_capital <= 0: initial_capital = total_usdt
@@ -1018,124 +910,79 @@ def build_report_header(state: Dict, equity: float, total_usdt: float, available
 
 def build_pnl_summary_line(state: Dict, realtime_prices: Dict[str, float]) -> str:
     trade_history = state.get('trade_history', [])
-    
-    # --- Phần tính toán chính ---
     total_pnl_closed = 0.0
     win_rate_str = "N/A"
     avg_win_str = "$0.00"
     avg_loss_str = "$0.00"
-
     if trade_history:
         df_history = pd.DataFrame(trade_history)
-        # Đảm bảo chỉ tính các lệnh đã đóng
         closed_trades_df = df_history[df_history['status'].str.contains('Closed', na=False) & df_history['pnl_usd'].notna()]
-        
         if not closed_trades_df.empty:
             total_trades = len(closed_trades_df)
-            
-            # Tính Win Rate
             winning_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] > 0]
             num_wins = len(winning_trades_df)
             win_rate_str = f"{num_wins / total_trades * 100:.2f}% ({num_wins}/{total_trades})"
-
-            # Tính tổng PnL đã đóng
             total_pnl_closed = closed_trades_df['pnl_usd'].sum()
-            
-            # Tính AVG Lãi
             if num_wins > 0:
                 avg_win_pnl = winning_trades_df['pnl_usd'].mean()
                 avg_win_str = f"${avg_win_pnl:,.2f}"
-
-            # Tính AVG Lỗ
             losing_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] <= 0]
             if not losing_trades_df.empty:
                 avg_loss_pnl = losing_trades_df['pnl_usd'].mean()
                 avg_loss_str = f"${avg_loss_pnl:,.2f}"
-
-    # --- Phần tính PnL đang mở và TP1 (giữ nguyên) ---
     realized_partial_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in state.get('active_trades', []))
     unrealized_pnl = sum(get_current_pnl(trade, realtime_price=realtime_prices.get(trade['symbol']))[0] for trade in state.get('active_trades', []))
-
-    # --- Tạo chuỗi kết quả ---
     pnl_line_1 = f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | 📈 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**"
     pnl_line_2 = f"🎯 AVG Lãi: **{avg_win_str}** | 🛡️ AVG Lỗ: **{avg_loss_str}** | 💎 PnL TP1: **${realized_partial_pnl:,.2f}**"
-    
     return f"{pnl_line_1}\n{pnl_line_2}"
-
 
 def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     pnl_usd, pnl_pct = get_current_pnl(trade, realtime_price=realtime_price)
     icon = "🟢" if pnl_usd >= 0 else "🔴"
     holding_h = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
     dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-    
     sl_price = trade['sl']
-    # === SỬA DÒNG NÀY ===
     tsl_info = f" TSL:{format_price_dynamically(sl_price)}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
-    
     tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
-
     entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
     score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
-    
     entry_zone = trade.get('entry_zone', 'N/A')
     last_zone = trade.get('last_zone')
     zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
     tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
-
     invested_usd = trade.get('total_invested_usd', 0.0)
     current_value = trade.get('total_invested_usd', 0.0) + pnl_usd
-
-    # === SỬA DÒNG NÀY === (Thêm dấu cách trước tsl_info cho đẹp)
     line1 = f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}"
     line2 = f"    Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{format_price_dynamically(trade['entry_price'])} Cur:{format_price_dynamically(realtime_price)} TP:{format_price_dynamically(trade['tp'])} SL:{format_price_dynamically(sl_price)}{tsl_info}"
-    
     return f"{line1}\n{line2}"
 
 def format_closed_trade_line(trade_data: pd.Series) -> str:
     try:
-        # --- Lấy dữ liệu cơ bản ---
         symbol_with_interval = f"{trade_data.get('symbol', 'N/A')}-{trade_data.get('interval', 'N/A')}"
         pnl_usd = trade_data.get('pnl_usd', 0)
         pnl_percent = trade_data.get('pnl_percent', 0)
         pnl_icon = "✅" if pnl_usd >= 0 else "❌"
-        
         entry_price_str = format_price_dynamically(trade_data.get('entry_price'))
         exit_price_str = format_price_dynamically(trade_data.get('exit_price'))
-        
         entry_time = pd.to_datetime(trade_data['entry_time']).tz_convert(VIETNAM_TZ)
         exit_time = pd.to_datetime(trade_data['exit_time']).tz_convert(VIETNAM_TZ)
         hold_duration_h = (exit_time - entry_time).total_seconds() / 3600
-
-        # --- Lấy dữ liệu phân tích (Zone và Score) ---
         entry_zone = trade_data.get('entry_zone', 'N/A')
-        # last_zone là zone ngay trước khi đóng lệnh
         last_zone = trade_data.get('last_zone', 'N/A')
         zone_display = f"Zone: {entry_zone} -> {last_zone}"
-
         entry_score = trade_data.get('entry_score', 0.0)
-        # last_score là điểm ngay trước khi đóng lệnh
         last_score = trade_data.get('last_score', 0.0)
         score_icon = "📉" if last_score < entry_score else ("📈" if last_score > entry_score else "")
         score_display = f"Score: {entry_score:.1f} -> {last_score:.1f}{score_icon}"
-
-        # --- Xử lý Tactic ---
         main_tactic = trade_data.get('opened_by_tactic', 'N/A')
         reason_closed = trade_data.get('status', 'Closed').split('(')[-1].replace(')', '').strip()
         tactic_display = f"{main_tactic} -> {reason_closed}"
-
-        # --- Tạo chuỗi hiển thị 3 dòng cực kỳ chi tiết ---
         line1 = f"  • {pnl_icon} **{symbol_with_interval}** | PnL: **${pnl_usd:,.2f} ({pnl_percent:+.2f}%)**"
         line2 = f"    `Entry: {entry_price_str} -> Exit: {exit_price_str} | Hold: {hold_duration_h:.1f}h`"
         line3 = f"    `{zone_display} | {score_display} | {tactic_display}`"
-        
         return f"{line1}\n{line2}\n{line3}"
-        
     except Exception as e:
         return f"  • {trade_data.get('symbol', 'N/A')} - Lỗi báo cáo lịch sử: {e}"
-
-
-
 
 def build_dynamic_alert_text(state: Dict, total_usdt: float, available_usdt: float, realtime_prices: Dict[str, float], equity: float) -> str:
     now_vn_str = datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')
@@ -1192,7 +1039,6 @@ def build_daily_summary_text(state: Dict, total_usdt: float, available_usdt: flo
     else: lines.append("  (Chưa có lịch sử giao dịch)")
     lines.append("\n====================================")
     return "\n".join(lines)
-
 
 def should_send_report(state: Dict, equity: Optional[float]) -> Optional[str]:
     if equity is None: return None
@@ -1251,7 +1097,6 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
     except Exception as e:
         log_error("Không thể lấy số dư tài khoản để đối soát.", error_details=str(e), state=state)
         return
-
     active_trades = state.get("active_trades", [])
     trades_to_remove = []
     threshold = GENERAL_CONFIG.get("RECONCILIATION_QTY_THRESHOLD", 0.95)
@@ -1274,17 +1119,13 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
             state.setdefault('trade_history', []).append(trade)
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
         log_message(f"---[✅ Đã dọn dẹp xong]---", state=state)
-
     symbols_in_state = {t['symbol'] for t in state.get("active_trades", [])}
     min_orphan_value = GENERAL_CONFIG.get("ORPHAN_ASSET_MIN_VALUE_USDT", 10.0)
     now = datetime.now(VIETNAM_TZ)
     state.setdefault('orphan_asset_alerts', {})
-
     for asset_code, quantity in asset_balances.items():
         if asset_code in ["USDT", "BNB"] or quantity <= 0: continue
-
         symbol_usdt = f"{asset_code}USDT"
-
         if symbol_usdt in SYMBOLS_TO_SCAN and symbol_usdt not in symbols_in_state:
             price = get_realtime_price(symbol_usdt)
             if price:
@@ -1296,15 +1137,11 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
                         last_alert_time = datetime.fromisoformat(last_alert_time_str)
                         if (now - last_alert_time).total_seconds() < 6 * 3600:
                             should_alert = False
-
                     if should_alert:
                         msg = (f"⚠️ PHÁT HIỆN TÀI SẢN MỒ CÔI: **{quantity:.6f} {asset_code}** (trị giá ~${asset_value_usdt:,.2f}). "
                                f"Vui lòng dùng Control Panel (Chức năng 8) để bán hoặc xử lý thủ công.")
                         log_error(msg, send_to_discord=True, force_discord=True, state=state)
                         state['orphan_asset_alerts'][asset_code] = now.isoformat()
-
-
-
 
 # ==============================================================================
 # ==================== VÒNG LẶP CHÍNH (v8.6.1) =================================
@@ -1312,14 +1149,12 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
 def run_session():
     if not acquire_lock():
         return
-
     state = {}
     try:
         with BinanceConnector(network=TRADING_MODE) as bnc:
             if not bnc.test_connection():
                 log_error("Không thể kết nối đến Binance API.", send_to_discord=True)
                 return
-
             state = load_json_file(STATE_FILE, {
                 "active_trades": [], "trade_history": [], "initial_capital": 0.0,
                 "money_spent_on_trades_last_session": 0.0, "pnl_closed_last_session": 0.0
@@ -1327,51 +1162,36 @@ def run_session():
             state['temp_newly_opened_trades'], state['temp_newly_closed_trades'] = [], []
             state['temp_money_spent_on_trades'], state['temp_pnl_from_closed_trades'] = 0.0, 0.0
             state['session_has_events'] = False
-
             state.setdefault('money_spent_on_trades_last_session', 0.0)
             state.setdefault('money_gained_from_trades_last_session', 0.0)
             state.setdefault('temp_pnl_from_closed_trades', 0.0)
-
-            # --- BƯỚC 1: ĐỐI SOÁT & LẤY DỮ LIỆU CƠ BẢN ---
             reconcile_positions_with_binance(bnc, state)
             available_usdt, total_usdt_at_start = get_usdt_fund(bnc)
             if total_usdt_at_start == 0.0 and not state.get("active_trades"):
                 return
-
-            # --- BƯỚC 2: TÍNH TOÁN EQUITY & QUẢN LÝ VỐN NĂNG ĐỘNG ---
             active_symbols_for_equity = list(set([t['symbol'] for t in state.get('active_trades', [])]))
             realtime_prices_at_start = {sym: get_realtime_price(sym) for sym in active_symbols_for_equity if sym}
-
             current_equity = calculate_total_equity(state, total_usdt_at_start, realtime_prices_at_start)
-            
             if current_equity is None:
                 log_message("⚠️ Không thể tính Equity do lỗi API giá. Tạm dừng phiên để đảm bảo an toàn.", state=state)
                 save_json_file(STATE_FILE, state)
                 return
-            
             manage_dynamic_capital(state, bnc, current_equity)
-
-            # --- BƯỚC 3: CÁC TÁC VỤ NẶNG THEO LỊCH ---
             now_vn = datetime.now(VIETNAM_TZ)
             last_refresh_str = state.get("last_indicator_refresh")
             is_heavy_task_time = not last_refresh_str or \
                                  (now_vn - datetime.fromisoformat(last_refresh_str)).total_seconds() / 60 >= GENERAL_CONFIG["HEAVY_REFRESH_MINUTES"]
-
             if is_heavy_task_time:
                 if not state.get('pending_trade_opportunity'):
                     run_heavy_tasks(bnc, state, available_usdt, total_usdt_at_start)
                     state["last_indicator_refresh"] = now_vn.isoformat()
                 else:
                     log_message("⏳ Tạm hoãn tác vụ nặng do có lệnh đang chờ thực thi.", state=state)
-
-            # --- BƯỚC 4: THỰC THI & QUẢN LÝ LỆNH ---
             if state.get('pending_trade_opportunity'):
                 execute_trade_opportunity(bnc, state, available_usdt, total_usdt_at_start)
-
             active_symbols = list(set([t['symbol'] for t in state.get('active_trades', [])]))
             if active_symbols:
                 current_prices_for_mgmt = {s: realtime_prices_at_start.get(s) or get_realtime_price(s) for s in active_symbols if s}
-
                 if all(price is not None for price in current_prices_for_mgmt.values()):
                     check_and_manage_open_positions(bnc, state, current_prices_for_mgmt)
                     handle_stale_trades(bnc, state, current_prices_for_mgmt)
@@ -1379,66 +1199,45 @@ def run_session():
                 else:
                     missing_symbols = [s for s, p in current_prices_for_mgmt.items() if p is None]
                     log_message(f"⚠️ Tạm dừng quản lý vị thế do không lấy được giá cho: {', '.join(missing_symbols)}", state=state)
-
-            # --- BƯỚC 5: BÁO CÁO & LƯU TRẠNG THÁI ---
             if state.get('temp_newly_opened_trades') or state.get('temp_newly_closed_trades'):
                 log_message(f"--- Cập nhật các sự kiện trong phiên ---", state=state)
                 for msg in state.get('temp_newly_opened_trades', []): log_message(f"  {msg}", state=state)
                 for msg in state.get('temp_newly_closed_trades', []): log_message(f"  {msg}", state=state)
-
             final_available_usdt, final_total_usdt = get_usdt_fund(bnc)
             final_realtime_prices = {t['symbol']: get_realtime_price(t['symbol']) for t in state.get('active_trades', []) if t.get('symbol')}
-
             final_equity = calculate_total_equity(state, final_total_usdt, final_realtime_prices)
-
             report_type_to_send = should_send_report(state, final_equity)
             if report_type_to_send:
                 log_message(f"🔔 Gửi báo cáo loại: {report_type_to_send.upper()}", state=state)
                 if report_type_to_send == "daily":
                     report_content = build_daily_summary_text(state, final_total_usdt, final_available_usdt, final_realtime_prices, final_equity)
                     state['last_summary_sent_time'] = now_vn.isoformat()
-                else: # dynamic
+                else:
                     report_content = build_dynamic_alert_text(state, final_total_usdt, final_available_usdt, final_realtime_prices, final_equity)
-
                 send_discord_message_chunks(report_content, force=True)
-
                 pnl_percent_for_alert = ((final_equity - state.get('initial_capital', 1)) / state.get('initial_capital', 1)) * 100 if state.get('initial_capital', 1) > 0 else 0
                 state['last_dynamic_alert'] = {"timestamp": now_vn.isoformat(), "total_pnl_percent": pnl_percent_for_alert}
-
             if 'last_critical_error' in state: state.pop('last_critical_error', None)
-
             state.pop('pnl_closed_last_session', None)
             state.pop('pnl_open_change_last_session', None)
             state.pop('equity_end_of_last_session', None)
-
-
             save_json_file(STATE_FILE, state)
-
     except Exception as e:
         error_msg = str(e)
-        # Tạo một "dấu hiệu lỗi" ngắn gọn, chỉ chứa phần cốt lõi
         error_signature = error_msg.split(' for url:')[0] if ' for url:' in error_msg else error_msg[:100]
-
         last_error = state.get('last_critical_error', {})
         now_ts = time.time()
         cooldown_seconds = GENERAL_CONFIG.get("CRITICAL_ERROR_ALERT_COOLDOWN_MINUTES", 45) * 60
         should_alert_discord = True
-
-        # So sánh dựa trên "dấu hiệu lỗi" thay vì toàn bộ thông điệp
         if last_error.get('signature') == error_signature:
             if (now_ts - last_error.get('timestamp', 0)) < cooldown_seconds:
                 should_alert_discord = False
                 log_message(f"ℹ️ Lỗi tương tự đã xảy ra gần đây. Tạm dừng gửi cảnh báo Discord.", state=state)
-
         log_error(f"LỖI TOÀN CỤC NGOÀI DỰ KIẾN", error_details=traceback.format_exc(), send_to_discord=should_alert_discord, state=state)
-
         if state:
-            # Lưu lại "dấu hiệu lỗi" để so sánh lần sau
             if should_alert_discord:
                  state['last_critical_error'] = {'signature': error_signature, 'timestamp': now_ts}
             save_json_file(STATE_FILE, state)
-
-
     finally:
         release_lock()
         if state and state.get('session_has_events', False):
@@ -1446,8 +1245,6 @@ def run_session():
             log_entry = f"[{timestamp}] (LiveTrade) ---[✅ Kết thúc phiên]---"
             print(log_entry)
             with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_entry + "\n")
-
-
 
 if __name__ == "__main__":
     run_session()
