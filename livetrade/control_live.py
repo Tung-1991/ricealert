@@ -316,12 +316,21 @@ def show_full_dashboard(bnc: BinanceConnector):
             else:
                 invested_usd = trade.get('total_invested_usd', 0)
                 price_info = f"Vốn: ${invested_usd:,.2f} | Entry: {format_price_dynamically(trade.get('entry_price'))} (Không thể tính PnL)"
+            
+            # SỬA LỖI 1: TÍNH VÀ THÊM THỜI GIAN GIỮ LỆNH
+            try:
+                entry_time = datetime.fromisoformat(trade.get('entry_time')).astimezone(VIETNAM_TZ)
+                holding_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
+                hold_display = f"| Giữ: {holding_hours:.1f}h"
+            except:
+                hold_display = ""
+            
             pnl_icon = "⚪️" if is_desynced else ("🟢" if pnl_usd >= 0 else "🔴")
             score_display = f"{trade.get('entry_score', 0.0):.1f}→{trade.get('last_score', 0.0):.1f}"
             entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
             zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
             tactic_info = f"({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display})"
-            print(f"{pnl_icon}{' ⚠️ DESYNC' if is_desynced else ''} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%)")
+            print(f"{pnl_icon}{' ⚠️ DESYNC' if is_desynced else ''} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) {hold_display}")
             print(f"   {price_info}")
 
     if input("\n👉 Hiển thị Radar thị trường? (y/n): ").lower() != 'y': print("="*80); return
@@ -330,13 +339,9 @@ def show_full_dashboard(bnc: BinanceConnector):
     symbols_to_scan = parse_env_variable("SYMBOLS_TO_SCAN")
     symbols_in_trades = {t['symbol'] for t in all_trades}
 
-    # === THAY ĐỔI LỚN #1: Bỏ bộ lọc, quét tất cả các symbol trong .env ===
-    # symbols_for_radar = [s for s in symbols_to_scan if s not in symbols_in_trades] # <- DÒNG CŨ BỊ XÓA
-    if not symbols_to_scan: # <- DÒNG MỚI (thay cho symbols_for_radar)
-        print("ℹ️ Không có symbol nào trong .env để quét.")
+    if not symbols_to_scan: print("ℹ️ Không có symbol nào trong .env để quét.")
     else:
-        for symbol in symbols_to_scan: # <- DÒNG MỚI
-            # === THAY ĐỔI LỚN #2: Thêm tag [MỞ] nếu có lệnh ===
+        for symbol in symbols_to_scan:
             trade_status_tag = " [MỞ]" if symbol in symbols_in_trades else ""
             print(f"\n--- {symbol}{trade_status_tag} ---")
             price_str = "N/A"
@@ -347,8 +352,6 @@ def show_full_dashboard(bnc: BinanceConnector):
                 indicators = indicator_results.get(symbol, {}).get(interval)
                 if not indicators: print(f"  [{interval}]: Không có dữ liệu để phân tích."); continue
                 zone = determine_market_zone_with_scoring(symbol, interval)
-
-                # === THAY ĐỔI LỚN #3: Logic tính toán và hiển thị điểm chi tiết hơn ===
                 best_raw_score, best_adj_score, best_tactic, entry_threshold, mtf_coeff = 0, 0, "N/A", "N/A", 1.0
 
                 for tactic_name, tactic_cfg in TACTICS_LAB.items():
@@ -359,91 +362,88 @@ def show_full_dashboard(bnc: BinanceConnector):
                         raw_score = decision.get("final_score", 0.0)
                         temp_mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
                         adjusted_score = raw_score * temp_mtf_coeff
-                        
-                        # So sánh dựa trên điểm đã điều chỉnh
                         if adjusted_score > best_adj_score:
                             best_raw_score = raw_score
                             best_adj_score = adjusted_score
                             best_tactic = tactic_name
                             entry_threshold = tactic_cfg.get("ENTRY_SCORE", "N/A")
                             mtf_coeff = temp_mtf_coeff
-
-                if best_raw_score == 0: # Fallback nếu không có tactic nào phù hợp zone
+                
+                if best_raw_score == 0:
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
                     best_raw_score = decision.get("final_score", 0.0)
                     mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
                     best_adj_score = best_raw_score * mtf_coeff
                     best_tactic = "Default"
                 
-                # So sánh điểm ĐÃ ĐIỀU CHỈNH với ngưỡng
                 is_strong_signal = isinstance(entry_threshold, (int, float)) and best_adj_score >= entry_threshold
                 icon = "🟢" if is_strong_signal else ("🟡" if best_adj_score >= 5.5 else "🔴")
-
-                # Xây dựng chuỗi hiển thị mới
                 mtf_display = f"x{mtf_coeff:.2f}"
                 score_display = f"Gốc: {best_raw_score:.2f} | Cuối: {best_adj_score:.2f} (MTF {mtf_display})"
                 print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | {score_display} | Tactic: {best_tactic} (Ngưỡng: {entry_threshold})")
-
     print("="*80)
+
 
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
-        if not os.path.exists(TRADE_HISTORY_CSV_FILE):
-            print("ℹ️ Không tìm thấy file trade_history.csv.")
-            return
+        if not os.path.exists(TRADE_HISTORY_CSV_FILE): print("ℹ️ Không tìm thấy file trade_history.csv."); return
+        
+        # Thiết lập để pandas sử dụng toàn bộ độ rộng của terminal
+        pd.set_option('display.width', None)
+        pd.set_option('display.max_columns', None)
         
         df = pd.read_csv(TRADE_HISTORY_CSV_FILE, engine='python', quotechar='"', skipinitialspace=True)
-        if df.empty:
-            print("ℹ️ File lịch sử trống.")
-            return
+        if df.empty: print("ℹ️ File lịch sử trống."); return
 
-        cols_to_display = [
-            'exit_time', 'symbol', 'interval', 'total_invested_usd', 
-            'pnl_usd', 'pnl_percent', 'holding_duration_hours',
+        cols_to_use = [
+            'exit_time', 'symbol', 'interval', 'entry_price', 'exit_price', 
+            'total_invested_usd', 'pnl_usd', 'pnl_percent', 'holding_duration_hours',
             'entry_score', 'last_score', 'entry_zone', 'last_zone',
             'opened_by_tactic', 'status'
         ]
-        
-        existing_cols = [c for c in cols_to_display if c in df.columns]
+        existing_cols = [c for c in cols_to_use if c in df.columns]
         df_display = df[existing_cols].copy()
+        
+        # Hàm định dạng giá động
+        def format_dyn_price(price):
+            try:
+                p = float(price)
+                if p >= 1.0: return f"{p:,.4f}"
+                return f"{p:,.8f}"
+            except (ValueError, TypeError): return "N/A"
 
-        # --- ĐỊNH DẠNG DỮ LIỆU ---
+        # Định dạng
         df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], format='mixed', errors='coerce').dt.strftime('%m-%d %H:%M')
-        if 'total_invested_usd' in df_display.columns:
-            df_display['total_invested_usd'] = df_display['total_invested_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):.2f}")
-        if 'pnl_usd' in df_display.columns:
-            df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):+.2f}")
-        if 'pnl_percent' in df_display.columns:
-            df_display['pnl_percent'] = df_display['pnl_percent'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):+.2f}%")
-        if 'entry_score' in df_display.columns:
+        if 'total_invested_usd' in df_display.columns: df_display['total_invested_usd'] = df_display['total_invested_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):.2f}")
+        if 'pnl_usd' in df_display.columns: df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):+.2f}")
+        if 'pnl_percent' in df_display.columns: df_display['pnl_percent'] = df_display['pnl_percent'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):+.2f}%")
+        
+        if 'entry_price' in df_display.columns: df_display['entry_price'] = df_display['entry_price'].apply(format_dyn_price)
+        if 'exit_price' in df_display.columns: df_display['exit_price'] = df_display['exit_price'].apply(format_dyn_price)
+
+        if 'entry_score' in df_display.columns and 'last_score' in df_display.columns:
             df_display['entry_score'] = df_display['entry_score'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.1f}")
-        if 'last_score' in df_display.columns:
             df_display['last_score'] = df_display['last_score'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.1f}")
             df_display['Score'] = df_display['entry_score'].astype(str) + '→' + df_display['last_score'].astype(str)
-            df_display.drop(columns=['entry_score', 'last_score'], inplace=True)
+        
         if 'entry_zone' in df_display.columns and 'last_zone' in df_display.columns:
             df_display['Zone'] = df_display['entry_zone'].astype(str) + '→' + df_display['last_zone'].astype(str)
-            df_display.drop(columns=['entry_zone', 'last_zone'], inplace=True)
             
-        # --- ĐÂY LÀ PHẦN SỬA LỖI HIỂN THỊ ---
-        # Đổi tên các cột dài thành tên ngắn hơn
         df_display.rename(columns={
-            'total_invested_usd': 'Vốn',
-            'pnl_percent': 'PnL %',
-            'holding_duration_hours': 'Hold (h)',
-            'opened_by_tactic': 'Tactic',
-            'exit_time': 'Time Close'
+            'total_invested_usd': 'Vốn', 'pnl_percent': 'PnL %', 'holding_duration_hours': 'Hold (h)',
+            'opened_by_tactic': 'Tactic', 'exit_time': 'Time Close', 'entry_price': 'Giá vào', 'exit_price': 'Giá ra'
         }, inplace=True)
         
-        final_order = [c for c in ['Time Close', 'symbol', 'interval', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status'] if c in df_display.columns]
+        final_order = [c for c in ['Time Close', 'symbol', 'interval', 'Giá vào', 'Giá ra', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status'] if c in df_display.columns]
         df_display = df_display[final_order]
 
         print(df_display.sort_values(by='Time Close', ascending=False).head(20).to_string(index=False))
+        pd.reset_option('display.width')
+        pd.reset_option('display.max_columns')
 
     except Exception as e:
-        print(f"⚠️ Lỗi khi đọc file CSV: {e}")
-        traceback.print_exc()
+        print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
 
 
 def manual_report(bnc: BinanceConnector):
@@ -471,30 +471,41 @@ def show_tactic_analysis():
     print("\n" + "="*15, "📊 BẢNG PHÂN TÍCH HIỆU SUẤT TACTIC 📊", "="*15)
     if not os.path.exists(TRADE_HISTORY_CSV_FILE): print("ℹ️ Không tìm thấy file trade_history.csv."); return
     try:
-        # Sử dụng pandas để đọc CSV, xử lý lỗi tốt hơn
         df = pd.read_csv(TRADE_HISTORY_CSV_FILE, on_bad_lines='skip')
+        df['pnl_usd'] = pd.to_numeric(df['pnl_usd'], errors='coerce')
         df = df[df['pnl_usd'].notna() & df['status'].str.contains('Closed', na=False, case=False)]
         if df.empty: print("ℹ️ Không có dữ liệu hợp lệ để phân tích hiệu suất."); return
 
-        # Nhóm theo 'opened_by_tactic'
         grouped = df.groupby('opened_by_tactic').agg(
             Total_Trades=('pnl_usd', 'count'),
             Total_PnL=('pnl_usd', 'sum'),
             Wins=('pnl_usd', lambda x: (x > 0).sum()),
-            Losses=('pnl_usd', lambda x: (x <= 0).sum()),
             Avg_Win_PnL=('pnl_usd', lambda x: x[x > 0].mean()),
             Avg_Loss_PnL=('pnl_usd', lambda x: x[x <= 0].mean())
         ).fillna(0)
 
         grouped['Win_Rate_%'] = (grouped['Wins'] / grouped['Total_Trades'] * 100).where(grouped['Total_Trades'] > 0, 0)
+        
         grouped['Payoff_Ratio'] = (grouped['Avg_Win_PnL'] / abs(grouped['Avg_Loss_PnL'])).where(grouped['Avg_Loss_PnL'] != 0, float('inf'))
+        
+        win_rate = grouped['Wins'] / grouped['Total_Trades']
+        loss_rate = 1 - win_rate
+        grouped['Expectancy_$'] = (win_rate * grouped['Avg_Win_PnL']) + (loss_rate * grouped['Avg_Loss_PnL'])
 
-        # Định dạng và hiển thị
+        grouped['Max_Win_$'] = df.groupby('opened_by_tactic')['pnl_usd'].apply(lambda x: x[x > 0].max()).fillna(0)
+        grouped['Max_Loss_$'] = df.groupby('opened_by_tactic')['pnl_usd'].apply(lambda x: x[x <= 0].min()).fillna(0)
+
         formatted_df = grouped.reset_index().rename(columns={'opened_by_tactic': 'Tactic'})
-        formatted_df = formatted_df[['Tactic', 'Total_Trades', 'Win_Rate_%', 'Total_PnL', 'Avg_Win_PnL', 'Avg_Loss_PnL', 'Payoff_Ratio']]
+        formatted_df = formatted_df[['Tactic', 'Total_Trades', 'Win_Rate_%', 'Total_PnL', 'Expectancy_$', 'Payoff_Ratio', 'Avg_Win_PnL', 'Avg_Loss_PnL', 'Max_Win_$', 'Max_Loss_$']]
+        
+        print("Chú thích:")
+        print("  - Expectancy_$: Lợi nhuận kỳ vọng cho mỗi lần vào lệnh bằng Tactic này.")
+        print("  - Payoff_Ratio: Khi thắng, bạn ăn được gấp bao nhiêu lần so với khi thua.")
+        print("-" * 60)
+        
         pd.options.display.float_format = '{:,.2f}'.format
         print(formatted_df.sort_values(by="Total_PnL", ascending=False).to_string(index=False))
-        pd.options.display.float_format = None # Reset lại
+        pd.options.display.float_format = None
     except Exception as e:
         print(f"⚠️ Lỗi khi phân tích file CSV: {e}")
     print("="*80)
@@ -841,4 +852,3 @@ if __name__ == "__main__":
         try: signal.signal(signal.SIGTSTP, handle_exit_signals)
         except AttributeError: pass
     main_menu()
-
