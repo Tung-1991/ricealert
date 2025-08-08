@@ -161,46 +161,21 @@ def reconcile_state(bnc: BinanceConnector, state: dict):
 def write_trades_to_csv(closed_trades: list):
     if not closed_trades: return
     
-    # Đảm bảo CSV_HEADER được cập nhật nếu có thêm trường mới
-    all_keys = set()
-    for trade in closed_trades:
-        all_keys.update(trade.keys())
-    
-    # Tạo header động nhưng vẫn giữ thứ tự ưu tiên của CSV_HEADER
-    final_header = list(CSV_HEADER)
-    for key in all_keys:
-        if key not in final_header:
-            final_header.append(key)
+    # Lấy header từ trade đầu tiên để đảm bảo nhất quán
+    final_header = list(closed_trades[0].keys())
 
     try:
-        # Sử dụng 'a' để ghi tiếp, và 'w' nếu file chưa tồn tại
-        # Kiểm tra header để tránh ghi lặp lại hoặc sai
         file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE)
-        write_header = not file_exists
         
-        if file_exists:
-            try:
-                # Đọc header hiện có, nếu khác thì sẽ ghi đè file
-                with open(TRADE_HISTORY_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    existing_header = next(reader)
-                    if set(existing_header) != set(final_header):
-                        print("⚠️ Header của file CSV đã thay đổi. Sẽ ghi đè file.")
-                        write_header = True
-            except (StopIteration, Exception): # File rỗng hoặc lỗi
-                 write_header = True
-
-        mode = 'w' if write_header else 'a'
-        
-        with open(TRADE_HISTORY_CSV_FILE, mode, newline='', encoding='utf-8') as f:
-            # Dùng DictWriter để đảm bảo các giá trị được đặt vào đúng cột
-            writer = csv.DictWriter(f, fieldnames=final_header, extrasaction='ignore', quoting=csv.QUOTE_ALL)
+        # Luôn mở ở chế độ 'a' (append) nếu file đã tồn tại
+        with open(TRADE_HISTORY_CSV_FILE, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=final_header, extrasaction='ignore')
             
-            if write_header:
+            # Chỉ ghi header nếu file không tồn tại (lần ghi đầu tiên)
+            if not file_exists:
                 writer.writeheader()
             
             for trade in closed_trades:
-                # Chuyển đổi các dict/list thành chuỗi JSON trước khi ghi
                 trade_to_write = {}
                 for key, value in trade.items():
                     if isinstance(value, (dict, list)):
@@ -209,10 +184,11 @@ def write_trades_to_csv(closed_trades: list):
                         trade_to_write[key] = value
                 writer.writerow(trade_to_write)
                 
-        print(f"✍️  Đã ghi thành công {len(closed_trades)} lệnh vào file CSV.")
+        print(f"✍️  Đã ghi tiếp thành công {len(closed_trades)} lệnh vào file CSV.")
     except Exception as e:
         print(f"❌ Lỗi nghiêm trọng khi ghi file CSV: {e}")
         traceback.print_exc()
+
 
 
 # --- CÁC HÀM XỬ LÝ GIAO DỊCH CÓ GHI SỔ SÁCH (ACCOUNTING SYNC) ---
@@ -383,16 +359,10 @@ def show_full_dashboard(bnc: BinanceConnector):
                 print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | {score_display} | Tactic: {best_tactic} (Ngưỡng: {entry_threshold})")
     print("="*80)
 
-
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
         if not os.path.exists(TRADE_HISTORY_CSV_FILE): print("ℹ️ Không tìm thấy file trade_history.csv."); return
-        
-        # Thiết lập để pandas sử dụng toàn bộ độ rộng của terminal
-        pd.set_option('display.width', None)
-        pd.set_option('display.max_columns', None)
-        
         df = pd.read_csv(TRADE_HISTORY_CSV_FILE, engine='python', quotechar='"', skipinitialspace=True)
         if df.empty: print("ℹ️ File lịch sử trống."); return
 
@@ -405,22 +375,13 @@ def view_csv_history():
         existing_cols = [c for c in cols_to_use if c in df.columns]
         df_display = df[existing_cols].copy()
         
-        # Hàm định dạng giá động
-        def format_dyn_price(price):
-            try:
-                p = float(price)
-                if p >= 1.0: return f"{p:,.4f}"
-                return f"{p:,.8f}"
-            except (ValueError, TypeError): return "N/A"
-
-        # Định dạng
         df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], format='mixed', errors='coerce').dt.strftime('%m-%d %H:%M')
         if 'total_invested_usd' in df_display.columns: df_display['total_invested_usd'] = df_display['total_invested_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):.2f}")
         if 'pnl_usd' in df_display.columns: df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${pd.to_numeric(x, errors='coerce'):+.2f}")
         if 'pnl_percent' in df_display.columns: df_display['pnl_percent'] = df_display['pnl_percent'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):+.2f}%")
         
-        if 'entry_price' in df_display.columns: df_display['entry_price'] = df_display['entry_price'].apply(format_dyn_price)
-        if 'exit_price' in df_display.columns: df_display['exit_price'] = df_display['exit_price'].apply(format_dyn_price)
+        if 'entry_price' in df_display.columns: df_display['entry_price'] = df_display['entry_price'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.4f}")
+        if 'exit_price' in df_display.columns: df_display['exit_price'] = df_display['exit_price'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.4f}")
 
         if 'entry_score' in df_display.columns and 'last_score' in df_display.columns:
             df_display['entry_score'] = df_display['entry_score'].apply(lambda x: f"{pd.to_numeric(x, errors='coerce'):.1f}")
@@ -439,9 +400,6 @@ def view_csv_history():
         df_display = df_display[final_order]
 
         print(df_display.sort_values(by='Time Close', ascending=False).head(20).to_string(index=False))
-        pd.reset_option('display.width')
-        pd.reset_option('display.max_columns')
-
     except Exception as e:
         print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
 
