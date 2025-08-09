@@ -56,7 +56,7 @@ TRADING_MODE: Literal["live", "testnet"] = "live" # Chế độ chạy: "live" (
 GENERAL_CONFIG = {
     "DATA_FETCH_LIMIT": 300,                     # Số lượng nến tối đa để tải về cho mỗi lần phân tích
     "DAILY_SUMMARY_TIMES": ["08:10", "20:10"],   # Các mốc thời gian trong ngày để gửi báo cáo tổng kết
-    "TRADE_COOLDOWN_HOURS": 3,                   # Thời gian (giờ) nghỉ giao dịch một đồng coin sau khi đóng lệnh
+    "TRADE_COOLDOWN_HOURS": 1,                   # Thời gian (giờ) nghỉ giao dịch một đồng coin sau khi đóng lệnh
     "CRON_JOB_INTERVAL_MINUTES": 1,              # Tần suất chạy bot (phút), phải khớp với crontab
     "HEAVY_REFRESH_MINUTES": 15,                 # Tần suất (phút) để quét lại toàn bộ thị trường tìm cơ hội mới
     "PENDING_TRADE_RETRY_LIMIT": 3,              # Số lần thử lại tối đa nếu một lệnh mua mới thất bại
@@ -66,7 +66,7 @@ GENERAL_CONFIG = {
     "MIN_ORDER_VALUE_USDT": 11.0,                # Giá trị lệnh tối thiểu (USD) để đặt lệnh trên sàn
     "OVERRIDE_COOLDOWN_SCORE": 7.5,              # Điểm số tối thiểu để phá vỡ thời gian nghỉ và vào lệnh ngay
     "ORPHAN_ASSET_MIN_VALUE_USDT": 10.0,         # Giá trị (USD) tối thiểu của một tài sản "mồ côi" để bot cảnh báo
-    "TOP_N_OPPORTUNITIES_TO_CHECK": 3,           # Số cơ hội hàng đầu để xem xét, mặc định là 3
+    "TOP_N_OPPORTUNITIES_TO_CHECK": 5,           # Số cơ hội hàng đầu để xem xét, mặc định là 3
 
     # --- ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) ---
     "DEPOSIT_DETECTION_MIN_USD": 10.0,           # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
@@ -88,13 +88,13 @@ MTF_ANALYSIS_CONFIG = {
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.27,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.3,        # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
     "PARTIAL_EARLY_CLOSE_PCT": 0.5,              # Tỷ lệ % của lệnh sẽ được đóng nếu điểm sụt giảm (đóng 50%)
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # Bật/Tắt tính năng bảo vệ lợi nhuận
-        "MIN_PEAK_PNL_TRIGGER": 3.5,             # Lãi tối thiểu (%) phải đạt được để kích hoạt bảo vệ
-        "PNL_DROP_TRIGGER_PCT": 2.0,             # Mức sụt giảm lợi nhuận (%) từ đỉnh để kích hoạt bán
-        "PARTIAL_CLOSE_PCT": 0.7                 # Tỷ lệ % của lệnh sẽ được bán để bảo vệ lợi nhuận (bán 70%)
+        "MIN_PEAK_PNL_TRIGGER": 5.0,             # Lãi tối thiểu (%) phải đạt được để kích hoạt bảo vệ
+        "PNL_DROP_TRIGGER_PCT": 2.5,             # Mức sụt giảm lợi nhuận (%) từ đỉnh để kích hoạt bán
+        "PARTIAL_CLOSE_PCT": 0.6                 # Tỷ lệ % của lệnh sẽ được bán để bảo vệ lợi nhuận (bán 70%)
     }
 }
 
@@ -109,27 +109,27 @@ DYNAMIC_ALERT_CONFIG = {
 # --- LUẬT RỦI RO ---
 RISK_RULES_CONFIG = {
     "MAX_ACTIVE_TRADES": 12,                     # Số lượng lệnh được phép mở cùng một lúc
-    "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.06, "4h": 0.08, "1d": 0.10}, # Mức cắt lỗ tối đa (%) cho phép theo từng khung thời gian
-    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.12, "4h": 0.16, "1d": 0.20}, # Mức chốt lời tối đa (%) để tránh kỳ vọng phi thực tế
+    "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.07, "4h": 0.10, "1d": 0.13}, # Mức cắt lỗ tối đa (%) cho phép theo từng khung thời gian
+    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.14, "4h": 0.20, "1d": 0.26}, # Mức chốt lời tối đa (%) để tránh kỳ vọng phi thực tế
     "STALE_TRADE_RULES": {                       # Quy tắc xử lý các lệnh "ì", không chạy
-        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 25.0}, # Lệnh 1h sau 48h mà lãi < 25% so với kỳ vọng -> xem xét đóng
-        "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 25.0}, # Lệnh 4h sau 72h mà lãi < 25% so với kỳ vọng -> xem xét đóng
-        "1d": {"HOURS": 168, "PROGRESS_THRESHOLD_PCT": 20.0},# Lệnh 1d sau 168h (1 tuần) mà lãi < 20% so với kỳ vọng -> xem xét đóng
+        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 1h sau 48h mà lãi < 25% so với kỳ vọng -> xem xét đóng
+        "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 4h sau 72h mà lãi < 25% so với kỳ vọng -> xem xét đóng
+        "1d": {"HOURS": 168, "PROGRESS_THRESHOLD_PCT": 15.0}, # Lệnh 1d sau 168h (1 tuần) mà lãi < 20% so với kỳ vọng -> xem xét đóng
         "STAY_OF_EXECUTION_SCORE": 6.8           # Điểm số tối thiểu để "ân xá", không đóng lệnh "ì" dù vi phạm
     }
 }
 
 # --- QUẢN LÝ VỐN TỔNG THỂ ---
 CAPITAL_MANAGEMENT_CONFIG = {
-    "MAX_TOTAL_EXPOSURE_PCT": 0.75               # Phanh an toàn: Tổng vốn đã vào lệnh không được vượt quá 75% tiền mặt
+    "MAX_TOTAL_EXPOSURE_PCT": 0.80               # Phanh an toàn: Tổng vốn đã vào lệnh không được vượt quá 75% tiền mặt
 }
 
 # --- TRUNG BÌNH GIÁ (DCA) ---
 DCA_CONFIG = {
     "ENABLED": True,                             # Bật/Tắt tính năng DCA
     "MAX_DCA_ENTRIES": 2,                        # Số lần DCA tối đa cho một lệnh
-    "TRIGGER_DROP_PCT": -5.0,                    # Mức giá giảm tối thiểu (%) để kích hoạt DCA
-    "SCORE_MIN_THRESHOLD": 6.5,                  # Điểm tín hiệu tối thiểu để được phép DCA
+    "TRIGGER_DROP_PCT": -4.5,                    # Mức giá giảm tối thiểu (%) để kích hoạt DCA
+    "SCORE_MIN_THRESHOLD": 6.8,                  # Điểm tín hiệu tối thiểu để được phép DCA
     "CAPITAL_MULTIPLIER": 0.75,                  # Vốn DCA = Vốn lần vào lệnh trước * 0.75
     "DCA_COOLDOWN_HOURS": 8                      # Thời gian (giờ) chờ giữa các lần DCA
 }
@@ -163,21 +163,21 @@ TACTICS_LAB = {
         "NOTES": "Săn điểm phá vỡ (breakout) từ nền giá đi ngang siết chặt.",
         "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
         "ENTRY_SCORE": 7.0,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
-        "RR": 2.5,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
-        "ATR_SL_MULTIPLIER": 1.8,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
+        "RR": 2.8,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
+        "ATR_SL_MULTIPLIER": 2.0,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
         "USE_TRAILING_SL": True,                         # Bật/Tắt Cắt lỗ động (Trailing Stop Loss).
-        "TRAIL_ACTIVATION_RR": 1.0,                      # Kích hoạt TSL khi lợi nhuận đạt 1R (gấp 1 lần rủi ro ban đầu).
-        "TRAIL_DISTANCE_RR": 0.8,                        # Giữ khoảng cách TSL cách giá hiện tại một khoảng bằng 0.8R.
-        "ENABLE_PARTIAL_TP": True,                       # Bật/Tắt Chốt lời một phần.
-        "TP1_RR_RATIO": 1.0,                             # Chốt lời phần 1 tại mức 1R.
-        "TP1_PROFIT_PCT": 0.5                            # Chốt 50% khối lượng lệnh tại TP1.
+        "TRAIL_ACTIVATION_RR": 1.5,                      # Kích hoạt TSL khi lợi nhuận đạt 1R (gấp 1 lần rủi ro ban đầu).
+        "TRAIL_DISTANCE_RR": 1.0,                        # Giữ khoảng cách TSL cách giá hiện tại một khoảng bằng 0.8R.
+        "ENABLE_PARTIAL_TP": False,                       # Bật/Tắt Chốt lời một phần.
+        "TP1_RR_RATIO": None,                             # Chốt lời phần 1 tại mức 1R.
+        "TP1_PROFIT_PCT": None                            # Chốt 50% khối lượng lệnh tại TP1.
     },
     "Dip_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Bắt đáy/sóng hồi trong một xu hướng lớn đang diễn ra.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
         "ENTRY_SCORE": 6.8,
-        "RR": 2.2,
+        "RR": 2.0,
         "ATR_SL_MULTIPLIER": 2.0,
         "USE_TRAILING_SL": False,                        # Tactic này không dùng TSL.
         "TRAIL_ACTIVATION_RR": None,
@@ -190,42 +190,42 @@ TACTICS_LAB = {
         "NOTES": "Tấn công quyết liệt khi điểm AI rất cao và có xác nhận mạnh mẽ.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6}, # Rất tin tưởng vào điểm AI.
         "ENTRY_SCORE": 6.6,
-        "RR": 2.2,
+        "RR": 2.3,
         "ATR_SL_MULTIPLIER": 2.5,                        # Đặt SL rộng hơn để tránh bị quét.
         "USE_TRAILING_SL": True,
         "TRAIL_ACTIVATION_RR": 1.2,
-        "TRAIL_DISTANCE_RR": 0.8,
+        "TRAIL_DISTANCE_RR": 1.0,
         "ENABLE_PARTIAL_TP": True,
-        "TP1_RR_RATIO": 1.0,
-        "TP1_PROFIT_PCT": 0.5
+        "TP1_RR_RATIO": 1.2,
+        "TP1_PROFIT_PCT": 0.4
     },
     "Balanced_Trader": {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh chủ lực, đi theo xu hướng đã rõ ràng, cân bằng giữa các yếu tố.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, # Trọng số cân bằng.
         "ENTRY_SCORE": 6.3,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
-        "RR": 1.8,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
+        "RR": 2.5,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
         "ATR_SL_MULTIPLIER": 2.8,                        # SL rất rộng, bám theo trend dài.
         "USE_TRAILING_SL": True,
-        "TRAIL_ACTIVATION_RR": 1.2,
-        "TRAIL_DISTANCE_RR": 1.0,                        # Kéo TSL xa hơn.
+        "TRAIL_ACTIVATION_RR": 1.5,
+        "TRAIL_DISTANCE_RR": 1.2,                        # Kéo TSL xa hơn.
         "ENABLE_PARTIAL_TP": True,
-        "TP1_RR_RATIO": 1.2,
-        "TP1_PROFIT_PCT": 0.5
+        "TP1_RR_RATIO": 1.4,
+        "TP1_PROFIT_PCT": 0.4
     },
     "Cautious_Observer": {
         "OPTIMAL_ZONE": NOISE_ZONE,                      # Chỉ hoạt động ở vùng Nhiễu.
         "NOTES": "Chỉ vào lệnh khi có cơ hội VÀNG (điểm siêu cao) trong vùng nhiễu nguy hiểm.",
         "WEIGHTS": {'tech': 0.7, 'context': 0.2, 'ai': 0.1}, # Tin vào tín hiệu kỹ thuật thuần túy, ít tin AI.
         "ENTRY_SCORE": 8.0,                              # Ngưỡng vào lệnh cực kỳ cao để lọc nhiễu.
-        "RR": 1.5,                                       # Kỳ vọng RR thấp, ăn nhanh.
+        "RR": 1.8,                                       # Kỳ vọng RR thấp, ăn nhanh.
         "ATR_SL_MULTIPLIER": 1.5,                        # SL chặt để thoát nhanh nếu sai.
         "USE_TRAILING_SL": True,
-        "TRAIL_ACTIVATION_RR": 0.7,                      # Kích hoạt TSL rất sớm.
-        "TRAIL_DISTANCE_RR": 0.5,                        # Kéo TSL rất sát.
+        "TRAIL_ACTIVATION_RR": 0.8,                      # Kích hoạt TSL rất sớm.
+        "TRAIL_DISTANCE_RR": 0.6,                        # Kéo TSL rất sát.
         "ENABLE_PARTIAL_TP": True,
         "TP1_RR_RATIO": 0.8,
-        "TP1_PROFIT_PCT": 0.5
+        "TP1_PROFIT_PCT": 0.7
     },
 }
 
