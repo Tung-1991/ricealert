@@ -194,10 +194,6 @@ def write_trades_to_csv(closed_trades: list):
 # --- CÁC HÀM XỬ LÝ GIAO DỊCH CÓ GHI SỔ SÁCH (ACCOUNTING SYNC) ---
 
 def process_and_log_closed_trade(bnc: BinanceConnector, trade: dict, reason: str, state: dict) -> bool:
-    """
-    Hàm đóng lệnh trung tâm.
-    [v7.3.0] NÂNG CẤP: Cập nhật 'money_gained_from_trades_last_session' để đồng bộ với live_trade.py.
-    """
     symbol, qty = trade['symbol'], float(trade.get('quantity', 0))
     if qty <= 0: return False
     try:
@@ -207,32 +203,35 @@ def process_and_log_closed_trade(bnc: BinanceConnector, trade: dict, reason: str
             raise Exception("Lệnh đóng không khớp hoặc không có phản hồi.")
     except Exception as e:
         print(f"❌ Lỗi API Binance khi đóng lệnh {symbol}: {e}"); return False
-
     money_gained = float(order['cummulativeQuoteQty'])
     closed_qty = float(order['executedQty'])
     exit_price = money_gained / closed_qty if closed_qty > 0 else trade['entry_price']
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     invested_usd = trade.get('total_invested_usd', 1)
     pnl_percent = (pnl_usd / invested_usd) * 100 if invested_usd > 0 else 0
-
-    # Cập nhật thông tin lệnh đã đóng
     trade.update({
         'status': f'Closed ({reason})', 'exit_price': exit_price,
         'exit_time': datetime.now(VIETNAM_TZ).isoformat(),
         'pnl_usd': trade.get('realized_pnl_usd', 0.0) + pnl_usd,
         'pnl_percent': pnl_percent,
     })
-
-    # === DÒNG GIAO TIẾP QUAN TRỌNG ===
-    # Báo cho live_trade biết rằng có một khoản tiền đã được thu về
+    try:
+        trade_interval = trade.get('interval', '1h')
+        cooldown_hours = GENERAL_CONFIG.get("TRADE_COOLDOWN_HOURS", 3)
+        cooldown_dict = state.setdefault('cooldown_until', {})
+        symbol_cooldowns = cooldown_dict.setdefault(symbol, {})
+        cooldown_end_time = datetime.now(VIETNAM_TZ) + timedelta(hours=cooldown_hours)
+        symbol_cooldowns[trade_interval] = cooldown_end_time.isoformat()
+        print(f"🔩  Đã áp dụng cooldown {cooldown_hours} giờ cho {symbol}-{trade_interval}.")
+    except Exception as e:
+        print(f"⚠️  Lỗi khi áp dụng cooldown: {e}")
     state['money_gained_from_trades_last_session'] = state.get('money_gained_from_trades_last_session', 0.0) + money_gained
-
-    # Di chuyển lệnh từ active_trades sang trade_history
     state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
     state.setdefault('trade_history', []).append(trade)
-    state['trade_history'] = state['trade_history'][-200:] # Giới hạn lịch sử
+    state['trade_history'] = state['trade_history'][-200:]
     print(f"✅ Đóng {symbol} thành công. PnL: ${pnl_usd:,.2f}. Đã cập nhật sổ sách.")
     return True
+
 
 # --- CÁC HÀM CHỨC NĂNG MENU ---
 
