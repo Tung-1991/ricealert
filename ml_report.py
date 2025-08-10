@@ -86,7 +86,7 @@ class AIModelBundle:
             self.reg_lstm = load_model(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.keras"), compile=False)
             self.clf_trans = load_model(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.keras"), compile=False)
             self.reg_trans = load_model(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.keras"), compile=False)
-        except Exception: self.meta = None # Mark as invalid if any file is missing
+        except Exception: self.meta = None
 
     def is_valid(self): return self.meta is not None
 
@@ -102,7 +102,10 @@ def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optio
     latest_row = features_df[features_to_use].iloc[[-1]]
     lgbm_clf_prob = bundle.clf_lgbm.predict_proba(latest_row)[0]
     lgbm_reg_pred = bundle.reg_lgbm.predict(latest_row)[0]
-    opinions['lightgbm'] = {"prob_sell": lgbm_clf_prob[0] * 100, "prob_buy": lgbm_clf_prob[2] * 100, "pct": lgbm_reg_pred}
+    lgbm_classes = bundle.clf_lgbm.classes_.tolist()
+    prob_sell_lgbm = lgbm_clf_prob[lgbm_classes.index(0)] if 0 in lgbm_classes else 0
+    prob_buy_lgbm = lgbm_clf_prob[lgbm_classes.index(2)] if 2 in lgbm_classes else 0
+    opinions['lightgbm'] = {"prob_sell": prob_sell_lgbm * 100, "prob_buy": prob_buy_lgbm * 100, "pct": float(lgbm_reg_pred)}
 
     # DL Models Opinion
     scaled_df = features_df.copy(); scaled_df[features_to_use] = bundle.scaler.transform(features_df[features_to_use])
@@ -111,11 +114,11 @@ def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optio
         seq_to_predict = sequence[[-1]]
         lstm_clf_prob = bundle.clf_lstm.predict(seq_to_predict, verbose=0)[0]
         lstm_reg_pred = bundle.reg_lstm.predict(seq_to_predict, verbose=0)[0][0]
-        opinions['lstm'] = {"prob_sell": lstm_clf_prob[0] * 100, "prob_buy": lstm_clf_prob[2] * 100, "pct": lstm_reg_pred}
+        opinions['lstm'] = {"prob_sell": float(lstm_clf_prob[0]) * 100, "prob_buy": float(lstm_clf_prob[2]) * 100, "pct": float(lstm_reg_pred)}
 
         trans_clf_prob = bundle.clf_trans.predict(seq_to_predict, verbose=0)[0]
         trans_reg_pred = bundle.reg_trans.predict(seq_to_predict, verbose=0)[0][0]
-        opinions['transformer'] = {"prob_sell": trans_clf_prob[0] * 100, "prob_buy": trans_clf_prob[2] * 100, "pct": trans_reg_pred}
+        opinions['transformer'] = {"prob_sell": float(trans_clf_prob[0]) * 100, "prob_buy": float(trans_clf_prob[2]) * 100, "pct": float(trans_reg_pred)}
 
     if not opinions: return None
 
@@ -126,15 +129,21 @@ def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optio
         final_prob_buy += op['prob_buy'] * weight; final_prob_sell += op['prob_sell'] * weight; final_pct += op['pct'] * weight
 
     lv = classify_level(final_prob_buy, final_prob_sell, final_pct, interval)
-    if 'BUY' not in opinions['lightgbm'] and 'SELL' not in opinions['lightgbm'] and len(opinions) > 1: # Xung đột
-         if lv['level'] in ['BUY', 'SELL']: lv = {"level": "AVOID", "sub_level": "AVOID_CONFLICT"}
+    if len(opinions) > 2:
+        buys = sum(1 for op in opinions.values() if op['pct'] > 0.1); sells = sum(1 for op in opinions.values() if op['pct'] < -0.1)
+        if buys > 0 and sells > 0 and lv['level'] in ['BUY', 'SELL']: lv = {"level": "AVOID", "sub_level": "AVOID_CONFLICT"}
 
     price = features_df.iloc[-1]['close']
     risk = {"STRONG_BUY":1/3,"BUY":1/2.5,"WEAK_BUY":1/2,"HOLD":1/1.5,"AVOID":1/1.5,"WEAK_SELL":1/2,"SELL":1/2.5,"PANIC_SELL":1/3}.get(lv['level'],1/1.5)
-    dir_ = 1 if final_pct >= 0 else -1
-    tp_pct = max(abs(final_pct), 0.5); sl_pct = tp_pct * risk
+    dir_ = 1 if final_pct >= 0 else -1; tp_pct = max(abs(final_pct), 0.5); sl_pct = tp_pct * risk
 
-    return {"symbol": symbol, "interval": interval, "prob_buy": round(final_prob_buy, 1), "prob_sell": round(final_prob_sell, 1), "pct": final_pct, "price": price, "tp": price * (1 + dir_ * tp_pct / 100), "sl": price * (1 - dir_ * sl_pct / 100), "level": lv['level'], "sub_level": lv['sub_level']}
+    return {
+        "symbol": symbol, "interval": interval,
+        "prob_buy": round(final_prob_buy, 1), "prob_sell": round(final_prob_sell, 1), "pct": final_pct,
+        "price": price, "tp": price * (1 + dir_ * tp_pct / 100), "sl": price * (1 - dir_ * sl_pct / 100),
+        "level": lv['level'], "sub_level": lv['sub_level'],
+        "expert_opinions": {name: {"pct": round(op['pct'], 4), "prob_buy": round(op['prob_buy'], 1), "prob_sell": round(op['prob_sell'], 1)} for name, op in opinions.items()}
+    }
 
 def classify_level(pb: float, ps: float, pct: float, interval: str) -> Dict[str, str]:
     if pb > 70 and pb > ps * 2: return {"level": "STRONG_BUY", "sub_level": "STRONG_BUY"}
@@ -156,14 +165,14 @@ def classify_level(pb: float, ps: float, pct: float, interval: str) -> Dict[str,
 # --------------------------------------------------
 def atomic_write_json(path: str, data: dict):
     temp_path = path + ".tmp";
-    with open(temp_path, 'w') as f: json.dump(data, f, indent=2)
+    with open(temp_path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
     os.replace(temp_path, path)
 
 def send_discord(payload: Dict):
     if not WEBHOOK_URL: return
     try:
         requests.post(WEBHOOK_URL, json=payload, timeout=15).raise_for_status()
-        time.sleep(1) # Rate limit
+        time.sleep(1)
     except Exception as e: print(f"[ERROR] Discord send failed: {e}")
 
 def load_state():
@@ -184,17 +193,35 @@ def fmt_pct(x): return f"{x:+.4f}%" if abs(x) < 0.01 and x != 0 else f"{x:+.2f}%
 
 def instant_alert(res: Dict, old_lv: Optional[str], old_sub: Optional[str]):
     from_str = "Tín hiệu mới"
-    if old_lv: from_str = f"Từ **{get_sub_info(old_sub)['name'] if old_sub and 'HOLD' in old_lv or 'AVOID' in old_lv else LEVEL_MAP.get(old_lv, {})['name']}** {get_sub_info(old_sub)['icon'] if old_sub and 'HOLD' in old_lv or 'AVOID' in old_lv else LEVEL_MAP.get(old_lv, {})['icon']}"
-    
-    si = get_sub_info(res['sub_level']); li = LEVEL_MAP.get(res['level'], {})
+    if old_lv:
+        old_info_map = get_sub_info(old_sub) if old_sub and ('HOLD' in old_lv or 'AVOID' in old_lv) else LEVEL_MAP.get(old_lv, {})
+        from_str = f"Từ **{old_info_map.get('name', 'N/A')}** {old_info_map.get('icon', '❔')}"
+
     is_sub_level_alert = res['level'] in ["HOLD", "AVOID"]
-    to_str = f"chuyển sang **{si['name'] if is_sub_level_alert else li['name']}** {si['icon'] if is_sub_level_alert else li['icon']}"
+    current_info_map = get_sub_info(res['sub_level']) if is_sub_level_alert else LEVEL_MAP.get(res['level'], {})
+    to_str = f"chuyển sang **{current_info_map.get('name', 'N/A')}** {current_info_map.get('icon', '❔')}"
     
-    desc = si['desc'] if is_sub_level_alert else f"Một cơ hội giao dịch **{li['name']}** tiềm năng đã xuất hiện."
-    fields = [{"name": "Giá hiện tại", "value": f"`{fmt_price(res['price'])}`", "inline": True}, {"name": "Dự đoán thay đổi", "value": f"`{fmt_pct(res['pct'])}`", "inline": True}, {"name": "Xác suất Mua/Bán", "value": f"`{res['prob_buy']:.1f}% / {res['prob_sell']:.1f}%`", "inline": True}]
-    if not is_sub_level_alert: fields.extend([{"name": "Mục tiêu (TP)", "value": f"`{fmt_price(res['tp'])}`", "inline": True}, {"name": "Cắt lỗ (SL)", "value": f"`{fmt_price(res['sl'])}`", "inline": True}])
-    
-    embed = {"title": f"🔔 AI Alert: {res['symbol']} ({res['interval']})", "description": f"`{from_str} -> {to_str}`\n\n{desc}", "color": 3447003, "fields": fields, "footer": {"text": f"AI Model Ensemble | {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S')}"}}
+    desc = current_info_map.get('desc', '') if is_sub_level_alert else f"Một cơ hội giao dịch **{current_info_map.get('name', 'N/A')}** tiềm năng đã xuất hiện."
+    fields = [
+        {"name": "Giá hiện tại", "value": f"`{fmt_price(res['price'])}`", "inline": True},
+        {"name": "Dự đoán thay đổi", "value": f"`{fmt_pct(res['pct'])}`", "inline": True},
+        {"name": "Xác suất Mua/Bán", "value": f"`{res['prob_buy']:.1f}% / {res['prob_sell']:.1f}%`", "inline": True},
+    ]
+
+    if not is_sub_level_alert:
+        fields.extend([
+            {"name": "Mục tiêu (TP)", "value": f"`{fmt_price(res['tp'])}`", "inline": True},
+            {"name": "Cắt lỗ (SL)", "value": f"`{fmt_price(res['sl'])}`", "inline": True},
+            {"name": "\u200b", "value": "\u200b", "inline": True}
+        ])
+
+    embed = {
+        "title": f"🔔 AI Alert: {res['symbol']} ({res['interval']})",
+        "description": f"`{from_str} -> {to_str}`\n\n{desc}",
+        "color": 3447003,
+        "fields": fields,
+        "footer": {"text": f"AI Model Ensemble | {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S')}"}
+    }
     send_discord({"embeds": [embed]})
 
 def summary_report(results: List[Dict]):
@@ -246,7 +273,7 @@ def main():
             if now_utc_ts - prev.get('last_alert_timestamp', 0) > cd:
                 instant_alert(res, prev.get('last_level'), prev.get('last_sub_level'))
                 state[key] = {"last_level": res['level'], "last_sub_level": res['sub_level'], "last_alert_timestamp": now_utc_ts}
-            else: # In cooldown, update level but not timestamp
+            else:
                 state[key] = {**prev, "last_level": res['level'], "last_sub_level": res['sub_level']}
     
     if should_send_overview(state):
