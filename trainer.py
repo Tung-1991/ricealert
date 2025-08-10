@@ -1,9 +1,11 @@
-# ===================== trainer.py — PROD v1.4 =====================
-# DEBUG=0 -> log sạch, KHÔNG epoch (crontab/detached)
-# DEBUG=1 -> có epoch, giữ tiến độ; vẫn chặn ptx85/NUMA/XLA/absl/retracing
-# ================================================================
+# ===================== trainer.py — PROD v1.6 (Final Fixed Version) =====================
+# KẾT HỢP:
+# - Bộ lọc log C-level mạnh mẽ từ v1.4 để chặn TOÀN BỘ rác.
+# - Tối ưu hiệu năng GPU bằng tf.data và BATCH_SIZE từ v1.5.
+# - Sửa lỗi LightGBM bằng cách loại bỏ device='gpu'.
+# ======================================================================================
 
-import os, sys, re, warnings, json, random, threading, select
+import os, sys, re, warnings, json, random, time, threading, select
 from datetime import datetime, timedelta, timezone
 from time import sleep
 
@@ -13,88 +15,72 @@ os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_XLA_FLAGS", "--tf_xla_auto_jit=0 --tf_xla_enable_xla_devices=false")
 os.environ.setdefault("XLA_FLAGS", "--xla_gpu_use_runtime_fusion=false --xla_gpu_enable_triton=false")
 
-DEBUG = os.getenv("DEBUG","0") == "1"
+DEBUG = os.getenv("DEBUG", "0") == "1"
 VERBOSE = 2 if DEBUG else 0
 
-# --- Bộ lọc rác + điều kiện epoch ---
+# --- [REVERT] Quay lại bộ lọc C-level mạnh mẽ từ v1.4 ---
 _PAT_RUBBISH = re.compile(
-    r"(" +
-    r"\+ptx85|numa_node|NUMA support|"
-    r"^=+ TensorFlow =+\s*$|XLA service .* initialized|Compiled cluster using XLA|"
-    r"^I\d{4}|^W\d{4}|^E\d{4}|"
-    r"StreamExecutor device|retracing\." +
-    r")"
+    r"(\+ptx85|could not open file to read NUMA node|Your kernel may have been built without NUMA support|"
+    r"XLA service .* initialized|Compiled cluster using XLA|does not guarantee that XLA will be used|"
+    r"StreamExecutor device|retracing\.|All log messages before absl::InitializeLog()|"
+    r"^I\d{4} |^W\d{4} |^E\d{4} |^=+\s*TensorFlow\s*=+|NVIDIA Release|Container image Copyright|"
+    r"governed by the NVIDIA|NOTE: The SHMEM allocation limit)",
+    re.IGNORECASE
 )
-_PAT_EPOCH = re.compile(r"^\s*Epoch\s+\d+/\d+\s*$")
+_PAT_EPOCH = re.compile(r"^\s*Epoch\s+\d+/\d+")
 
 def _keep_line(s: str, allow_epoch: bool) -> bool:
     if _PAT_RUBBISH.search(s):
         return False
-    if (not allow_epoch) and _PAT_EPOCH.search(s):
+    if not allow_epoch and _PAT_EPOCH.search(s):
         return False
     return True
 
-# --- Gắn filter ở C-STDOUT/C-STDERR (fd-level), trước khi import TF ---
 def attach_fd_filter(fd: int, allow_epoch: bool):
     r_fd, w_fd = os.pipe()
     orig_fd = os.dup(fd)
-    os.dup2(w_fd, fd)         # redirect C-level fd -> pipe
+    os.dup2(w_fd, fd)
     os.close(w_fd)
-
     def _pump():
         with os.fdopen(r_fd, 'rb', buffering=0) as r, os.fdopen(orig_fd, 'wb', buffering=0) as w:
             buf = b""
             while True:
                 rlist, _, _ = select.select([r.fileno()], [], [], 0.1)
-                if rlist:
-                    chunk = os.read(r.fileno(), 4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        try:
-                            s = line.decode("utf-8", "ignore")
-                        except:
-                            s = str(line)
-                        if _keep_line(s, allow_epoch):
-                            w.write((s+"\n").encode("utf-8", "ignore"))
-                            w.flush()
-                else:
-                    # flush phần dư nếu stream kết thúc không có \n
+                if not rlist:
                     if buf:
-                        try:
-                            s = buf.decode("utf-8", "ignore")
-                        except:
-                            s = str(buf)
-                        if _keep_line(s, allow_epoch):
-                            w.write((s).encode("utf-8", "ignore"))
-                            w.flush()
+                        try: s = buf.decode("utf-8", "ignore")
+                        except: s = str(buf)
+                        if _keep_line(s, allow_epoch): w.write(s.encode("utf-8", "ignore")); w.flush()
                         buf = b""
+                    continue
+                chunk = os.read(r.fileno(), 4096)
+                if not chunk: break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    try: s = line.decode("utf-8", "ignore")
+                    except: s = str(line)
+                    if _keep_line(s, allow_epoch): w.write((s + "\n").encode("utf-8", "ignore")); w.flush()
+    t = threading.Thread(target=_pump, daemon=True); t.start()
 
-    t = threading.Thread(target=_pump, daemon=True)
-    t.start()
-
-# Gắn cho cả stdout (fd=1) & stderr (fd=2)
 attach_fd_filter(1, allow_epoch=DEBUG)
 attach_fd_filter(2, allow_epoch=DEBUG)
 
-# ---------------- TF + imports còn lại ----------------
 warnings.filterwarnings("ignore", category=UserWarning)
-
-import numpy as np, pandas as pd, requests, joblib, lightgbm as lgb, ta
+import numpy as np
+import pandas as pd
+import requests
+import joblib
+import lightgbm as lgb
+import ta
 import tensorflow as tf
 tf.config.optimizer.set_jit(False)
 try:
     import absl.logging as absl_logging
     absl_logging.set_verbosity(absl_logging.ERROR)
-except Exception:
+except ImportError:
     pass
 tf.get_logger().setLevel("ERROR")
-for h in tf.get_logger().handlers:
-    try: h.setLevel("ERROR")
-    except Exception: pass
-
 from dotenv import load_dotenv
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Model
@@ -102,11 +88,10 @@ from tensorflow.keras.layers import (
     Input, LSTM, Dense, Dropout, LayerNormalization, MultiHeadAttention,
     GlobalAveragePooling1D, Add, BatchNormalization
 )
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-# ---------------- Config ----------------
 SEED = 42
 random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
 load_dotenv()
@@ -129,11 +114,12 @@ MIN_MAP  = _load_map("MIN_SAMPLE_MAP",     {"1h":400, "4h":300, "1d":200})
 SEQUENCE_LENGTH = 60
 TRANSFORMER_HEADS = 8
 TRANSFORMER_LAYERS = 4
+# --- [KEEP] Giữ lại tối ưu BATCH_SIZE ---
+BATCH_SIZE = 512
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---------------- Data utils ----------------
 def get_price_data(symbol: str, interval: str, limit: int, end_time: datetime = None) -> pd.DataFrame:
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
@@ -200,7 +186,6 @@ def create_labels_and_targets(df: pd.DataFrame, fut_off: int, atr_factor: float)
     df_copy['reg_target'] = df_copy['reg_target'].clip(lower=-10, upper=10)
     return df_copy.dropna()
 
-# ---------------- Models ----------------
 def create_sequences(data: pd.DataFrame, feature_cols: list, label_clf_col: str, label_reg_col: str, seq_length: int):
     X, y_clf, y_reg = [], [], []
     for i in range(len(data) - seq_length):
@@ -209,25 +194,22 @@ def create_sequences(data: pd.DataFrame, feature_cols: list, label_clf_col: str,
         y_reg.append(data[label_reg_col].iloc[i + seq_length])
     return np.array(X), np.array(y_clf), np.array(y_reg)
 
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, LSTM, Dense, Dropout, LayerNormalization, MultiHeadAttention, GlobalAveragePooling1D, Add, BatchNormalization
-
 def build_lstm_model(input_shape: tuple, model_type: str = 'classifier'):
     inputs = Input(shape=input_shape)
-    x = LSTM(100, return_sequences=True, unroll=True)(inputs)
+    x = LSTM(units=100, return_sequences=True, unroll=True)(inputs)
     x = Dropout(0.2)(x)
-    x = LSTM(50, return_sequences=False, unroll=True)(x)
+    x = LSTM(units=50, return_sequences=False, unroll=True)(x)
     x = Dropout(0.2)(x)
-    x = Dense(25)(x)
+    x = Dense(units=25)(x)
     x = BatchNormalization()(x)
     if model_type == 'classifier':
-        outputs = Dense(3, activation='softmax')(x)
+        outputs = Dense(units=3, activation='softmax')(x)
         model = Model(inputs, outputs)
-        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'], run_eagerly=True)
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     else:
-        outputs = Dense(1, activation='linear')(x)
+        outputs = Dense(units=1, activation='linear')(x)
         model = Model(inputs, outputs)
-        model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'], run_eagerly=True)
+        model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
     return model
 
 def transformer_encoder_block(inputs, head_size, num_heads, ff_dim, dropout=0):
@@ -236,9 +218,9 @@ def transformer_encoder_block(inputs, head_size, num_heads, ff_dim, dropout=0):
     x = Dropout(dropout)(x)
     res = Add()([x, inputs])
     x = LayerNormalization(epsilon=1e-6)(res)
-    x = Dense(ff_dim, activation="relu")(x)
+    x = Dense(units=ff_dim, activation="relu")(x)
     x = Dropout(dropout)(x)
-    x = Dense(inputs.shape[-1])(x)
+    x = Dense(units=inputs.shape[-1])(x)
     return Add()([x, res])
 
 def build_transformer_model(input_shape, head_size, num_heads, ff_dim, num_layers, dropout=0, model_type='classifier'):
@@ -252,108 +234,93 @@ def build_transformer_model(input_shape, head_size, num_heads, ff_dim, num_layer
     if model_type == 'classifier':
         outputs = Dense(3, activation="softmax")(x)
         model = Model(inputs, outputs)
-        model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"], run_eagerly=True)
+        model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     else:
         outputs = Dense(1, activation="linear")(x)
         model = Model(inputs, outputs)
-        model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mae"], run_eagerly=True)
+        model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mae"])
     return model
 
-from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-
+# --- [KEEP] Giữ lại hàm train tối ưu từ v1.5 ---
 def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     print(f"--- Bắt đầu xử lý {symbol} [{interval}] ---")
     base_features = ['open', 'high', 'low', 'close', 'price']
     label_cols = ['label', 'reg_target']
     features_to_use = [c for c in df.columns if c not in base_features + label_cols]
-
     scaler = StandardScaler()
     df_scaled = df.copy()
     df_scaled[features_to_use] = scaler.fit_transform(df[features_to_use]).astype(np.float32)
-
     print("  -> (1/3) LightGBM...")
     try:
         X_lgbm, y_clf_lgbm, y_reg_lgbm = df[features_to_use], df['label'], df['reg_target']
-        X_train, X_test, y_train_clf, y_test_clf, y_train_reg, y_test_reg = train_test_split(
+        X_train_lgbm, X_test_lgbm, y_train_clf, y_test_clf, y_train_reg, y_test_reg = train_test_split(
             X_lgbm, y_clf_lgbm, y_reg_lgbm, test_size=0.15, shuffle=False)
-        clf_lgbm = lgb.LGBMClassifier(objective='multiclass', num_class=3, is_unbalance=True, n_estimators=1000, learning_rate=0.05, verbose=-1, n_jobs=-1)
-        clf_lgbm.fit(X_train, y_train_clf, eval_set=[(X_test, y_test_clf)], callbacks=[lgb.early_stopping(50, verbose=False)])
-        reg_lgbm = lgb.LGBMRegressor(objective='regression_l1', n_estimators=1000, learning_rate=0.05, verbose=-1, n_jobs=-1)
-        reg_lgbm.fit(X_train, y_train_reg, eval_set=[(X_test, y_test_reg)], callbacks=[lgb.early_stopping(50, verbose=False)])
+        # --- [FIX] Gỡ bỏ device='gpu' để sửa lỗi "No OpenCL device found" ---
+        clf_lgbm = lgb.LGBMClassifier(objective='multiclass', num_class=3, is_unbalance=True, n_estimators=1000,
+                                      learning_rate=0.05, verbose=-1, n_jobs=-1)
+        clf_lgbm.fit(X_train_lgbm, y_train_clf, eval_set=[(X_test_lgbm, y_test_clf)],
+                     callbacks=[lgb.early_stopping(50, verbose=False)])
+        reg_lgbm = lgb.LGBMRegressor(objective='regression_l1', n_estimators=1000,
+                                     learning_rate=0.05, verbose=-1, n_jobs=-1)
+        reg_lgbm.fit(X_train_lgbm, y_train_reg, eval_set=[(X_test_lgbm, y_test_reg)],
+                     callbacks=[lgb.early_stopping(50, verbose=False)])
         joblib.dump(clf_lgbm, os.path.join(DATA_DIR, f"model_{symbol}_lgbm_clf_{interval}.pkl"), compress=3)
         joblib.dump(reg_lgbm, os.path.join(DATA_DIR, f"model_{symbol}_lgbm_reg_{interval}.pkl"), compress=3)
         print("     ✅ LightGBM xong.")
     except Exception as e:
         print(f"     ❌ LGBM lỗi: {e}")
-
-    print("  -> Dựng dữ liệu chuỗi cho DL...")
+    print("  -> Dựng dữ liệu chuỗi và pipeline tf.data cho DL...")
     try:
         X_seq, y_clf_seq, y_reg_seq = create_sequences(df_scaled, features_to_use, 'label', 'reg_target', SEQUENCE_LENGTH)
         X_seq = X_seq.astype(np.float32)
-        y_clf_seq = to_categorical(y_clf_seq.astype(np.int32), num_classes=3).astype(np.float32)
+        y_clf_seq_cat = to_categorical(y_clf_seq.astype(np.int32), num_classes=3).astype(np.float32)
         y_reg_seq = y_reg_seq.astype(np.float32)
-        if len(X_seq) < 100:
-            raise ValueError(f"Không đủ chuỗi ({len(X_seq)}).")
+        if len(X_seq) < 100: raise ValueError(f"Không đủ chuỗi ({len(X_seq)}).")
+        val_size = int(len(X_seq) * 0.15)
+        train_size = len(X_seq) - val_size
+        ds_clf = tf.data.Dataset.from_tensor_slices((X_seq, y_clf_seq_cat))
+        train_ds_clf = ds_clf.take(train_size).cache().shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        val_ds_clf = ds_clf.skip(train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        ds_reg = tf.data.Dataset.from_tensor_slices((X_seq, y_reg_seq))
+        train_ds_reg = ds_reg.take(train_size).cache().shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        val_ds_reg = ds_reg.skip(train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
     except Exception as e:
-        print(f"     ❌ Tạo chuỗi lỗi: {e}. Bỏ qua DL.")
-        meta = {
-            "features": features_to_use,
-            "trained_at": datetime.now(timezone.utc).isoformat(),
-            "atr_factor_threshold": OFFS_MAP.get(interval, 0.75),
-            "future_offset": OFFS_MAP.get(interval, 4),
-            "sequence_length": SEQUENCE_LENGTH
-        }
+        print(f"     ❌ Tạo chuỗi/pipeline lỗi: {e}. Bỏ qua DL.")
+        meta = {"features": features_to_use, "trained_at": datetime.now(timezone.utc).isoformat(), "atr_factor_threshold": LABEL_MAP.get(interval, 0.75), "future_offset": OFFS_MAP.get(interval, 4), "sequence_length": SEQUENCE_LENGTH}
         joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
-        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f:
-            json.dump(meta, f, indent=2)
+        with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f: json.dump(meta, f, indent=2)
         return
-
     input_shape = (X_seq.shape[1], X_seq.shape[2])
-
     print("  -> (2/3) LSTM...")
     try:
         clf_lstm = build_lstm_model(input_shape, model_type='classifier')
+        clf_lstm.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)], verbose=VERBOSE)
+        clf_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.h5"))
         reg_lstm = build_lstm_model(input_shape, model_type='regressor')
-        clf_path = os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.h5")
-        reg_path = os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.h5")
-        clf_callbacks = [EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True), ModelCheckpoint(filepath=clf_path, save_best_only=True, monitor='val_accuracy', mode='max')]
-        reg_callbacks = [EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True), ModelCheckpoint(filepath=reg_path, save_best_only=True, monitor='val_loss', mode='min')]
-        clf_lstm.fit(X_seq, y_clf_seq, epochs=50, batch_size=64, validation_split=0.15, callbacks=clf_callbacks, verbose=VERBOSE)
-        reg_lstm.fit(X_seq, y_reg_seq, epochs=50, batch_size=64, validation_split=0.15, callbacks=reg_callbacks, verbose=VERBOSE)
+        reg_lstm.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)], verbose=VERBOSE)
+        reg_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.h5"))
         print("     ✅ LSTM xong.")
     except Exception as e:
         print(f"     ❌ LSTM lỗi: {e}")
-
     print("  -> (3/3) Transformer...")
     try:
         clf_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='classifier')
+        clf_trans.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)], verbose=VERBOSE)
+        clf_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.h5"))
         reg_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='regressor')
-        clf_path = os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.h5")
-        reg_path = os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.h5")
-        clf_callbacks = [EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True), ModelCheckpoint(filepath=clf_path, save_best_only=True, monitor='val_accuracy', mode='max')]
-        reg_callbacks = [EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True), ModelCheckpoint(filepath=reg_path, save_best_only=True, monitor='val_loss', mode='min')]
-        clf_trans.fit(X_seq, y_clf_seq, epochs=50, batch_size=64, validation_split=0.15, callbacks=clf_callbacks, verbose=VERBOSE)
-        reg_trans.fit(X_seq, y_reg_seq, epochs=50, batch_size=64, validation_split=0.15, callbacks=reg_callbacks, verbose=VERBOSE)
+        reg_trans.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)], verbose=VERBOSE)
+        reg_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.h5"))
         print("     ✅ Transformer xong.")
     except Exception as e:
         print(f"     ❌ Transformer lỗi: {e}")
-
-    meta = {
-        "features": features_to_use,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "atr_factor_threshold": LABEL_MAP.get(interval, 0.75),
-        "future_offset": OFFS_MAP.get(interval, 4),
-        "sequence_length": SEQUENCE_LENGTH
-    }
+    meta = {"features": features_to_use, "trained_at": datetime.now(timezone.utc).isoformat(), "atr_factor_threshold": LABEL_MAP.get(interval, 0.75), "future_offset": OFFS_MAP.get(interval, 4), "sequence_length": SEQUENCE_LENGTH}
     joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
-    with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f:
-        json.dump(meta, f, indent=2)
+    with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f: json.dump(meta, f, indent=2)
     counts = pd.Series(df['label']).value_counts()
     print(f"--- ✅ Xong {symbol} [{interval}] | Tổng: {len(df)} (S:{counts.get(0,0)}, H:{counts.get(1,0)}, B:{counts.get(2,0)}) ---\n")
 
-# ---------------- Main ----------------
 if __name__ == "__main__":
+    print("--- BẮT ĐẦU QUÁ TRÌNH HUẤN LUYỆN ---")
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
         try:
@@ -361,15 +328,13 @@ if __name__ == "__main__":
                 tf.config.experimental.set_memory_growth(gpu, True)
             print(f"✅ GPU(s) phát hiện: {len(gpus)} → memory_growth=ON")
         except RuntimeError as e:
-            print(f"[WARN] set_memory_growth: {e}")
+            print(f"[WARN] Lỗi set_memory_growth: {e}")
     else:
-        print("⚠️ Không phát hiện GPU. Sẽ chạy CPU (chậm).")
-
+        print("⚠️ Không phát hiện GPU. Sẽ chạy trên CPU (rất chậm).")
     intervals_to_train = [iv.strip() for iv in INTERVALS if iv.strip()]
     if len(sys.argv) > 1:
         intervals_to_train = [iv.strip() for iv in sys.argv[1].split(',') if iv.strip()]
-        print(f"🚀 Huấn luyện theo CLI intervals: {intervals_to_train}")
-
+        print(f"🚀 Huấn luyện theo tham số CLI intervals: {intervals_to_train}")
     for sym in SYMBOLS:
         for iv in intervals_to_train:
             hist_len   = HIST_MAP.get(iv, 3000)
@@ -377,22 +342,21 @@ if __name__ == "__main__":
             atr_factor = LABEL_MAP.get(iv, 0.75)
             step_size  = STEP_MAP.get(iv, 1000)
             min_rows   = MIN_MAP.get(iv, 500)
-            print(f"\n🔄 Dựng dữ liệu {sym} [{iv}]...")
+            print(f"\n🔄 Dựng dữ liệu cho {sym} [{iv}]...")
             try:
                 df_raw = get_full_price_history(sym, iv, hist_len + fut_off + SEQUENCE_LENGTH, step_size)
                 if len(df_raw) < min_rows:
-                    print(f"❌ Bỏ {sym} [{iv}] – chỉ có {len(df_raw)} nến (< {min_rows}).")
+                    print(f"❌ Bỏ qua {sym} [{iv}] – chỉ có {len(df_raw)} nến (< {min_rows}).")
                     continue
                 df_features = add_features(df_raw)
                 df_dataset  = create_labels_and_targets(df_features, fut_off, atr_factor)
                 if len(df_dataset) < (min_rows // 2):
-                    print(f"⚠️ Bỏ {sym} [{iv}] – mẫu hợp lệ sau nhãn quá ít: {len(df_dataset)}.")
+                    print(f"⚠️ Bỏ qua {sym} [{iv}] – mẫu hợp lệ sau khi tạo nhãn quá ít: {len(df_dataset)}.")
                     continue
                 train_and_save_all_models(sym, iv, df_dataset)
             except Exception as e:
-                print(f"[CRITICAL] Lỗi xử lý {sym} [{iv}]: {e}")
-                import traceback; print(traceback.format_exc())
-
-    print("\n🎯 TOÀN BỘ QUÁ TRÌNH HUẤN LUYỆN HOÀN TẤT.")
+                print(f"[CRITICAL] Lỗi nghiêm trọng khi xử lý {sym} [{iv}]: {e}")
+                import traceback
+                print(traceback.format_exc())
+    print("\n🎯 TOÀN BỘ QUÁ TRÌNH HUẤN LUYỆN ĐÃ HOÀN TẤT.")
     print("Có thể nén thư mục 'data' để deploy.")
-# =================== END trainer.py ===================

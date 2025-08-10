@@ -7,15 +7,22 @@ __pycache__/
 venv/
 .env
 indicator_cache
+
 # === General Cache & State Files ===
 *.log
 *.json
 *.sqlite3
 *.db
+# <<< BỔ SUNG MỚI: Bỏ qua các file nén model
+*.tar.gz
+*.zip
+*.rar
 
 # === Output, Logs, and Generated Files ===
 output/
 log/
+# <<< BỔ SUNG MỚI: Bỏ qua thư mục model đã train
+/data/
 ai_logs/
 advisor_log/
 trade/tradelog/
@@ -25,6 +32,7 @@ ricenews/__pycache__/
 advisor_state.json
 ml_state.json
 livetrade/data
+
 # === Cooldown & Temp Cache ===
 cooldown_tracker.json
 cooldown_tracker_ml.json
