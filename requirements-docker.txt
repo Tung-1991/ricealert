@@ -1,0 +1,8 @@
+pandas
+numpy
+lightgbm
+ta
+scikit-learn
+joblib
+python-dotenv
+requests
