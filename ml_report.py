@@ -1,18 +1,11 @@
-(venv) root@ricealert:~/ricealert$cat ml_report.py
 # /root/ricealert/ml_report.py
-# PHIÊN BẢN ULTIMATE (ĐÃ SỬA LỖI): "Hội Đồng Chuyên Gia AI"
+# PHIÊN BẢN ULTIMATE (KERAS 3 COMPATIBLE): "Hội Đồng Chuyên Gia AI"
 # Tác giả: Đối tác lập trình & [Tên của bạn]
 #
-# CHANGELOG (Bản sửa lỗi):
-# - SỬA LỖI TẢI MODEL: Viết lại hoàn toàn hàm `load_all_models`. Giờ đây nó sẽ tải
-#   từng loại model (LGBM, LSTM, Transformer) một cách độc lập. Nếu một loại model
-#   bị thiếu file, nó sẽ bỏ qua loại đó nhưng vẫn tiếp tục tải các loại khác,
-#   đảm bảo hệ thống không bị dừng lại một cách vô lý.
-# - TÍNH ĐỘC LẬP: Sao chép trực tiếp các hàm `add_features` và `create_sequences`
-#   vào file này và xóa bỏ dòng `from trainer import ...`. Điều này làm cho
-#   ml_report.py trở nên hoàn toàn độc lập, tránh các lỗi tiềm ẩn liên quan đến import.
-# - CẢI THIỆN LOG: Thêm các dòng print chi tiết hơn để bạn biết chính xác model nào
-#   được tải thành công hoặc bị bỏ qua.
+# CHANGELOG (Keras 3):
+# - TƯƠNG THÍCH KERAS 3: Thay đổi import `load_model` từ `keras.models` thay vì `tensorflow.keras`.
+# - CẬP NHẬT ĐỊNH DẠNG MODEL: Cập nhật logic để tìm và tải các model có định dạng mới là `.keras` thay vì `.h5`.
+# - GIỮ NGUYÊN: Tính độc lập, khả năng chịu lỗi và toàn bộ logic báo cáo của các phiên bản trước.
 
 import os
 import sys
@@ -35,10 +28,11 @@ warnings.filterwarnings("ignore", category=UserWarning)
 import tensorflow as tf
 tf.get_logger().setLevel("ERROR")
 import lightgbm as lgb
-from tensorflow.keras.models import load_model
+# THAY ĐỔI 1: Import load_model từ gói Keras 3 độc lập
+from keras.models import load_model
 
 # ==============================================================================
-# ⚙️ CẤU HÌNH & HẰNG SỐ
+# ⚙️ CẤU HÌNH & HẰNG SỐ (GIỮ NGUYÊN)
 # ==============================================================================
 load_dotenv()
 
@@ -58,7 +52,7 @@ LOG_DIR = os.path.join(BASE_DIR, "ai_logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # ==============================================================================
-# (MỚI) CÁC HÀM HELPER ĐƯỢC SAO CHÉP VÀO ĐỂ ĐẢM BẢO TÍNH ĐỘC LẬP
+# CÁC HÀM HELPER ĐỘC LẬP (GIỮ NGUYÊN)
 # ==============================================================================
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -91,7 +85,7 @@ def create_sequences(data: pd.DataFrame, feature_cols: list, seq_length: int):
     return np.array(X)
 
 # ==============================================================================
-# 📚 LỚP QUẢN LÝ "HỘI ĐỒNG CHUYÊN GIA AI" (ĐÃ SỬA LỖI)
+# LỚP QUẢN LÝ "HỘI ĐỒNG CHUYÊN GIA AI"
 # ==============================================================================
 
 class AIEnsemble:
@@ -103,8 +97,8 @@ class AIEnsemble:
         self.sequence_length = 0
 
     def load_all_models(self, symbols: List[str], intervals: List[str]):
-        """(SỬA LỖI) Tải từng model một cách độc lập để tăng tính kiên cường."""
-        print("🧠 Đang tải 'Hội đồng Chuyên gia AI' vào bộ nhớ...")
+        """Tải từng model một cách độc lập, tìm kiếm định dạng .keras cho model deep learning."""
+        print("🧠 Đang tải 'Hội đồng Chuyên gia AI' (Keras 3 Mode) vào bộ nhớ...")
         loaded_count = 0
         total_pairs = 0
         for sym in symbols:
@@ -127,24 +121,26 @@ class AIEnsemble:
                     continue
 
                 model_loaded_for_pair = False
-                # LightGBM
+                # LightGBM (không thay đổi)
                 try:
                     self.models[key]['lgbm_clf'] = joblib.load(os.path.join(self.data_dir, f"model_{sym}_lgbm_clf_{iv}.pkl"))
                     self.models[key]['lgbm_reg'] = joblib.load(os.path.join(self.data_dir, f"model_{sym}_lgbm_reg_{iv}.pkl"))
                     model_loaded_for_pair = True
                 except FileNotFoundError: pass
 
+                # THAY ĐỔI 2: Tìm file .keras thay vì .h5
                 # LSTM
                 try:
-                    self.models[key]['lstm_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_clf_{iv}.h5"), compile=False)
-                    self.models[key]['lstm_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_reg_{iv}.h5"), compile=False)
+                    self.models[key]['lstm_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_clf_{iv}.keras"), compile=False)
+                    self.models[key]['lstm_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_reg_{iv}.keras"), compile=False)
                     model_loaded_for_pair = True
                 except (FileNotFoundError, IOError): pass
 
+                # THAY ĐỔI 2: Tìm file .keras thay vì .h5
                 # Transformer
                 try:
-                    self.models[key]['transformer_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_clf_{iv}.h5"), compile=False)
-                    self.models[key]['transformer_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_reg_{iv}.h5"), compile=False)
+                    self.models[key]['transformer_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_clf_{iv}.keras"), compile=False)
+                    self.models[key]['transformer_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_reg_{iv}.keras"), compile=False)
                     model_loaded_for_pair = True
                 except (FileNotFoundError, IOError): pass
 
@@ -157,6 +153,7 @@ class AIEnsemble:
 
         print(f"✅ Đã tải thành công model cho {loaded_count}/{total_pairs} cặp coin/khung giờ.")
 
+    # TOÀN BỘ CÁC HÀM LOGIC BÊN DƯỚI ĐƯỢC GIỮ NGUYÊN 100%
     def predict(self, symbol: str, interval: str, df: pd.DataFrame) -> Dict[str, Any]:
         key = f"{symbol}_{interval}"
         if key not in self.models or not self.models[key]:
@@ -251,7 +248,7 @@ class AIEnsemble:
         return {"level": "AVOID", "sub_level": sub}
 
 # ==============================================================================
-# 🚀 VÒNG LẶP CHÍNH & BÁO CÁO (Tương tự phiên bản trước)
+# VÒNG LẶP CHÍNH & BÁO CÁO (GIỮ NGUYÊN)
 # ==============================================================================
 
 def get_price_data_for_prediction(symbol: str, interval: str, limit: int) -> pd.DataFrame:
@@ -321,7 +318,7 @@ def send_discord_message(content: str):
         except Exception as e: print(f"[ERROR] Lỗi gửi Discord: {e}")
 
 if __name__ == "__main__":
-    print("--- Bắt đầu chu trình ML Report (Ultimate Edition - Fixed) ---")
+    print("--- Bắt đầu chu trình ML Report (Keras 3 Edition) ---")
     ensemble = AIEnsemble(DATA_DIR)
     ensemble.load_all_models(SYMBOLS, INTERVALS)
     if not any(ensemble.models.values()):
