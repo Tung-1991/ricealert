@@ -1,0 +1,10 @@
+.git
+.gitignore
+.dockerignore
+__pycache__/
+venv/
+data/
+ai_logs/
+log/
+livetrade/
+backtest/
