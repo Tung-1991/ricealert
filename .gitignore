@@ -1,4 +1,5 @@
 # === Python & Virtual Env ===
+rice_news_env/*
 __pycache__/
 *.py[cod]
 *.pyo

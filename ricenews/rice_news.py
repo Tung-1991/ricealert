@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # rice_news.py
-# Version: 5.4 (Intelligent Cooldown Logic)
-# Description: This version implements the "Wise Editor" logic. It processes all
-#              new news items first, then decides whether to send a digest based
-#              on the cooldown of the highest-level news item. This prevents
-#              important news from being missed while preserving the exact
-#              same rich output format of version 5.3.
+# Version: 6.0 (Scoring Engine)
+# Description: Nâng cấp hoàn toàn logic phân loại tin tức. Thay vì chỉ dựa vào
+#              từ khóa đầu tiên tìm thấy, phiên bản này sử dụng một hệ thống
+#              chấm điểm (scoring). Mỗi từ khóa có một trọng số điểm dương (tích cực)
+#              hoặc âm (tiêu cực). Tổng điểm của một tin tức sẽ quyết định
+#              mức độ quan trọng (Level) của nó, giúp đánh giá chính xác hơn.
+#              Output JSON giờ sẽ có thêm trường `news_score`.
 
 import os
 import json
@@ -23,7 +24,7 @@ from collections import defaultdict, Counter
 from market_context import get_market_context_data, get_market_context
 
 # ==============================================================================
-# CONFIG & SETUP (Không thay đổi)
+# CONFIG & SETUP (CÓ THAY ĐỔI)
 # ==============================================================================
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(dotenv_path=dotenv_path)
@@ -36,23 +37,44 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_NEWS_WEBHOOK")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 WATCHED_COINS = set([s.replace("USDT", "").lower() for s in os.getenv("SYMBOLS", "").split(",")])
-WATCHED_COINS.update(["btc", "eth"])
+WATCHED_COINS.update(["btc", "eth", "xrp", "sol", "bnb"])
 
 LEVEL_COOLDOWN_MINUTES = {
-    "CRITICAL": 30, "WARNING": 60, "ALERT": 120,
-    "WATCHLIST": 240, "INFO": 480
+    "CRITICAL": 15, "WARNING": 45, "ALERT": 90,
+    "WATCHLIST": 180, "INFO": 360
 }
 SUMMARY_COOLDOWN_SECONDS = 6 * 60 * 60
 
-KEYWORDS = {
-    "CRITICAL": ["will list", "etf approval", "halving", "fomc", "interest rate", "cpi", "war", "approved", "regulatory approval"],
-    "WARNING": ["delist", "unlock", "hack", "exploit", "sec", "lawsuit", "regulation", "maintenance", "downtime", "outage", "bị điều tra", "kiện"],
-    "ALERT": ["upgrade", "partnership", "margin", "futures", "mainnet", "testnet", "available on", "will add"],
-    "WATCHLIST": ["airdrop", "voting", "ama", "token burn", "governance"]
+# *** NÂNG CẤP LỚN 1: HỆ THỐNG ĐIỂM CHO TỪ KHÓA ***
+# Điểm dương = Tích cực, Điểm âm = Tiêu cực
+# Độ lớn của điểm thể hiện mức độ tác động
+KEYWORD_SCORES = {
+    # Critical (Rất quan trọng)
+    "etf approval": 10, "etf approved": 10, "regulatory approval": 10, "will list": 8, "listing": 7,
+    "halving": 8, "fomc": 7, "interest rate": 7, "cpi": 7, "war": -9, "sec sues": -9, "sec charges": -9,
+    "hack": -10, "exploit": -10, "lawsuit": -8, "delist": -8, "bị điều tra": -9, "kiện": -8, "downtime": -7, "outage": -7,
+    "unlock": -6,
+
+    # Alert (Quan trọng)
+    "partnership": 5, "mainnet": 6, "upgrade": 5, "launch": 5, "adoption": 5,
+    "margin": 4, "futures": 4, "available on": 4, "will add": 4,
+    "maintenance": -5, "regulation": -6,
+
+    # Watchlist (Đáng chú ý)
+    "testnet": 3, "airdrop": 3, "voting": 2, "ama": 1, "token burn": 4, "governance": 2, "tvl hits record": 5,
+
+    # Modifiers (Từ bổ nghĩa - tăng/giảm điểm)
+    "record": 2, "huge": 2, "massive": 2, "significant": 2,
+    "major": 2, "minor": -1, "delay": -3, "vulnerability": -7
 }
-POSITIVE_KEYWORDS = ["etf", "niêm yết", "listing", "adoption", "partnership", "approved", "upgrade", "launch", "mainnet", "burn", "available on", "will add"]
-NEGATIVE_KEYWORDS = ["kiện", "hacker", "scam", "bị điều tra", "tether", "sec sues", "sec charges", "hack", "exploit", "lawsuit", "delist", "downtime", "outage"]
-MACRO_KEYWORDS = ["fomc", "interest rate", "cpi", "inflation", "sec", "lawsuit", "regulation", "fed", "market", "imf", "war"]
+
+# *** NÂNG CẤP LỚN 2: NGƯỠNG ĐIỂM ĐỂ PHÂN LOẠI ***
+SCORE_THRESHOLDS = {
+    "CRITICAL": 8,
+    "WARNING": 5,  # Ngưỡng cho tin tiêu cực (điểm < -5) sẽ được xử lý riêng
+    "ALERT": 4,
+    "WATCHLIST": 2
+}
 
 RSS_SOURCES = {"CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss", "Cointelegraph": "https://cointelegraph.com/rss"}
 
@@ -75,7 +97,7 @@ def should_send_summary(last_summary_ts: float) -> bool:
     return False
 
 # ==============================================================================
-# CORE ANALYSIS (Không thay đổi)
+# CORE ANALYSIS (NÂNG CẤP HOÀN TOÀN)
 # ==============================================================================
 def analyze_market_context_trend(mc: dict) -> str:
     if not mc: return "NEUTRAL"
@@ -91,47 +113,70 @@ def analyze_market_context_trend(mc: dict) -> str:
     if down_score > up_score: return "DOWNTREND"
     return "NEUTRAL"
 
-def classify_news_level(title: str) -> str:
+# *** NÂNG CẤP LỚN 3: HÀM PHÂN TÍCH VÀ CHẤM ĐIỂM MỚI ***
+def classify_and_score_news(title: str) -> Tuple[str, int]:
+    """
+    Phân tích tiêu đề, tính tổng điểm dựa trên KEYWORD_SCORES và trả về
+    (level, score).
+    """
     title_l = title.lower()
-    for level, keys in KEYWORDS.items():
-        if any(re.search(rf"\b{re.escape(key)}\b", title_l) for key in keys):
-            return level
-    return "INFO"
+    score = 0
+    # Dùng set để tránh đếm 1 từ khóa nhiều lần
+    found_keywords = set()
+
+    for keyword, value in KEYWORD_SCORES.items():
+        # Tìm kiếm linh hoạt hơn, không cần ranh giới từ \b
+        if keyword in title_l and keyword not in found_keywords:
+            score += value
+            found_keywords.add(keyword)
+
+    # Quy tắc đặc biệt cho tin Cảnh báo (Warning)
+    if score <= -SCORE_THRESHOLDS["WARNING"]:
+        return "WARNING", score
+
+    # Phân loại dựa trên ngưỡng điểm
+    for level, threshold in SCORE_THRESHOLDS.items():
+        if score >= threshold:
+            return level, score
+
+    return "INFO", score
 
 def detect_category_tag(title: str) -> str:
     title_l = title.lower()
+    # Ưu tiên tìm coin trong danh sách theo dõi
     for coin in WATCHED_COINS:
+        # Tìm chính xác tên coin để tránh "link" khớp với "Chainlink"
         if re.search(rf"\b{coin}\b", title_l):
             return coin.upper()
-    match = re.search(r'\(([A-Z]{3,6})\)|\b([A-Z]{3,6}USDT)\b', title)
+
+    # Tìm các mã token viết hoa trong ngoặc đơn hoặc đứng riêng lẻ
+    match = re.search(r'\(([A-Z]{3,6})\)|\b([A-Z]{3,6})\b', title)
     if match:
-        return (match.group(1) or match.group(2)).replace("USDT", "")
-    if any(kw in title_l for kw in MACRO_KEYWORDS):
+        tag = (match.group(1) or match.group(2))
+        if tag and tag.lower() not in ['USDT', 'CEO', 'CTO', 'TVL']:
+             return tag.upper()
+
+    # Phân loại vĩ mô sau cùng
+    macro_keywords = ["fomc", "interest rate", "cpi", "inflation", "sec", "regulation", "fed", "market", "imf", "war"]
+    if any(kw in title_l for kw in macro_keywords):
         return "MACRO"
+
     return "GENERAL"
 
-def get_news_sentiment(title: str) -> str:
-    lowered = title.lower()
-    if any(keyword in lowered for keyword in POSITIVE_KEYWORDS): return "positive"
-    if any(keyword in lowered for keyword in NEGATIVE_KEYWORDS): return "negative"
-    return "neutral"
-
-def generate_specific_suggestion(news: Dict, market_trend: str) -> Tuple[str, str]:
-    title_l, level = news['title'].lower(), news['level']
-    sentiment = get_news_sentiment(title_l)
-    if level == "INFO":
+def generate_specific_suggestion(score: int, market_trend: str) -> Tuple[str, str]:
+    if score == 0:
         return "Tin tức tham khảo, tác động không đáng kể đến thị trường.", "⚪️ NEUTRAL"
-    if sentiment == "positive":
+
+    if score > 0: # Tin tích cực
         if market_trend == "UPTREND":
             return "Tác động TÍCH CỰC, củng cố xu hướng tăng. 👉 Ưu tiên các lệnh MUA.", "🚀 BULLISH"
         else:
             return "Tác động TÍCH CỰC, có thể tạo sóng hồi ngắn. 👉 Cân nhắc lướt sóng.", "📈 POSITIVE"
-    elif sentiment == "negative":
+    else: # Tin tiêu cực
         if market_trend == "DOWNTREND":
             return "Tác động TIÊU CỰC, củng cố xu hướng giảm. 👉 Ưu tiên các lệnh BÁN.", "📉 BEARISH"
         else:
             return "Tác động TIÊU CỰC, có thể gây điều chỉnh. 👉 Thận trọng, cân nhắc chốt lời.", "🚨 NEGATIVE"
-    return "Tác động TRUNG LẬP, ít ảnh hưởng tới giá. 👉 Quan sát thêm.", "⚪️ NEUTRAL"
 
 def generate_final_summary(alerts: List[Dict], market_trend: str) -> str:
     if not alerts:
@@ -145,6 +190,7 @@ def generate_final_summary(alerts: List[Dict], market_trend: str) -> str:
         base_summary = "Có nhiều tin tức CẬP NHẬT về các dự án."
     else:
         base_summary = "Thị trường có một vài tin tức mới."
+
     if market_trend == "UPTREND":
         context_summary = "Bối cảnh thị trường chung đang TÍCH CỰC, các tin tốt sẽ được khuếch đại."
     elif market_trend == "DOWNTREND":
@@ -181,7 +227,7 @@ def save_news_for_precious(news_item: Dict):
             json.dump(logs, f, indent=2, ensure_ascii=False)
 
 # ==============================================================================
-# DISCORD & SUMMARY FUNCTIONS (Không thay đổi)
+# DISCORD & SUMMARY FUNCTIONS (CÓ THAY ĐỔI NHỎ)
 # ==============================================================================
 def send_discord_alert(message: str):
     if not DISCORD_WEBHOOK:
@@ -230,17 +276,21 @@ def send_daily_summary():
     for level in level_order:
         if level in news_by_level:
             emoji = {"CRITICAL": "🔴", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "INFO": "ℹ️"}.get(level, "ℹ️")
+            # Thêm điểm số vào tiêu đề
             msg += f"\n{emoji} **{level}** ({len(news_by_level[level])} tin):\n"
-            for item in news_by_level[level][:5]:
-                msg += f"- [{item['source_name']}] {item['title']} [Link](<{item['url']}>)\n"
+            # Sắp xếp tin theo độ "hot" (giá trị tuyệt đối của điểm)
+            sorted_news = sorted(news_by_level[level], key=lambda x: abs(x.get('news_score', 0)), reverse=True)
+            for item in sorted_news[:5]:
+                score_str = f" (Điểm: {item.get('news_score', 0)})"
+                msg += f"- [{item['source_name']}] {item['title']}{score_str} [Link](<{item['url']}>)\n"
     send_discord_alert(msg)
     print("✅ Daily Summary sent.")
 
 # ==============================================================================
-# MAIN EXECUTION (NÂNG CẤP LOGIC COOLDOWN)
+# MAIN EXECUTION (CẬP NHẬT THEO LOGIC MỚI)
 # ==============================================================================
 def main():
-    print(f"--- Running News Cycle at {datetime.now(VN_TZ).strftime('%Y-%m-%d %H:%M:%S')} ---")
+    print(f"--- Running News Cycle v6.0 (Scoring Engine) at {datetime.now(VN_TZ).strftime('%Y-%m-%d %H:%M:%S')} ---")
 
     cooldown_data = load_json(COOLDOWN_TRACKER, {"last_sent_id": [], "last_sent_level": {}, "last_summary": 0})
     now_ts = time.time()
@@ -257,8 +307,6 @@ def main():
         context = get_market_context_data()
     market_trend = analyze_market_context_trend(context)
 
-    # <<< BƯỚC 1: THU THẬP TẤT CẢ TIN MỚI >>>
-    # (Phóng viên mang tất cả tin mới về bàn làm việc của Tổng biên tập)
     all_news = fetch_news_sources()
     new_alerts_this_cycle = []
     
@@ -266,24 +314,24 @@ def main():
         if news['id'] in cooldown_data.get("last_sent_id", []):
             continue
         
-        level = classify_news_level(news['title'])
-        suggestion, impact_tag = generate_specific_suggestion({"title": news['title'], "level": level}, market_trend)
+        level, score = classify_and_score_news(news['title'])
+        suggestion, impact_tag = generate_specific_suggestion(score, market_trend)
         
         alert_item = {
             "id": news['id'], "title": news['title'], "url": news['url'],
             "source_name": news['source_name'], "published_at": news.get('published_at', datetime.now().isoformat()),
-            "level": level, "category_tag": detect_category_tag(news['title']),
+            "level": level,
+            "news_score": score, # <-- THÊM ĐIỂM SỐ VÀO DỮ LIỆU
+            "category_tag": detect_category_tag(news['title']),
             "suggestion": suggestion, "impact_tag": impact_tag
         }
-        new_alerts_this_cycle.append(alert_item)
+        # Chỉ xử lý các tin có mức độ quan trọng từ WATCHLIST trở lên hoặc có điểm khác 0
+        if level != "INFO" or score != 0:
+            new_alerts_this_cycle.append(alert_item)
 
-    # <<< BƯỚC 2: XEM XÉT CÁC TIN MỚI >>>
-    # Nếu không có tin nào mới trên bàn, kết thúc chu trình
     if not new_alerts_this_cycle:
-        print("✅ No new alerts to send for this cycle.")
+        print("✅ No new significant alerts to send for this cycle.")
     else:
-        # <<< BƯỚC 3: KIỂM TRA COOLDOWN CỦA TIN "NÓNG" NHẤT >>>
-        # (Tổng biên tập nhìn vào tin nóng nhất và kiểm tra sổ)
         level_order = ["CRITICAL", "WARNING", "ALERT", "WATCHLIST", "INFO"]
         highest_level_in_news = "INFO"
         for level in level_order:
@@ -299,16 +347,11 @@ def main():
             print(f"⏳ Digest skipped. Highest level '{highest_level_in_news}' is on cooldown.")
             should_send_digest = False
 
-        # <<< BƯỚC 4: GỬI BẢN TIN NẾU CẦN >>>
-        # (Nếu được phép, Tổng biên tập cho in TẤT CẢ tin mới trên bàn)
         if should_send_digest:
             print(f"🔥 Found {len(new_alerts_this_cycle)} new alerts. Highest level: {highest_level_in_news}. Sending digest...")
             
-            # --- PHẦN XÂY DỰNG MESSAGE VÀ GỬI ĐI ---
-            # --- LOGIC NÀY ĐƯỢC GIỮ NGUYÊN 100% ĐỂ ĐẢM BẢO OUTPUT KHÔNG ĐỔI ---
             for alert in new_alerts_this_cycle:
-                json_to_save = {k: v for k, v in alert.items() if k != 'impact_tag'}
-                save_news_for_precious(json_to_save)
+                save_news_for_precious(alert)
             print(f"✅ Wrote/Updated {len(new_alerts_this_cycle)} items to signal file.")
 
             news_by_level = defaultdict(list)
@@ -322,19 +365,21 @@ def main():
                     emoji = {"CRITICAL": "🔴", "WARNING": "⚠️", "ALERT": "📣", "WATCHLIST": "👀", "INFO": "ℹ️"}.get(level, "ℹ️")
                     level_header = f"{emoji} **{level}**"
                     news_blocks.append(level_header)
-                    for alert in news_by_level[level]:
+                    # Sắp xếp tin trong mỗi level theo điểm số (cao -> thấp)
+                    sorted_alerts = sorted(news_by_level[level], key=lambda x: x['news_score'], reverse=True)
+                    for alert in sorted_alerts:
+                        score_str = f" (Điểm: {alert.get('news_score', 0)})"
                         part = (f"- **[{alert['source_name']}] {alert['title']}**\n"
-                                f"  *↳ Nhận định:* {alert['suggestion']} [Link](<{alert['url']}>)")
+                                f"  *↳ Nhận định:* {alert['suggestion']}{score_str} [Link](<{alert['url']}>)")
                         news_blocks.append(part)
+
             final_summary = generate_final_summary(new_alerts_this_cycle, market_trend)
             full_digest_message = (f"**🔥 BẢN TIN THỊ TRƯỜNG - {datetime.now(VN_TZ).strftime('%H:%M')} 🔥**\n\n"
                                    + context_block + "\n\n"
                                    + "\n".join(news_blocks)
                                    + f"\n\n{final_summary}")
             send_discord_alert(full_digest_message)
-            # --- KẾT THÚC PHẦN XÂY DỰNG MESSAGE ---
 
-            # Cập nhật trạng thái cooldown sau khi gửi thành công
             sent_ids_this_cycle = [alert['id'] for alert in new_alerts_this_cycle]
             cooldown_data["last_sent_id"] = (cooldown_data.get("last_sent_id", []) + sent_ids_this_cycle)[-50:]
             
@@ -342,12 +387,10 @@ def main():
             for level in updated_levels:
                 cooldown_data.get("last_sent_level", {})[level] = now_ts
     
-    # Lưu lại trạng thái cooldown (quan trọng cho cả lần chạy gửi tin và không gửi tin)
     with open(COOLDOWN_TRACKER, 'w') as f:
         json.dump(cooldown_data, f, indent=2)
 
     print("--- Cycle Finished ---")
-
 
 if __name__ == "__main__":
     main()
