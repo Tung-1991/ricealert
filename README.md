@@ -1,4 +1,3 @@
----
 
 # Hệ Thống Giao Dịch Thuật Toán RiceAlert
 *(hiện đã làm xong phần spot cho coin, đang dồn lực phát triển thêm tính năng đánh sóng ngắn, với đòn bảy với các coin top trên exness, đồng thời sẽ áp dụng các triết lý phía dưới cho phần phân tích CKVN (làm song song với các hệ thống))*
