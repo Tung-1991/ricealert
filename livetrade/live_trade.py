@@ -111,6 +111,7 @@ RISK_RULES_CONFIG = {
     "MAX_ACTIVE_TRADES": 12,                     # Số lượng lệnh được phép mở cùng một lúc
     "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.07, "4h": 0.10, "1d": 0.13}, # Mức cắt lỗ tối đa (%) cho phép theo từng khung thời gian
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.14, "4h": 0.20, "1d": 0.26}, # Mức chốt lời tối đa (%) để tránh kỳ vọng phi thực tế
+    "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.03, "4h": 0.04, "1d": 0.05}, # SL không bao giờ được gần hơn 2.5% giá vào lệnh
     "STALE_TRADE_RULES": {                       # Quy tắc xử lý các lệnh "ì", không chạy
         "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 1h sau 48h mà lãi < 25% so với kỳ vọng -> xem xét đóng
         "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 4h sau 72h mà lãi < 25% so với kỳ vọng -> xem xét đóng
@@ -128,8 +129,12 @@ CAPITAL_MANAGEMENT_CONFIG = {
 DCA_CONFIG = {
     "ENABLED": True,                             # Bật/Tắt tính năng DCA
     "MAX_DCA_ENTRIES": 2,                        # Số lần DCA tối đa cho một lệnh
-    "TRIGGER_DROP_PCT": -4.5,                    # Mức giá giảm tối thiểu (%) để kích hoạt DCA
-    "SCORE_MIN_THRESHOLD": 6.8,                  # Điểm tín hiệu tối thiểu để được phép DCA
+    "TRIGGER_DROP_PCT_BY_TIMEFRAME": {
+        "1h": -99.0,                             # Vô hiệu hóa DCA cho lệnh 1h
+        "4h": -3.8,                              # Kích hoạt DCA cho lệnh 4h khi giảm 3.8%
+        "1d": -4.5                               # Kích hoạt DCA cho lệnh 1d khi giảm 4.5%
+    },
+    "SCORE_MIN_THRESHOLD": 7.0,                  # Điểm tín hiệu tối thiểu để được phép DCA
     "CAPITAL_MULTIPLIER": 0.75,                  # Vốn DCA = Vốn lần vào lệnh trước * 0.75
     "DCA_COOLDOWN_HOURS": 8                      # Thời gian (giờ) chờ giữa các lần DCA
 }
@@ -205,7 +210,7 @@ TACTICS_LAB = {
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, # Trọng số cân bằng.
         "ENTRY_SCORE": 6.3,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
         "RR": 2.5,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
-        "ATR_SL_MULTIPLIER": 2.8,                        # SL rất rộng, bám theo trend dài.
+        "ATR_SL_MULTIPLIER": 3.0,                        # SL rất rộng, bám theo trend dài.
         "USE_TRAILING_SL": True,
         "TRAIL_ACTIVATION_RR": 1.5,
         "TRAIL_DISTANCE_RR": 1.2,                        # Kéo TSL xa hơn.
@@ -624,17 +629,31 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         if not symbol: continue
         if len(trade.get("dca_entries", [])) >= DCA_CONFIG["MAX_DCA_ENTRIES"]: continue
         if trade.get('last_dca_time') and (now - datetime.fromisoformat(trade.get('last_dca_time'))).total_seconds() / 3600 < DCA_CONFIG['DCA_COOLDOWN_HOURS']: continue
+        
         current_price = realtime_prices.get(symbol)
         if not current_price or current_price <= 0: continue
+        
         last_entry_price = trade['dca_entries'][-1]['price'] if trade.get('dca_entries') else trade['initial_entry']['price']
         price_drop_pct = ((current_price - last_entry_price) / last_entry_price) * 100
-        if price_drop_pct > DCA_CONFIG["TRIGGER_DROP_PCT"]: continue
+        
+        # --- LOGIC ĐỌC CẤU HÌNH DCA THEO KHUNG THỜI GIAN ---
+        dca_trigger_map = DCA_CONFIG.get("TRIGGER_DROP_PCT_BY_TIMEFRAME", {})
+        # Lấy ra ngưỡng DCA cho đúng khung thời gian của lệnh, mặc định là -4.5% nếu không có
+        dca_trigger_for_interval = dca_trigger_map.get(trade.get('interval'), -4.5)
+        
+        if price_drop_pct > dca_trigger_for_interval:
+            continue
+        # --- KẾT THÚC LOGIC MỚI ---
+        
         if get_advisor_decision(symbol, trade['interval'], indicator_results.get(symbol, {}).get(trade["interval"], {}), ADVISOR_BASE_CONFIG).get("final_score", 0.0) < DCA_CONFIG["SCORE_MIN_THRESHOLD"]: continue
+        
         dca_investment = (trade['dca_entries'][-1]['invested_usd'] if trade.get('dca_entries') else trade['initial_entry']['invested_usd']) * DCA_CONFIG["CAPITAL_MULTIPLIER"]
         if dca_investment < min_order_value:
             log_message(f"⚠️ Bỏ qua DCA cho {symbol}: Vốn DCA dự tính ({dca_investment:,.2f}$) quá nhỏ.", state=state)
             continue
+            
         if dca_investment <= 0 or dca_investment > available_usdt or (current_exposure_usd + dca_investment) > exposure_limit: continue
+        
         try:
             state.setdefault('temp_newly_closed_trades', []).append(f"🎯 Thử DCA cho {symbol}...")
             market_dca_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(dca_investment, 2))
@@ -665,6 +684,7 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
             state.setdefault('temp_newly_closed_trades', []).append(f"  => ✅ DCA thành công {symbol} với ${dca_cost:,.2f}")
         except Exception as e:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
+
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
@@ -756,7 +776,6 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
     if not found_executable_trade:
         log_message(f"  => Không có cơ hội nào trong top {len(top_opportunities)} đạt ngưỡng vào lệnh. Chờ phiên sau.", state=state)
 
-
 def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
     opportunity = state.get('pending_trade_opportunity')
     if not opportunity: return
@@ -770,9 +789,35 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state.pop('pending_trade_opportunity', None)
         return
     entry_price_estimate = realtime_price
+
+    # ==============================================================================
+    # === KHỐI LOGIC TÍNH TOÁN STOP LOSS ĐÃ ĐƯỢC NÂNG CẤP (v2.0) ===
+    # ==============================================================================
+    # 1. Tính khoảng cách rủi ro lý tưởng dựa trên ATR
     risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
-    max_sl_pct = RISK_RULES_CONFIG["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval, 0.1)
-    final_risk_dist = min(risk_dist_from_atr, entry_price_estimate * max_sl_pct)
+
+    # 2. Lấy ra dictionary cấu hình SÀN và TRẦN cho SL
+    min_risk_map = RISK_RULES_CONFIG.get("MIN_RISK_DIST_PERCENT_BY_TIMEFRAME", {})
+    max_risk_map = RISK_RULES_CONFIG.get("MAX_SL_PERCENT_BY_TIMEFRAME", {})
+
+    # 3. Lấy ra giá trị % SÀN và TRẦN cho đúng khung thời gian (interval) của lệnh này
+    min_risk_pct = min_risk_map.get(interval, 0.02)  # Mặc định 2% nếu không có cấu hình
+    max_risk_pct = max_risk_map.get(interval, 0.10) # Mặc định 10% nếu không có cấu hình
+
+    # 4. Tính khoảng cách SÀN và TRẦN dựa trên giá
+    min_risk_dist_from_price = entry_price_estimate * min_risk_pct
+    max_risk_dist_from_price = entry_price_estimate * max_risk_pct
+
+    # 5. Khoảng cách SL hiệu quả là số LỚN HƠN giữa (tính theo ATR) và (SÀN an toàn)
+    #    Điều này đảm bảo SL không bao giờ bị quá gần
+    effective_risk_dist = max(risk_dist_from_atr, min_risk_dist_from_price)
+
+    # 6. Cuối cùng, áp dụng TRẦN an toàn để khoảng cách không bao giờ bị quá rộng
+    final_risk_dist = min(effective_risk_dist, max_risk_dist_from_price)
+    # ==============================================================================
+    # === KẾT THÚC KHỐI LOGIC NÂNG CẤP ===
+    # ==============================================================================
+
     if final_risk_dist <= 0:
         log_error(f"Tính toán risk_dist cho {symbol} không hợp lệ. Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
@@ -838,6 +883,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         if retry_count >= GENERAL_CONFIG["PENDING_TRADE_RETRY_LIMIT"]:
             log_error(f"Không thể mở lệnh {symbol} sau {retry_count} lần thử. Hủy bỏ.", send_to_discord=True, force_discord=True, state=state)
             state.pop('pending_trade_opportunity', None)
+
 
 def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
     if not MTF_ANALYSIS_CONFIG["ENABLED"]:
