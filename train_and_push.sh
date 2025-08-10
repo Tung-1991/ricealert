@@ -1,89 +1,113 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ===== SCRIPT HUẤN LUYỆN & TRIỂN KHAI TỰ ĐỘNG v1.8 =====
-# TÍNH NĂNG MỚI: Xử lý lỗi khi triển khai (scp), không làm crash script.
+# ===== SCRIPT HUẤN LUYỆN & TRIỂN KHAI v2.1 =====
+# FIX: Thêm lại các cờ --ulimit đã bị thiếu.
 
 # --- CẤU HÌNH ---
 # Đường dẫn trên máy LOCAL của bạn
 PROJECT_DIR="/home/tungn/ricealert"
 IMAGE="rice-trainer:tf2502"
 LOG_DIR="$PROJECT_DIR/log"
-CONTAINER_NAME="rice-trainer-session" # Tên tạm thời, vì sẽ bị xóa
-ARCHIVE_NAME="data.tar.gz"
+DATA_DIR="$PROJECT_DIR/data"
+CONTAINER_NAME="rice-trainer-session"
 
 # Thông tin VPS để triển khai
 VPS_USER="root"
 VPS_IP="103.101.162.130"
-VPS_REMOTE_PATH="/root/ricealert/" # QUAN TRỌNG: Phải có dấu / ở cuối
+VPS_REMOTE_PATH="/root/ricealert/"
 
-# --- THỰC THI ---
+# Kịch bản cho cron job hàng tuần
+CRON_WEEKLY_INTERVALS="1h,4h"
+# Kịch bản cho cron job hàng tháng (train lại tất cả)
+CRON_MONTHLY_INTERVALS="1h,4h,1d"
 
-# Đảm bảo thư mục log tồn tại
-mkdir -p "$LOG_DIR"
+# --- HÀM THỰC THI ---
+run_training_process() {
+    local debug_env="$1"
+    local intervals="$2"
+    
+    echo "🧹 Dọn dẹp container '$CONTAINER_NAME' cũ (nếu có)..."
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-# Dọn dẹp container cũ (chỉ để phòng hờ)
-echo "🧹 Dọn dẹp container '$CONTAINER_NAME' cũ (nếu có)..."
-docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    LOGFILE="train_$(date +%F_%H-%M-%S).log"
+    FULL_LOGFILE_PATH="$LOG_DIR/$LOGFILE"
 
-# Lấy thông tin từ người dùng
-read -rp "Nhập các khung thời gian muốn train (vd: 1h,4h,1d): " INTERVALS_TO_TRAIN
-if [[ -z "$INTERVALS_TO_TRAIN" ]]; then
-  echo "Lỗi: Bạn chưa nhập khung thời gian. Thoát."
-  exit 1
-fi
+    echo "---"
+    echo "🐳 Bắt đầu quá trình huấn luyện cho intervals: $intervals | Chế độ DEBUG: $debug_env"
+    echo "   Log sẽ được lưu vào: $LOGFILE"
+    echo "---"
 
-echo "Chọn chế độ chạy (Cả 2 chế độ đều tự xóa container khi xong):"
-echo "  [1] RUN   (Log sạch, không Epoch)"
-echo "  [2] DEBUG (Log có Epoch, để theo dõi)"
-read -rp "Nhập lựa chọn [1-2]: " MODE_CHOICE
+    # <<< SỬA LỖI: THÊM LẠI 2 DÒNG --ulimit Ở ĐÂY >>>
+    docker run --rm --name "$CONTAINER_NAME" --gpus all \
+      --ulimit memlock=-1 --ulimit stack=67108864 \
+      -v "$PROJECT_DIR":/app --user "$(id -u)":"$(id -g)" \
+      -e DEBUG="$debug_env" \
+      "$IMAGE" \
+      bash -c "python -u trainer.py \"$intervals\"" 2>&1 | tee "$FULL_LOGFILE_PATH"
 
-# Thiết lập biến môi trường DEBUG dựa trên lựa chọn
-DEBUG_ENV=0
-if [[ "$MODE_CHOICE" == "2" ]]; then
-  DEBUG_ENV=1
-fi
+    echo "---"
+    echo "✅ Quá trình huấn luyện đã hoàn tất!"
 
-LOGFILE="train_$(date +%F_%H-%M-%S).log"
-FULL_LOGFILE_PATH="$LOG_DIR/$LOGFILE"
+    # --- Triển khai trực tiếp thư mục data ---
+    echo "🚀 Chuẩn bị triển khai trực tiếp thư mục 'data' lên VPS..."
+    
+    echo "   -> Bước 1/2: Đang xóa thư mục 'data' cũ trên VPS ($VPS_IP)..."
+    if ssh "$VPS_USER@$VPS_IP" "rm -rf \"${VPS_REMOTE_PATH}data\""; then
+        echo "      ✅ Xóa thành công."
+        
+        echo "   -> Bước 2/2: Đang copy thư mục 'data' mới lên VPS..."
+        if scp -r "$DATA_DIR" "$VPS_USER@$VPS_IP:$VPS_REMOTE_PATH"; then
+            echo "      ✅ Triển khai toàn bộ thư mục 'data' thành công!"
+            echo "👉 Quá trình hoàn tất. Dịch vụ trên VPS giờ đã có dữ liệu mới."
+        else
+            echo "      ⚠️ LỖI: Không thể copy thư mục 'data' mới lên VPS."
+            echo "      👉 Vui lòng kiểm tra kết nối và thử copy thủ công:"
+            echo "      scp -r \"$DATA_DIR\" \"$VPS_USER@$VPS_IP:$VPS_REMOTE_PATH\""
+        fi
+    else
+        echo "⚠️ LỖI: Không thể kết nối tới VPS để xóa thư mục 'data' cũ."
+        echo "👉 Triển khai đã bị hủy. Vui lòng kiểm tra và thực hiện thủ công."
+    fi
 
-# --- Bắt đầu quá trình huấn luyện ---
-echo "---"
-echo "🐳 Bắt đầu quá trình huấn luyện. Log sẽ được hiển thị và lưu vào: $LOGFILE"
-echo "⏳ Script sẽ tự động tiếp tục sau khi huấn luyện hoàn tất. Vui lòng không tắt terminal này."
-echo "---"
+    echo "🎉 TOÀN BỘ QUY TRÌNH KẾT THÚC. 🎉"
+}
 
-# Chạy container ở FOREGROUND, --rm để tự xóa, và dùng `tee` để xuất log
-docker run --rm --name "$CONTAINER_NAME" --gpus all \
-  --ulimit memlock=-1 --ulimit stack=67108864 \
-  -v "$PROJECT_DIR":/app --user "$(id -u)":"$(id -g)" \
-  -e DEBUG="$DEBUG_ENV" \
-  "$IMAGE" \
-  bash -c "python -u trainer.py \"$INTERVALS_TO_TRAIN\"" 2>&1 | tee "$FULL_LOGFILE_PATH"
 
-# --- Các lệnh sau đây CHỈ được thực thi KHI quá trình train ở trên đã hoàn tất ---
-echo "---"
-echo "✅ Quá trình huấn luyện đã hoàn tất!"
-
-# Nén thư mục data
-echo "📦 Đang nén thư mục 'data' thành '$ARCHIVE_NAME'..."
-cd "$PROJECT_DIR"
-tar -czf "$ARCHIVE_NAME" data
-echo "✅ Nén thành công! File '$ARCHIVE_NAME' đã được tạo."
-
-# Triển khai file nén lên VPS với cơ chế xử lý lỗi
-echo "🚀 Đang thử triển khai file '$ARCHIVE_NAME' lên VPS ($VPS_IP)..."
-
-if scp "$ARCHIVE_NAME" "$VPS_USER@$VPS_IP:$VPS_REMOTE_PATH"; then
-    # Khối lệnh này chạy nếu scp THÀNH CÔNG
-    echo "✅ Triển khai thành công!"
-    echo "👉 Hãy SSH vào VPS và giải nén bằng lệnh: cd $VPS_REMOTE_PATH && tar -xzvf $ARCHIVE_NAME"
+# --- ĐIỂM BẮT ĐẦU CỦA SCRIPT ---
+if [[ $# -gt 0 ]]; then
+    # CHẾ ĐỘ TỰ ĐỘNG (Dành cho crontab)
+    case "$1" in
+        weekly)
+            echo "Chạy kịch bản tự động HÀNG TUẦN..."
+            run_training_process 0 "$CRON_WEEKLY_INTERVALS"
+            ;;
+        monthly)
+            echo "Chạy kịch bản tự động HÀNG THÁNG..."
+            run_training_process 0 "$CRON_MONTHLY_INTERVALS"
+            ;;
+        *)
+            echo "Lỗi: Kịch bản '$1' không được nhận dạng."
+            exit 1
+            ;;
+    esac
 else
-    # Khối lệnh này chạy nếu scp THẤT BẠI
-    echo "⚠️ LỖI: Không thể tự động triển khai file lên VPS."
-    echo "Lý do có thể là: Sai mật khẩu, VPS không thể truy cập, hoặc lỗi mạng."
-    echo "👉 Vui lòng tự triển khai thủ công bằng cách chạy lệnh sau trên máy LOCAL:"
-    echo "scp \"$PROJECT_DIR/$ARCHIVE_NAME\" \"$VPS_USER@$VPS_IP:$VPS_REMOTE_PATH\""
-fi
+    # CHẾ ĐỘ TƯƠNG TÁC (Khi bạn chạy thủ công)
+    read -rp "Nhập các khung thời gian muốn train (vd: 1h,4h,1d): " INTERVALS_TO_TRAIN
+    if [[ -z "$INTERVALS_TO_TRAIN" ]]; then
+        echo "Lỗi: Bạn chưa nhập khung thời gian. Thoát."
+        exit 1
+    fi
 
-echo "🎉 TOÀN BỘ QUY TRÌNH KẾT THÚC. 🎉"
+    echo "Chọn chế độ chạy (Cả 2 chế độ đều tự xóa container khi xong):"
+    echo "  [1] RUN   (Log sạch, không Epoch)"
+    echo "  [2] DEBUG (Log có Epoch, để theo dõi)"
+    read -rp "Nhập lựa chọn [1-2]: " MODE_CHOICE
+
+    DEBUG_ENV=0
+    if [[ "$MODE_CHOICE" == "2" ]]; then
+        DEBUG_ENV=1
+    fi
+    
+    run_training_process "$DEBUG_ENV" "$INTERVALS_TO_TRAIN"
+fi
