@@ -1,345 +1,261 @@
-# /root/ricealert/ml_report.py
-# PHIÊN BẢN ULTIMATE (KERAS 3 COMPATIBLE): "Hội Đồng Chuyên Gia AI"
-# Tác giả: Đối tác lập trình & [Tên của bạn]
-#
-# CHANGELOG (Keras 3):
-# - TƯƠNG THÍCH KERAS 3: Thay đổi import `load_model` từ `keras.models` thay vì `tensorflow.keras`.
-# - CẬP NHẬT ĐỊNH DẠNG MODEL: Cập nhật logic để tìm và tải các model có định dạng mới là `.keras` thay vì `.h5`.
-# - GIỮ NGUYÊN: Tính độc lập, khả năng chịu lỗi và toàn bộ logic báo cáo của các phiên bản trước.
-
-import os
-import sys
-import json
-import warnings
-import requests
-import joblib
-import pandas as pd
-import numpy as np
-import ta
-from datetime import datetime, timezone, timedelta
+import os, sys, json, time, requests, joblib
+import pandas as pd, numpy as np, ta
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-from typing import Dict, List, Any
+from typing import List, Dict, Optional
+from itertools import groupby
 
-# --- Cấu hình để giảm log rác của TensorFlow ---
+# --- TF & Keras Imports (Yên lặng) ---
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
-
-# --- Tải các thư viện cần thiết ---
 import tensorflow as tf
 tf.get_logger().setLevel("ERROR")
-import lightgbm as lgb
-# THAY ĐỔI 1: Import load_model từ gói Keras 3 độc lập
 from keras.models import load_model
 
-# ==============================================================================
-# ⚙️ CẤU HÌNH & HẰNG SỐ (GIỮ NGUYÊN)
-# ==============================================================================
+# --------------------------------------------------
+# CONFIG & CONSTANTS
+# --------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
 load_dotenv()
 
-SYMBOLS = os.getenv("SYMBOLS", "ETHUSDT,BTCUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS", "ETHUSDT,BTCUSDT,SOLUSDT").split(",")
 INTERVALS = os.getenv("INTERVALS", "1h,4h,1d").split(",")
 WEBHOOK_URL = os.getenv("DISCORD_AI_WEBHOOK")
+ERROR_WEBHOOK = os.getenv("DISCORD_ERROR_WEBHOOK")
+ENSEMBLE_WEIGHTS = {"lightgbm": 0.25, "lstm": 0.35, "transformer": 0.40}
+SEQUENCE_LENGTH = 60 # Phải khớp với trainer.py
+API_LIMIT = SEQUENCE_LENGTH + 200
 
-ENSEMBLE_WEIGHTS = {
-    "lightgbm": 0.25,
-    "lstm": 0.35,
-    "transformer": 0.40
-}
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 LOG_DIR = os.path.join(BASE_DIR, "ai_logs")
+STATE_FILE = os.path.join(BASE_DIR, "ml_state.json")
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# ==============================================================================
-# CÁC HÀM HELPER ĐỘC LẬP (GIỮ NGUYÊN)
-# ==============================================================================
+COOLDOWN_BY_LEVEL = {"STRONG_BUY": 3600, "PANIC_SELL": 3600, "BUY": 7200, "SELL": 7200, "WEAK_BUY": 14400, "WEAK_SELL": 14400, "HOLD": 28800, "AVOID": 28800}
+LEVEL_MAP = {"STRONG_BUY": {"icon": "🚀", "name": "STRONG BUY"}, "BUY": {"icon": "✅", "name": "BUY"}, "WEAK_BUY": {"icon": "🟢", "name": "WEAK BUY"}, "HOLD": {"icon": "🔍", "name": "HOLD"}, "AVOID": {"icon": "🚧", "name": "AVOID"}, "WEAK_SELL": {"icon": "🔻", "name": "WEAK SELL"}, "SELL": {"icon": "❌", "name": "SELL"}, "PANIC_SELL": {"icon": "🆘", "name": "PANIC SELL"}}
+SUB_LEVEL_INFO = {"HOLD_BULLISH": {"icon": "📈", "name": "HOLD (Thiên Tăng)", "desc": "Thị trường tích lũy, thiên tăng."}, "HOLD_BEARISH": {"icon": "📉", "name": "HOLD (Thiên Giảm)", "desc": "Thị trường phân phối, thiên giảm."}, "HOLD_NEUTRAL": {"icon": "🤔", "name": "HOLD (Trung Lập)", "desc": "Biên động quá nhỏ."}, "AVOID_UNCERTAIN": {"icon": "❓", "name": "AVOID (Không Chắc)", "desc": "Tín hiệu nhiễu."}, "AVOID_CONFLICT": {"icon": "⚔️", "name": "AVOID (Xung Đột)", "desc": "Tín hiệu các model trái chiều."}, "DEFAULT": {"icon": "", "name": "", "desc": ""}}
+
+def get_sub_info(key: str) -> dict: return SUB_LEVEL_INFO.get(key, SUB_LEVEL_INFO["DEFAULT"])
+
+# --------------------------------------------------
+# DATA HELPERS
+# --------------------------------------------------
+def get_price_data(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+    try:
+        r = requests.get("https://api.binance.com/api/v3/klines", params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+        r.raise_for_status()
+        df = pd.DataFrame(r.json(), columns=["timestamp", "open", "high", "low", "close", "volume", "c1", "c2", "c3", "c4", "c5", "c6"]).iloc[:, :6]
+        df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+        return df.set_index("timestamp").apply(pd.to_numeric, errors="coerce")
+    except Exception as e: print(f"[ERROR] get_price_data {symbol}-{interval}: {e}"); return pd.DataFrame()
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    close, high, low, volume = out["close"], out["high"], out["low"], out["volume"]
-    out['price'] = close
-    out['vol_ma20'] = volume.rolling(window=20).mean()
-    bb = ta.volatility.BollingerBands(close, window=20)
-    out['bb_upper'], out['bb_lower'] = bb.bollinger_hband(), bb.bollinger_lband()
-    out['bb_width'] = (out['bb_upper'] - out['bb_lower']) / (bb.bollinger_mavg() + 1e-9)
-    macd = ta.trend.MACD(close)
-    out['macd'], out['macd_signal'], out["macd_diff"] = macd.macd(), macd.macd_signal(), macd.macd_diff()
-    for n in [14, 28, 50]:
-        out[f'rsi_{n}'] = ta.momentum.rsi(close, window=n)
-        out[f'ema_{n}'] = ta.trend.ema_indicator(close, window=n)
-        out[f'dist_ema_{n}'] = (close - out[f'ema_{n}']) / (out[f'ema_{n}'] + 1e-9)
-    out["adx"] = ta.trend.adx(high, low, close)
-    out['atr'] = ta.volatility.average_true_range(high, low, close, window=14)
-    out['cmf'] = ta.volume.chaikin_money_flow(high, low, close, volume, window=20)
+    out = df.copy(); close, high, low, volume = out["close"], out["high"], out["low"], out["volume"]
+    out['price'] = close; out['vol_ma20'] = volume.rolling(window=20).mean()
+    bb = ta.volatility.BollingerBands(close, window=20); out['bb_upper'], out['bb_lower'] = bb.bollinger_hband(), bb.bollinger_lband(); out['bb_width'] = (out['bb_upper'] - out['bb_lower']) / (bb.bollinger_mavg() + 1e-9)
+    macd = ta.trend.MACD(close); out['macd'], out['macd_signal'], out["macd_diff"] = macd.macd(), macd.macd_signal(), macd.macd_diff()
+    for n in [14, 28, 50]: out[f'rsi_{n}'] = ta.momentum.rsi(close, window=n); out[f'ema_{n}'] = ta.trend.ema_indicator(close, window=n); out[f'dist_ema_{n}'] = (close - out[f'ema_{n}']) / (out[f'ema_{n}'] + 1e-9)
+    out["adx"] = ta.trend.adx(high, low, close); out['atr'] = ta.volatility.average_true_range(high, low, close, window=14); out['cmf'] = ta.volume.chaikin_money_flow(high, low, close, volume, window=20)
     for n in [1, 2, 3, 5, 8, 13, 21]: out[f'pct_change_lag_{n}'] = close.pct_change(periods=n)
-    out.replace([np.inf, -np.inf], np.nan, inplace=True)
-    out.bfill(inplace=True); out.ffill(inplace=True); out.fillna(0, inplace=True)
+    out.replace([np.inf, -np.inf], np.nan, inplace=True); out.bfill(inplace=True); out.ffill(inplace=True); out.fillna(0, inplace=True)
     return out
 
-def create_sequences(data: pd.DataFrame, feature_cols: list, seq_length: int):
-    X = []
-    # Chỉ cần tạo X, không cần y cho việc dự đoán
-    for i in range(len(data) - seq_length + 1):
-        X.append(data[feature_cols].iloc[i:(i + seq_length)].values)
-    return np.array(X)
+def create_sequences(data: pd.DataFrame, feature_cols: list, seq_length: int) -> np.ndarray:
+    X = []; num_features = len(feature_cols)
+    values = data[feature_cols].values
+    for i in range(len(data) - seq_length + 1): X.append(values[i:(i + seq_length)])
+    return np.array(X).reshape(-1, seq_length, num_features)
 
-# ==============================================================================
-# LỚP QUẢN LÝ "HỘI ĐỒNG CHUYÊN GIA AI"
-# ==============================================================================
+# --------------------------------------------------
+# ENSEMBLE ANALYSIS
+# --------------------------------------------------
+class AIModelBundle:
+    def __init__(self, symbol: str, interval: str):
+        self.clf_lgbm, self.reg_lgbm, self.clf_lstm, self.reg_lstm, self.clf_trans, self.reg_trans = (None,) * 6
+        self.scaler, self.meta = None, None
+        try:
+            self.meta = json.load(open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json")))
+            self.scaler = joblib.load(os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
+            self.clf_lgbm = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_lgbm_clf_{interval}.pkl"))
+            self.reg_lgbm = joblib.load(os.path.join(DATA_DIR, f"model_{symbol}_lgbm_reg_{interval}.pkl"))
+            self.clf_lstm = load_model(os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.keras"), compile=False)
+            self.reg_lstm = load_model(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.keras"), compile=False)
+            self.clf_trans = load_model(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.keras"), compile=False)
+            self.reg_trans = load_model(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.keras"), compile=False)
+        except Exception: self.meta = None # Mark as invalid if any file is missing
 
-class AIEnsemble:
-    def __init__(self, data_dir: str):
-        self.data_dir = data_dir
-        self.models = {}
-        self.scalers = {}
-        self.metas = {}
-        self.sequence_length = 0
+    def is_valid(self): return self.meta is not None
 
-    def load_all_models(self, symbols: List[str], intervals: List[str]):
-        """Tải từng model một cách độc lập, tìm kiếm định dạng .keras cho model deep learning."""
-        print("🧠 Đang tải 'Hội đồng Chuyên gia AI' (Keras 3 Mode) vào bộ nhớ...")
-        loaded_count = 0
-        total_pairs = 0
-        for sym in symbols:
-            for iv in intervals:
-                total_pairs += 1
-                key = f"{sym}_{iv}"
-                self.models[key] = {}
+def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optional[Dict]:
+    df = get_price_data(symbol, interval, API_LIMIT)
+    if df.empty or len(df) < SEQUENCE_LENGTH + 50: return None
+    
+    features_df = add_features(df)
+    features_to_use = bundle.meta['features']
+    
+    opinions = {}
+    # LGBM Opinion
+    latest_row = features_df[features_to_use].iloc[[-1]]
+    lgbm_clf_prob = bundle.clf_lgbm.predict_proba(latest_row)[0]
+    lgbm_reg_pred = bundle.reg_lgbm.predict(latest_row)[0]
+    opinions['lightgbm'] = {"prob_sell": lgbm_clf_prob[0] * 100, "prob_buy": lgbm_clf_prob[2] * 100, "pct": lgbm_reg_pred}
 
-                meta_path = os.path.join(self.data_dir, f"meta_{sym}_{iv}.json")
-                scaler_path = os.path.join(self.data_dir, f"scaler_{sym}_{iv}.pkl")
+    # DL Models Opinion
+    scaled_df = features_df.copy(); scaled_df[features_to_use] = bundle.scaler.transform(features_df[features_to_use])
+    sequence = create_sequences(scaled_df, features_to_use, SEQUENCE_LENGTH)
+    if len(sequence) > 0:
+        seq_to_predict = sequence[[-1]]
+        lstm_clf_prob = bundle.clf_lstm.predict(seq_to_predict, verbose=0)[0]
+        lstm_reg_pred = bundle.reg_lstm.predict(seq_to_predict, verbose=0)[0][0]
+        opinions['lstm'] = {"prob_sell": lstm_clf_prob[0] * 100, "prob_buy": lstm_clf_prob[2] * 100, "pct": lstm_reg_pred}
 
-                try:
-                    with open(meta_path, 'r') as f:
-                        self.metas[key] = json.load(f)
-                    self.scalers[key] = joblib.load(scaler_path)
-                    if not self.sequence_length:
-                        self.sequence_length = self.metas[key].get('sequence_length', 60)
-                except FileNotFoundError:
-                    print(f"     - ⚠️ Không tìm thấy file nền tảng (meta/scaler) cho {key}. Bỏ qua.")
-                    continue
+        trans_clf_prob = bundle.clf_trans.predict(seq_to_predict, verbose=0)[0]
+        trans_reg_pred = bundle.reg_trans.predict(seq_to_predict, verbose=0)[0][0]
+        opinions['transformer'] = {"prob_sell": trans_clf_prob[0] * 100, "prob_buy": trans_clf_prob[2] * 100, "pct": trans_reg_pred}
 
-                model_loaded_for_pair = False
-                # LightGBM (không thay đổi)
-                try:
-                    self.models[key]['lgbm_clf'] = joblib.load(os.path.join(self.data_dir, f"model_{sym}_lgbm_clf_{iv}.pkl"))
-                    self.models[key]['lgbm_reg'] = joblib.load(os.path.join(self.data_dir, f"model_{sym}_lgbm_reg_{iv}.pkl"))
-                    model_loaded_for_pair = True
-                except FileNotFoundError: pass
+    if not opinions: return None
 
-                # THAY ĐỔI 2: Tìm file .keras thay vì .h5
-                # LSTM
-                try:
-                    self.models[key]['lstm_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_clf_{iv}.keras"), compile=False)
-                    self.models[key]['lstm_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_lstm_reg_{iv}.keras"), compile=False)
-                    model_loaded_for_pair = True
-                except (FileNotFoundError, IOError): pass
+    final_prob_buy, final_prob_sell, final_pct, total_weight = 0.0, 0.0, 0.0, sum(ENSEMBLE_WEIGHTS[k] for k in opinions)
+    if total_weight == 0: return None
+    for name, op in opinions.items():
+        weight = ENSEMBLE_WEIGHTS[name] / total_weight
+        final_prob_buy += op['prob_buy'] * weight; final_prob_sell += op['prob_sell'] * weight; final_pct += op['pct'] * weight
 
-                # THAY ĐỔI 2: Tìm file .keras thay vì .h5
-                # Transformer
-                try:
-                    self.models[key]['transformer_clf'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_clf_{iv}.keras"), compile=False)
-                    self.models[key]['transformer_reg'] = load_model(os.path.join(self.data_dir, f"model_{sym}_transformer_reg_{iv}.keras"), compile=False)
-                    model_loaded_for_pair = True
-                except (FileNotFoundError, IOError): pass
+    lv = classify_level(final_prob_buy, final_prob_sell, final_pct, interval)
+    if 'BUY' not in opinions['lightgbm'] and 'SELL' not in opinions['lightgbm'] and len(opinions) > 1: # Xung đột
+         if lv['level'] in ['BUY', 'SELL']: lv = {"level": "AVOID", "sub_level": "AVOID_CONFLICT"}
 
-                if model_loaded_for_pair:
-                    loaded_count += 1
-                    print(f"  -> ✅ Đã tải model cho {key}")
-                else:
-                    print(f"  -> ❌ Không có file model nào cho {key}")
+    price = features_df.iloc[-1]['close']
+    risk = {"STRONG_BUY":1/3,"BUY":1/2.5,"WEAK_BUY":1/2,"HOLD":1/1.5,"AVOID":1/1.5,"WEAK_SELL":1/2,"SELL":1/2.5,"PANIC_SELL":1/3}.get(lv['level'],1/1.5)
+    dir_ = 1 if final_pct >= 0 else -1
+    tp_pct = max(abs(final_pct), 0.5); sl_pct = tp_pct * risk
 
+    return {"symbol": symbol, "interval": interval, "prob_buy": round(final_prob_buy, 1), "prob_sell": round(final_prob_sell, 1), "pct": final_pct, "price": price, "tp": price * (1 + dir_ * tp_pct / 100), "sl": price * (1 - dir_ * sl_pct / 100), "level": lv['level'], "sub_level": lv['sub_level']}
 
-        print(f"✅ Đã tải thành công model cho {loaded_count}/{total_pairs} cặp coin/khung giờ.")
+def classify_level(pb: float, ps: float, pct: float, interval: str) -> Dict[str, str]:
+    if pb > 70 and pb > ps * 2: return {"level": "STRONG_BUY", "sub_level": "STRONG_BUY"}
+    if ps > 70 and ps > pb * 2: return {"level": "PANIC_SELL", "sub_level": "PANIC_SELL"}
+    if pb > 60 and pb > ps * 1.5: return {"level": "BUY", "sub_level": "BUY"}
+    if ps > 60 and ps > pb * 1.5: return {"level": "SELL", "sub_level": "SELL"}
+    if pb > 55: return {"level": "WEAK_BUY", "sub_level": "WEAK_BUY"}
+    if ps > 55: return {"level": "WEAK_SELL", "sub_level": "WEAK_SELL"}
+    dz = {"1h": 0.4, "4h": 0.8, "1d": 1.2}.get(interval, 0.8)
+    if abs(pct) < dz:
+        sub = "HOLD_NEUTRAL";
+        if pb > ps + 5: sub = "HOLD_BULLISH";
+        elif ps > pb + 5: sub = "HOLD_BEARISH"
+        return {"level": "HOLD", "sub_level": sub}
+    return {"level": "AVOID", "sub_level": "AVOID_UNCERTAIN"}
 
-    # TOÀN BỘ CÁC HÀM LOGIC BÊN DƯỚI ĐƯỢC GIỮ NGUYÊN 100%
-    def predict(self, symbol: str, interval: str, df: pd.DataFrame) -> Dict[str, Any]:
-        key = f"{symbol}_{interval}"
-        if key not in self.models or not self.models[key]:
-            return None
+# --------------------------------------------------
+# IO, FORMATTING & STATE
+# --------------------------------------------------
+def atomic_write_json(path: str, data: dict):
+    temp_path = path + ".tmp";
+    with open(temp_path, 'w') as f: json.dump(data, f, indent=2)
+    os.replace(temp_path, path)
 
-        meta = self.metas[key]
-        scaler = self.scalers[key]
-        features_to_use = meta['features']
-
-        df_features = add_features(df)
-        current_data = df_features.reindex(columns=features_to_use, fill_value=0)
-        current_data_scaled = scaler.transform(current_data)
-        current_data_scaled_df = pd.DataFrame(current_data_scaled, columns=features_to_use, index=current_data.index)
-
-        opinions = {}
-
-        # LightGBM
-        if 'lgbm_clf' in self.models[key]:
-            latest_features_lgbm = current_data.iloc[[-1]]
-            lgbm_clf_prob = self.models[key]['lgbm_clf'].predict_proba(latest_features_lgbm)[0]
-            lgbm_reg_pred = self.models[key]['lgbm_reg'].predict(latest_features_lgbm)[0]
-            opinions['lightgbm'] = self._format_prediction(lgbm_clf_prob, lgbm_reg_pred, meta, df_features.iloc[-1]['atr'])
-
-        # Dữ liệu chuỗi cho LSTM & Transformer
-        seq_to_predict = None
-        if 'lstm_clf' in self.models[key] or 'transformer_clf' in self.models[key]:
-            # Chỉ tạo chuỗi nếu cần
-            latest_sequence_scaled = create_sequences(current_data_scaled_df, features_to_use, self.sequence_length)
-            if len(latest_sequence_scaled) > 0:
-                seq_to_predict = latest_sequence_scaled[[-1]]
-
-        if seq_to_predict is not None:
-            # LSTM
-            if 'lstm_clf' in self.models[key]:
-                lstm_clf_prob = self.models[key]['lstm_clf'].predict(seq_to_predict, verbose=0)[0]
-                lstm_reg_pred = self.models[key]['lstm_reg'].predict(seq_to_predict, verbose=0)[0][0]
-                opinions['lstm'] = self._format_prediction(lstm_clf_prob, lstm_reg_pred, meta, df_features.iloc[-1]['atr'])
-            # Transformer
-            if 'transformer_clf' in self.models[key]:
-                trans_clf_prob = self.models[key]['transformer_clf'].predict(seq_to_predict, verbose=0)[0]
-                trans_reg_pred = self.models[key]['transformer_reg'].predict(seq_to_predict, verbose=0)[0][0]
-                opinions['transformer'] = self._format_prediction(trans_clf_prob, trans_reg_pred, meta, df_features.iloc[-1]['atr'])
-
-        if not opinions: return None
-
-        final_prob_buy, final_prob_sell, final_pct = 0.0, 0.0, 0.0
-        valid_opinions = {k: v for k, v in opinions.items() if v is not None}
-        total_weight = sum(ENSEMBLE_WEIGHTS[k] for k in valid_opinions)
-        if total_weight == 0: return None # Không có model nào hợp lệ
-
-        for name, opinion in valid_opinions.items():
-            weight = ENSEMBLE_WEIGHTS[name] / total_weight
-            final_prob_buy += opinion['prob_buy'] * weight
-            final_prob_sell += opinion['prob_sell'] * weight
-            final_pct += opinion['pct'] * weight
-
-        final_result = {
-            "symbol": symbol, "interval": interval,
-            "prob_buy": round(final_prob_buy, 2), "prob_sell": round(final_prob_sell, 2),
-            "pct": round(final_pct, 4), "price": df_features.iloc[-1]['price'],
-            "debug_info": {
-                "ensemble_method": "Weighted Average", "weights": ENSEMBLE_WEIGHTS,
-                "expert_opinions": opinions
-            }
-        }
-        final_result.update(self._classify_level(final_result))
-        return final_result
-
-    def _format_prediction(self, prob, reg_pred, meta, current_atr):
-        # prob[0] = sell, prob[1] = hold, prob[2] = buy
-        prob_sell = prob[0] * 100
-        prob_buy = prob[2] * 100
-        pct = (reg_pred * current_atr / meta.get('atr_factor_threshold', 0.75)) * 100
-        return {"prob_buy": prob_buy, "prob_sell": prob_sell, "pct": pct}
-
-    def _classify_level(self, result: Dict) -> Dict:
-        pb, ps, pct = result['prob_buy'], result['prob_sell'], result['pct']
-        if pb > 70 and pb > ps * 2: return {"level": "STRONG_BUY", "sub_level": "STRONG_BUY"}
-        if ps > 70 and ps > pb * 2: return {"level": "PANIC_SELL", "sub_level": "PANIC_SELL"}
-        if pb > 60 and pb > ps * 1.5: return {"level": "BUY", "sub_level": "BUY"}
-        if ps > 60 and ps > pb * 1.5: return {"level": "SELL", "sub_level": "SELL"}
-        if pb > 55: return {"level": "WEAK_BUY", "sub_level": "WEAK_BUY"}
-        if ps > 55: return {"level": "WEAK_SELL", "sub_level": "WEAK_SELL"}
-        dz = {"1h": 0.4, "4h": 0.8, "1d": 1.2}.get(result['interval'], 0.8)
-        if abs(pct) < dz:
-            sub = "HOLD_NEUTRAL"
-            if pb > ps + 5: sub = "HOLD_BULLISH"
-            elif ps > pb + 5: sub = "HOLD_BEARISH"
-            return {"level": "HOLD", "sub_level": sub}
-        sub = "AVOID_UNCERTAIN"
-        if pb > 35 and ps > 35: sub = "AVOID_CONFLICT"
-        return {"level": "AVOID", "sub_level": sub}
-
-# ==============================================================================
-# VÒNG LẶP CHÍNH & BÁO CÁO (GIỮ NGUYÊN)
-# ==============================================================================
-
-def get_price_data_for_prediction(symbol: str, interval: str, limit: int) -> pd.DataFrame:
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        if not isinstance(data, list) or not data: return pd.DataFrame()
-        df = pd.DataFrame(data, columns=["timestamp","open","high","low","close","volume","c1","c2","c3","c4","c5","c6"]).iloc[:, :6]
-        df.columns = ["timestamp","open","high","low","close","volume"]
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-        df.set_index("timestamp", inplace=True)
-        return df.astype(float)
-    except Exception as e:
-        print(f"[ERROR] Lỗi get_price_data cho {symbol} {interval}: {e}")
-        return pd.DataFrame()
-
-def atomic_write_json(filepath: str, data: Dict):
-    temp_filepath = filepath + ".tmp"
-    with open(temp_filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(temp_filepath, filepath)
-
-def format_discord_report(all_results: List[Dict]) -> str:
-    if not all_results: return "Không có dữ liệu AI để báo cáo."
-    results_by_symbol = {}
-    for res in all_results:
-        if res['symbol'] not in results_by_symbol:
-            results_by_symbol[res['symbol']] = []
-        results_by_symbol[res['symbol']].append(res)
-    buy_signals = sum(1 for r in all_results if "BUY" in r.get('level', ''))
-    sell_signals = sum(1 for r in all_results if "SELL" in r.get('level', ''))
-    market_sentiment = "TRUNG LẬP 😐"
-    if buy_signals > sell_signals * 1.5: market_sentiment = "LẠC QUAN 📈"
-    elif sell_signals > buy_signals * 1.5: market_sentiment = "BI QUAN 📉"
-    now_vn = datetime.now(timezone(timedelta(hours=7)))
-    header = (f"📊 **Tổng quan Thị trường AI - {now_vn.strftime('%H:%M (%d/%m/%Y)')}**\n"
-              f"Nhiệt kế thị trường: **{market_sentiment}**\n")
-    level_icons = {"STRONG_BUY": "🚀", "BUY": "✅", "WEAK_BUY": "🟢", "PANIC_SELL": "🆘", "SELL": "❌", "WEAK_SELL": "🔻", "HOLD_BULLISH": "📈", "HOLD_BEARISH": "📉", "HOLD_NEUTRAL": "🤔", "AVOID_CONFLICT": "⚔️", "AVOID_UNCERTAIN": "❓"}
-    chunks = []
-    for symbol, results in sorted(results_by_symbol.items()):
-        price = results[0].get('price', 0)
-        chunk_header = f"\n--- **{symbol}** | Giá: `{price:,.4f}` ---"
-        chunk_body = []
-        for res in sorted(results, key=lambda x: ['1h', '4h', '1d'].index(x['interval'])):
-            iv, sub_level, pct = res['interval'], res.get('sub_level', 'N/A'), res.get('pct', 0)
-            icon = level_icons.get(sub_level, "❔")
-            line1 = f"  • **[{iv}]** {icon} **{sub_level.replace('_', ' ')}** | Dự đoán: **{pct:+.2f}%**"
-            opinions = res.get('debug_info', {}).get('expert_opinions', {})
-            details = []
-            if 'lightgbm' in opinions: details.append(f"LGBM: {opinions['lightgbm']['pct']:.2f}%")
-            if 'lstm' in opinions: details.append(f"LSTM: {opinions['lstm']['pct']:.2f}%")
-            if 'transformer' in opinions: details.append(f"Tran: {opinions['transformer']['pct']:.2f}%")
-            line2 = f"    ```- {', '.join(details)}```" if details else ""
-            chunk_body.append(f"{line1}\n{line2}" if line2 else line1)
-        chunks.append(f"{chunk_header}\n" + "\n".join(chunk_body))
-    return header + "".join(chunks)
-
-def send_discord_message(content: str):
+def send_discord(payload: Dict):
     if not WEBHOOK_URL: return
-    max_len = 1900
-    for i in range(0, len(content), max_len):
-        chunk = content[i:i+max_len]
-        try: requests.post(WEBHOOK_URL, json={"content": chunk}, timeout=10)
-        except Exception as e: print(f"[ERROR] Lỗi gửi Discord: {e}")
+    try:
+        requests.post(WEBHOOK_URL, json=payload, timeout=15).raise_for_status()
+        time.sleep(1) # Rate limit
+    except Exception as e: print(f"[ERROR] Discord send failed: {e}")
+
+def load_state():
+    if not os.path.exists(STATE_FILE): return {}
+    try: return json.load(open(STATE_FILE))
+    except Exception: return {}
+
+def should_send_overview(state: dict) -> bool:
+    last = state.get("last_overview_timestamp", 0)
+    now_vn = datetime.now(ZoneInfo("Asia/Bangkok"))
+    for h in (8, 20):
+        t_vn = now_vn.replace(hour=h, minute=1, second=0, microsecond=0).timestamp()
+        if now_vn.timestamp() >= t_vn and last < t_vn: return True
+    return False
+
+def fmt_price(p): return f"{p:.8f}".rstrip('0').rstrip('.') if p < 1 else f"{p:.4f}".rstrip('0').rstrip('.')
+def fmt_pct(x): return f"{x:+.4f}%" if abs(x) < 0.01 and x != 0 else f"{x:+.2f}%"
+
+def instant_alert(res: Dict, old_lv: Optional[str], old_sub: Optional[str]):
+    from_str = "Tín hiệu mới"
+    if old_lv: from_str = f"Từ **{get_sub_info(old_sub)['name'] if old_sub and 'HOLD' in old_lv or 'AVOID' in old_lv else LEVEL_MAP.get(old_lv, {})['name']}** {get_sub_info(old_sub)['icon'] if old_sub and 'HOLD' in old_lv or 'AVOID' in old_lv else LEVEL_MAP.get(old_lv, {})['icon']}"
+    
+    si = get_sub_info(res['sub_level']); li = LEVEL_MAP.get(res['level'], {})
+    is_sub_level_alert = res['level'] in ["HOLD", "AVOID"]
+    to_str = f"chuyển sang **{si['name'] if is_sub_level_alert else li['name']}** {si['icon'] if is_sub_level_alert else li['icon']}"
+    
+    desc = si['desc'] if is_sub_level_alert else f"Một cơ hội giao dịch **{li['name']}** tiềm năng đã xuất hiện."
+    fields = [{"name": "Giá hiện tại", "value": f"`{fmt_price(res['price'])}`", "inline": True}, {"name": "Dự đoán thay đổi", "value": f"`{fmt_pct(res['pct'])}`", "inline": True}, {"name": "Xác suất Mua/Bán", "value": f"`{res['prob_buy']:.1f}% / {res['prob_sell']:.1f}%`", "inline": True}]
+    if not is_sub_level_alert: fields.extend([{"name": "Mục tiêu (TP)", "value": f"`{fmt_price(res['tp'])}`", "inline": True}, {"name": "Cắt lỗ (SL)", "value": f"`{fmt_price(res['sl'])}`", "inline": True}])
+    
+    embed = {"title": f"🔔 AI Alert: {res['symbol']} ({res['interval']})", "description": f"`{from_str} -> {to_str}`\n\n{desc}", "color": 3447003, "fields": fields, "footer": {"text": f"AI Model Ensemble | {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S')}"}}
+    send_discord({"embeds": [embed]})
+
+def summary_report(results: List[Dict]):
+    counts = {"BUY": sum(1 for r in results if "BUY" in r['level']), "SELL": sum(1 for r in results if "SELL" in r['level'])}
+    status = "TRUNG LẬP 🤔"; total = len(results)
+    if counts['BUY'] > counts['SELL'] * 1.5 and counts['BUY'] / total > 0.3: status = "LẠC QUAN 📈"
+    elif counts['SELL'] > counts['BUY'] * 1.5 and counts['SELL'] / total > 0.3: status = "BI QUAN 📉"
+    
+    now_vn_str = datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M (%d/%m/%Y)')
+    embed = {"title": f"📊 Tổng quan Thị trường AI - {now_vn_str}", "description": f"**Nhiệt kế thị trường: `{status}`**\n*Tổng hợp tín hiệu từ Hội đồng Chuyên gia AI.*", "color": 5814783, "fields": [], "footer": {"text": "AI Model Ensemble"}}
+    
+    sorted_results = sorted(results, key=lambda x: x['symbol'])
+    for sym, group in groupby(sorted_results, key=lambda x: x['symbol']):
+        group_list = list(group)
+        price = group_list[0]['price']
+        val = ""
+        for r in sorted(group_list, key=lambda x: INTERVALS.index(x['interval'])):
+            info = get_sub_info(r['sub_level']) if r['level'] in ["HOLD", "AVOID"] else LEVEL_MAP[r['level']]
+            val += f"`{r['interval']:<3}` {info['icon']} **{info['name']}** `{fmt_pct(r['pct'])}`\n"
+        embed['fields'].append({"name": f"**{sym}** | Giá: `{fmt_price(price)}`", "value": val, "inline": True})
+    
+    send_discord({"embeds": [embed]})
+
+# --------------------------------------------------
+# MAIN LOOP
+# --------------------------------------------------
+def main():
+    print(f"--- 🧠 Bắt đầu chu trình phân tích Ensemble AI ({datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%H:%M:%S')}) ---")
+    state = load_state()
+    models_cache = {f"{s}-{i}": AIModelBundle(s, i) for s in SYMBOLS for i in INTERVALS}
+    
+    results = []
+    now_utc_ts = datetime.now(timezone.utc).timestamp()
+    
+    for key, bundle in models_cache.items():
+        if not bundle.is_valid(): continue
+        symbol, interval = key.split('-')
+        
+        res = analyze_ensemble(symbol, interval, bundle)
+        if not res: print(f"  - {key}: Bỏ qua (Không đủ dữ liệu)"); continue
+        
+        print(f"  - {key}: {res['sub_level']} ({fmt_pct(res['pct'])})")
+        atomic_write_json(os.path.join(LOG_DIR, f"{symbol}_{interval}.json"), res)
+        results.append(res)
+        
+        prev = state.get(key, {})
+        if res['sub_level'] != prev.get('last_sub_level'):
+            cd = COOLDOWN_BY_LEVEL.get(res['level'], 3600)
+            if now_utc_ts - prev.get('last_alert_timestamp', 0) > cd:
+                instant_alert(res, prev.get('last_level'), prev.get('last_sub_level'))
+                state[key] = {"last_level": res['level'], "last_sub_level": res['sub_level'], "last_alert_timestamp": now_utc_ts}
+            else: # In cooldown, update level but not timestamp
+                state[key] = {**prev, "last_level": res['level'], "last_sub_level": res['sub_level']}
+    
+    if should_send_overview(state):
+        print("--- 📊 Gửi báo cáo tổng quan ---")
+        summary_report(results)
+        state['last_overview_timestamp'] = now_utc_ts
+        
+    atomic_write_json(STATE_FILE, state)
+    print("--- ✅ Hoàn tất chu trình ---")
 
 if __name__ == "__main__":
-    print("--- Bắt đầu chu trình ML Report (Keras 3 Edition) ---")
-    ensemble = AIEnsemble(DATA_DIR)
-    ensemble.load_all_models(SYMBOLS, INTERVALS)
-    if not any(ensemble.models.values()):
-        print("❌ Không có model nào được tải. Dừng chương trình.")
-        sys.exit(1)
-    all_predictions = []
-    for sym in SYMBOLS:
-        for iv in INTERVALS:
-            print(f"  -> Đang dự đoán cho {sym} [{iv}]...")
-            data_limit = ensemble.sequence_length + 200
-            df_new = get_price_data_for_prediction(sym, iv, limit=data_limit)
-            if df_new is None or len(df_new) < ensemble.sequence_length + 50:
-                print(f"     - ⚠️ Thiếu dữ liệu mới cho {sym} [{iv}]. Bỏ qua.")
-                continue
-            prediction = ensemble.predict(sym, iv, df_new)
-            if prediction:
-                json_filepath = os.path.join(LOG_DIR, f"{sym}_{iv}.json")
-                atomic_write_json(json_filepath, prediction)
-                all_predictions.append(prediction)
-    print("\n📊 Đang tạo báo cáo Discord...")
-    discord_report = format_discord_report(all_predictions)
-    send_discord_message(discord_report)
-    print("✅ Đã gửi báo cáo lên Discord.")
-    print("\n🎯🎯🎯 Chu trình ML Report đã hoàn tất. 🎯🎯🎯")
+    main()
