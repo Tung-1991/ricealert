@@ -1,29 +1,19 @@
 # backtest/control_panel.py
 # -*- coding: utf-8 -*-
 """
-Control Panel for Paper Trading
-Version: 1.3.1 - Enhanced Display Format
-Date: 2025-08-03
-
-CHANGELOG (v1.3.1):
-- UI/UX: Overhauled the `view_open_trades` function for a much cleaner, more readable,
-  and professional multi-line display for each trade, similar to modern trading panels.
-- Readability: Each trade's info is now split into three logical lines:
-  1. Identification & Tactic Info.
-  2. PnL, Duration & Capital Info.
-  3. Key Price Levels (Entry, Current, TP, SL).
-- This change significantly improves at-a-glance diagnostics.
+Control Panel v2.2 (FIXED & STABLE) for Paper Trading
+Date: 2025-08-10
 """
 import os
 import sys
 import json
-from datetime import datetime, timedelta
-import pytz
-import requests
 import uuid
 import traceback
+import requests
+import pytz
+import pandas as pd
+from datetime import datetime, timedelta
 
-# --- CẤU HÌNH ĐƯỜNG DẪN ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 sys.path.append(PROJECT_ROOT)
@@ -31,318 +21,257 @@ sys.path.append(PROJECT_ROOT)
 try:
     from paper_trade import PaperTrader, Config
 except ImportError as e:
-    sys.exit(f"Lỗi: Không thể import class `PaperTrader` hoặc `Config`.\nLỗi chi tiết: {e}")
+    sys.exit(f"❌ Lỗi: Không thể import module cần thiết: {e}.")
 
-# --- CÁC HẰNG SỐ VÀ CẤU HÌNH ---
-STATE_FILE = os.path.join(BASE_DIR, "paper_data", "paper_trade_state.json")
-ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
-VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
+STATE_FILE = Config.STATE_FILE
+TRADE_HISTORY_CSV_FILE = Config.TRADE_HISTORY_CSV_FILE
+VIETNAM_TZ = Config.VIETNAM_TZ
 
-TACTICS = list(Config.TACTICS_LAB.keys())
-ZONES = Config.ZONES
-INTERVALS = Config.INTERVALS_TO_SCAN
-
-# --- CÁC HÀM TIỆN ÍCH ---
-def get_current_price(symbol):
-    """Lấy giá hiện tại từ Binance."""
+def get_current_price(symbol: str) -> float | None:
     url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         return float(response.json()['price'])
-    except Exception as e:
-        print(f"\n⚠️  Không thể lấy giá cho {symbol}: {e}")
+    except Exception:
         return None
 
-def parse_env_variable(key_name):
-    """Đọc một biến từ file .env."""
-    try:
-        with open(ENV_FILE, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    if key.strip() == key_name:
-                        value = value.strip().strip('"').strip("'")
-                        return [item.strip() for item in value.split(',')]
-    except FileNotFoundError:
-        print(f"⚠️ Không tìm thấy file .env tại {ENV_FILE}")
-    return []
-
-def select_from_list(options, prompt):
-    """Hiển thị menu lựa chọn cho người dùng."""
-    for i, option in enumerate(options): print(f"  {i+1}. {option}")
+def select_from_list(options: list, prompt: str, display_list: list | None = None) -> any:
+    if not options: return None
+    display = display_list if display_list is not None else options
+    for i, item in enumerate(display): print(f"  {i+1}. {item}")
     while True:
         try:
-            choice = int(input(prompt))
+            choice_str = input(prompt)
+            if not choice_str: return None
+            choice = int(choice_str)
             if 1 <= choice <= len(options): return options[choice - 1]
             else: print("⚠️ Lựa chọn không hợp lệ.")
-        except ValueError:
-            print("⚠️ Vui lòng nhập một con số.")
+        except ValueError: print("⚠️ Vui lòng nhập một con số.")
 
-def build_simple_header(trader, equity):
-    """Tạo header báo cáo đơn giản, mô phỏng lại logic từ paper_trade."""
-    initial_capital = trader.state.get('initial_capital', Config.INITIAL_CAPITAL)
-    pnl_since_start = equity - initial_capital
-    pnl_percent = (pnl_since_start / initial_capital) * 100 if initial_capital > 0 else 0
-    pnl_icon = "🟢" if pnl_since_start >= 0 else "🔴"
-    header = []
-    header.append(f"💰 Vốn BĐ: ${initial_capital:,.2f} | 💵 Tiền mặt: ${trader.state.get('cash', 0):,.2f}")
-    header.append(f"📊 Tổng TS: ${equity:,.2f} | 📈 PnL Tổng: {pnl_icon} ${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)")
-    return "\n".join(header)
-
-# --- CÁC HÀM CHỨC NĂNG (Đã cập nhật để dùng PaperTrader) ---
-
-def view_open_trades():
-    """Hiển thị các lệnh đang mở với định dạng mới, chi tiết và dễ đọc."""
-    print("\n--- DANH SÁCH LỆNH ĐANG MỞ (Real-time) ---")
+def show_dashboard():
+    print("\n" + "="*80)
+    print(f"📊 BẢNG ĐIỀU KHIỂN & TRẠNG THÁI LỆNH - {datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')} 📊")
     try:
         trader = PaperTrader()
-    except SystemExit as e:
-        print(f"❌ Lỗi khi khởi tạo PaperTrader: {e}")
+        active_trades = trader.state.get("active_trades", [])
+        symbols_needed = list(set(trade['symbol'] for trade in active_trades))
+        prices = {sym: get_current_price(sym) for sym in symbols_needed}
+        equity = trader._calculate_total_equity(realtime_prices=prices)
+        if equity is None:
+            print("\n⚠️ Không thể tính tổng tài sản do thiếu dữ liệu giá.")
+            return None
+        print("\n" + trader._build_report_header(equity))
+        print(trader._build_pnl_summary_line(prices))
+        print("\n" + "---" * 10 + " 🛰️ DANH SÁCH LỆNH ĐANG MỞ 🛰️ " + "---" * 10)
+        if not active_trades:
+            print("ℹ️ Không có lệnh nào đang mở.")
+            return None
+        for i, trade in enumerate(sorted(active_trades, key=lambda x: x['entry_time'])):
+            price = prices.get(trade['symbol'])
+            if price is None:
+                print(f"{(i+1):>2}. ⚠️ {trade['symbol']} - Không thể lấy giá hiện tại.")
+                continue
+            details_text = trader._build_trade_details_for_report(trade, current_price=price)
+            print(f"{(i+1):>2}. " + details_text.lstrip())
+        return active_trades
+    except Exception as e:
+        print(f"❌ Lỗi khi hiển thị dashboard: {e}")
+        traceback.print_exc()
         return None
 
-    active_trades = trader.state.get("active_trades", [])
-    if not active_trades:
-        print(f"💵 Tiền mặt: ${trader.state.get('cash', 0):,.2f}")
-        print("ℹ️ Không có lệnh nào đang mở.")
-        return None
-
-    symbols_needed = list(set(trade['symbol'] for trade in active_trades))
-    prices = {sym: get_current_price(sym) for sym in symbols_needed}
-
-    total_equity = trader._calculate_total_equity(realtime_prices=prices)
-    if total_equity is None:
-        print("⚠️ Không thể tính tổng tài sản do thiếu dữ liệu giá.")
-        total_equity = trader.state.get('cash', 0) # Fallback
-
-    report_header = build_simple_header(trader, total_equity)
-    print(report_header)
-    print("-" * 80)
-
-    for i, trade in enumerate(active_trades):
-        symbol = trade.get('symbol', 'N/A')
-        current_price = prices.get(symbol)
+def view_csv_history():
+    print("\n" + "---" * 10 + " 📜 20 Giao dịch cuối từ file CSV 📜 " + "---" * 10)
+    try:
+        if not os.path.exists(TRADE_HISTORY_CSV_FILE):
+            print("ℹ️ Không tìm thấy file trade_history.csv."); return
+        df = pd.read_csv(TRADE_HISTORY_CSV_FILE, engine='python', on_bad_lines='skip')
+        if df.empty:
+            print("ℹ️ File lịch sử trống."); return
         
-        if current_price is None:
-            print(f"{i+1}. ⚠️ {symbol} - Không thể lấy giá hiện tại.")
-            continue
-
-        pnl_usd, pnl_percent = trader._get_current_pnl(trade, current_price)
-        pnl_icon = "🟢" if pnl_usd >= 0 else "🔴"
-
-        holding_hours = (datetime.now(VIETNAM_TZ) - datetime.fromisoformat(trade['entry_time'])).total_seconds() / 3600
-        dca_info = f" (DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
-        tsl_info = f" TSL:{trade['sl']:.4f}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
-        tp1_info = " TP1✅" if trade.get('tp1_hit', False) else ""
-        stale_info = ""
-        if 'stale_override_until' in trade and datetime.now(VIETNAM_TZ) < datetime.fromisoformat(trade['stale_override_until']):
-            stale_info = f" 🛡️Gia hạn"
-
-        entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
-        score_display = f"{entry_score:,.1f}→{last_score:,.1f}" + ("📉" if last_score < entry_score else "📈" if last_score > entry_score else "")
-        zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone', 'N/A')}" if trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
-        tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
+        df['exit_time_dt'] = pd.to_datetime(df['exit_time'], errors='coerce')
+        df.dropna(subset=['exit_time_dt'], inplace=True)
+        df_sorted = df.sort_values(by='exit_time_dt', ascending=False).head(20)
         
-        current_value = trade.get('total_invested_usd', 0) + pnl_usd
-
-        # Định dạng 3 dòng mới
-        line1 = f"{i+1}. {pnl_icon} {symbol}-{trade.get('interval', 'N/A')} {tactic_info}"
-        line2 = f"    PnL: {pnl_usd:+.2f} ({pnl_percent:+.2f}%) | Giữ: {holding_hours:.1f}h | Vốn: ${trade.get('total_invested_usd', 0):,.2f} -> ${current_value:,.2f}{dca_info}{tp1_info}{stale_info}"
-        line3 = f"    Entry: {trade.get('entry_price', 0):.4f} | Cur: {current_price:.4f} | TP: {trade.get('tp', 0):.4f} | SL: {trade.get('sl', 0):.4f}{tsl_info}"
-
-        print(line1)
-        print(line2)
-        print(line3)
+        cols_to_use = ['exit_time_dt', 'symbol', 'interval', 'pnl_usd', 'pnl_percent', 'holding_duration_hours', 'opened_by_tactic', 'status']
+        df_display = df_sorted[[c for c in cols_to_use if c in df_sorted.columns]].copy()
         
-    print("-" * 80)
-    return active_trades
+        df_display['Time'] = df_display['exit_time_dt'].dt.strftime('%m-%d %H:%M')
+        df_display['pnl_usd'] = pd.to_numeric(df_display['pnl_usd'], errors='coerce').apply(lambda x: f"${x:+.2f}")
+        df_display['pnl_percent'] = pd.to_numeric(df_display['pnl_percent'], errors='coerce').apply(lambda x: f"({x:+.2f}%)")
+        df_display.rename(columns={'holding_duration_hours': 'Hold(h)', 'opened_by_tactic': 'Tactic'}, inplace=True)
+        
+        final_cols = [c for c in ['Time', 'symbol', 'interval', 'pnl_usd', 'pnl_percent', 'Hold(h)', 'Tactic', 'status'] if c in df_display.columns]
+        print(df_display[final_cols].to_string(index=False))
+    except Exception as e:
+        print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
 
+def show_tactic_analysis():
+    print("\n" + "="*15 + " 📊 PHÂN TÍCH HIỆU SUẤT TACTIC 📊 " + "="*15)
+    try:
+        if not os.path.exists(TRADE_HISTORY_CSV_FILE):
+            print("ℹ️ Không tìm thấy file trade_history.csv."); return
+        df = pd.read_csv(TRADE_HISTORY_CSV_FILE, on_bad_lines='skip')
+        df['pnl_usd'] = pd.to_numeric(df['pnl_usd'], errors='coerce')
+        df = df[df['pnl_usd'].notna() & df['status'].str.contains('Closed', na=False, case=False)]
+        if df.empty:
+            print("ℹ️ Không có dữ liệu hợp lệ để phân tích."); return
+        grouped = df.groupby('opened_by_tactic').agg(
+            Total_Trades=('pnl_usd', 'count'), Total_PnL=('pnl_usd', 'sum'),
+            Wins=('pnl_usd', lambda x: (x > 0).sum()),
+            Avg_Win_PnL=('pnl_usd', lambda x: x[x > 0].mean()),
+            Avg_Loss_PnL=('pnl_usd', lambda x: x[x <= 0].mean())
+        ).fillna(0)
+        grouped['Win_Rate_%'] = (grouped['Wins'] / grouped['Total_Trades'] * 100).where(grouped['Total_Trades'] > 0, 0)
+        grouped['Payoff_Ratio'] = (grouped['Avg_Win_PnL'] / abs(grouped['Avg_Loss_PnL'])).where(grouped['Avg_Loss_PnL'] != 0, float('inf'))
+        win_rate = grouped['Wins'] / grouped['Total_Trades'].replace(0,1)
+        loss_rate = 1 - win_rate
+        grouped['Expectancy_$'] = (win_rate * grouped['Avg_Win_PnL']) + (loss_rate * grouped['Avg_Loss_PnL'])
+        formatted_df = grouped.reset_index().rename(columns={'opened_by_tactic': 'Tactic'})
+        formatted_df = formatted_df[['Tactic', 'Total_Trades', 'Win_Rate_%', 'Total_PnL', 'Expectancy_$', 'Payoff_Ratio']]
+        print("Chú thích: Expectancy_$: Lợi nhuận kỳ vọng mỗi lệnh | Payoff_Ratio: Lãi trung bình / Lỗ trung bình")
+        print("-" * 80)
+        pd.options.display.float_format = '{:,.2f}'.format
+        print(formatted_df.sort_values(by="Total_PnL", ascending=False).to_string(index=False))
+        pd.options.display.float_format = None
+    except Exception as e:
+        print(f"⚠️ Lỗi khi phân tích: {e}")
+
+def manual_report():
+    print("\n" + "📜" * 10 + " TẠO BÁO CÁO THỦ CÔNG " + "📜" * 10)
+    try:
+        trader = PaperTrader()
+        prices = {t['symbol']: get_current_price(t['symbol']) for t in trader.state.get('active_trades', [])}
+        equity = trader._calculate_total_equity(realtime_prices=prices)
+        if equity is None:
+            print("❌ Không thể tạo báo cáo do lỗi API giá."); return
+        report_content = trader._build_report_text(prices, equity)
+        print("\n" + "="*80); print(report_content); print("="*80)
+        if Config.ALERT_CONFIG.get("DISCORD_WEBHOOK_URL") and input("\n👉 Gửi báo cáo này lên Discord? (y/n): ").lower() == 'y':
+            print("... Đang gửi lên Discord..."); trader._send_discord_message(report_content); print("✅ Đã gửi.")
+    except Exception as e:
+        print(f"❌ Lỗi khi tạo báo cáo: {e}"); traceback.print_exc()
 
 def close_manual_trades():
-    print("\n--- Chức năng: Đóng lệnh thủ công ---")
-    active_trades = view_open_trades()
+    print("\n" + "🎬" * 10 + " ĐÓNG LỆNH THỦ CÔNG " + "🎬" * 10)
+    active_trades = show_dashboard()
     if not active_trades: return
-
     try:
         trader = PaperTrader()
-        choice = input("\n👉 Nhập số thứ tự của các lệnh cần đóng (ví dụ: 1,3). Nhấn Enter để hủy: ")
-        if not choice.strip():
-            print("Hủy thao tác.")
-            return
-
-        indices_to_close = []
-        for part in choice.split(','):
-            if part.strip().isdigit():
-                index = int(part.strip()) - 1
-                if 0 <= index < len(active_trades):
-                    indices_to_close.append(index)
-                else:
-                    print(f"⚠️ Cảnh báo: Số '{part.strip()}' không hợp lệ.")
-        if not indices_to_close:
-            print("❌ Không có lựa chọn hợp lệ.")
-            return
-
-        trades_to_process = [active_trades[i] for i in sorted(list(set(indices_to_close)))]
-        for trade in trades_to_process:
-            print(f"\n⚡️ Đang xử lý đóng lệnh cho {trade['symbol']}...")
-            current_price = get_current_price(trade['symbol'])
-            if current_price is None:
-                print(f"❌ Không thể đóng {trade['symbol']} vì không lấy được giá.")
-                continue
-
-            success = trader._close_trade_simulated(trade, "Manual Panel", current_price)
-            if success:
-                print(f"✅ Đã đóng {trade['symbol']} thành công.")
-            else:
-                print(f"❌ Đóng {trade['symbol']} thất bại.")
-
-        trader._save_state()
-        print("\n✅ Đã lưu lại trạng thái thành công!")
-
-    except Exception as e:
-        print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
-
-def close_all_trades():
-    print("\n--- Chức năng: Đóng TẤT CẢ lệnh ---")
-    try:
-        trader = PaperTrader()
-        if not trader.state.get("active_trades"):
-            print("ℹ️ Không có lệnh nào đang mở để đóng.")
-            return
-        if input("⚠️ CẢNH BÁO: Đóng tất cả vị thế? (y/n): ").lower() != 'y':
-            print("Hủy thao tác.")
-            return
-
-        trades_to_close = list(trader.state['active_trades'])
+        choice_str = input("\n👉 Nhập số thứ tự lệnh cần đóng (vd: 1,3). 'all' để đóng tất cả. Enter để hủy: ").lower()
+        if not choice_str: return
+        trades_to_process = []
+        if choice_str == 'all':
+            if input("⚠️ CẢNH BÁO: Đóng tất cả vị thế? (y/n): ").lower() == 'y':
+                trades_to_process = active_trades
+        else:
+            indices_to_close = {int(p.strip()) - 1 for p in choice_str.split(',') if p.strip().isdigit()}
+            trades_to_process = [active_trades[i] for i in sorted(indices_to_close) if 0 <= i < len(active_trades)]
+        if not trades_to_process: print("❌ Không có lựa chọn hợp lệ."); return
         closed_count = 0
-        for trade in trades_to_close:
-            print(f"\n⚡️ Đang đóng {trade['symbol']}...")
+        for trade in trades_to_process:
+            print(f"⚡️ Đang xử lý đóng lệnh {trade['symbol']}...")
             current_price = get_current_price(trade['symbol'])
             if current_price is None:
-                print(f"❌ Không thể đóng {trade['symbol']} vì không lấy được giá. Bỏ qua.")
-                continue
-
-            if trader._close_trade_simulated(trade, "All Manual", current_price):
-                print(f"✅ Đóng {trade['symbol']} thành công.")
+                print(f"❌ Không thể đóng {trade['symbol']} vì lỗi API giá."); continue
+            if trader._close_trade_simulated(trade, "Panel Manual", current_price):
+                print(f"✅ Đã đóng thành công.")
                 closed_count += 1
-            else:
-                print(f"❌ Đóng {trade['symbol']} thất bại.")
-
         if closed_count > 0:
             trader._save_state()
-            print("\n✅ Đã lưu lại trạng thái thành công!")
-    except Exception as e:
-        print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
-
-def extend_stale_check():
-    print("\n--- Chức năng: Gia hạn lệnh ---")
-    active_trades = view_open_trades()
-    if not active_trades: return
-    try:
-        trader = PaperTrader()
-        choice = input("\n👉 Chọn số lệnh cần gia hạn (Enter để hủy): ")
-        if not choice.strip() or not choice.strip().isdigit():
-            print("Hủy thao tác.")
-            return
-        index = int(choice.strip()) - 1
-        if not (0 <= index < len(active_trades)):
-            print("❌ Lựa chọn không hợp lệ.")
-            return
-
-        hours = float(input("👉 Nhập số giờ muốn gia hạn (ví dụ: 48): "))
-        if hours <= 0:
-            print("❌ Số giờ phải dương.")
-            return
-
-        trade_id_to_update = active_trades[index]['trade_id']
-        trade_found = False
-        for trade in trader.state['active_trades']:
-            if trade['trade_id'] == trade_id_to_update:
-                override_until = datetime.now(VIETNAM_TZ) + timedelta(hours=hours)
-                trade['stale_override_until'] = override_until.isoformat()
-                print(f"\n✅ Lệnh {trade['symbol']} đã được gia hạn đến: {override_until.strftime('%Y-%m-%d %H:%M:%S')}")
-                trade_found = True
-                break
-
-        if trade_found:
-            trader._save_state()
-            print("\n✅ Đã lưu lại trạng thái thành công!")
-        else:
-            print("❌ Không tìm thấy trade để cập nhật. Có thể state đã thay đổi.")
-
-    except ValueError:
-        print("❌ Vui lòng nhập một con số hợp lệ.")
+            print(f"\n✅ Đã đóng {closed_count} lệnh và lưu trạng thái.")
     except Exception as e:
         print(f"\n❌ Lỗi không mong muốn: {e}")
 
 def open_manual_trade():
-    print("\n--- Chức năng: Mở lệnh mới thủ công ---")
+    print("\n" + "🔥" * 10 + " MỞ LỆNH MỚI THỦ CÔNG " + "🔥" * 10)
     try:
         trader = PaperTrader()
         print(f"💵 Tiền mặt khả dụng: ${trader.state.get('cash', 0):,.2f}")
-        allowed_symbols = parse_env_variable("SYMBOLS_TO_SCAN")
-        if not allowed_symbols:
-            print("❌ Không đọc được SYMBOLS_TO_SCAN từ file .env.")
-            return
-
-        print("\n--- Bước 1: Chọn thông tin ---")
-        symbol = select_from_list(allowed_symbols, "👉 Chọn Symbol: ")
-        interval = select_from_list(INTERVALS, "👉 Chọn Interval: ")
-        tactic = select_from_list(TACTICS, "👉 Chọn Tactic: ")
-        zone = select_from_list(ZONES, "👉 Chọn Vùng (Zone): ")
-
-        print("\n--- Bước 2: Nhập chi tiết ---")
+        symbol = select_from_list(Config.SYMBOLS_TO_SCAN, "👉 Chọn Symbol: ")
+        if not symbol: return
+        interval = select_from_list(Config.ALL_TIME_FRAMES, "👉 Chọn Interval: ")
+        if not interval: return
+        tactic_name = select_from_list(list(Config.TACTICS_LAB.keys()), "👉 Chọn Tactic: ")
+        if not tactic_name: return
         entry_price = float(input(f"👉 Giá vào lệnh (Entry) cho {symbol}: "))
-        tp = float(input("👉 Giá chốt lời (Take Profit): "))
-        sl = float(input("👉 Giá cắt lỗ (Stop Loss): "))
         invested_usd = float(input("👉 Số vốn đầu tư (USD): "))
-
-        if not all(x > 0 for x in [entry_price, tp, sl, invested_usd]):
-            print("❌ Các giá trị phải dương."); return
-        if invested_usd > trader.state.get('cash', 0):
-            print(f"❌ Vốn đầu tư (${invested_usd:,.2f}) lớn hơn tiền mặt (${trader.state.get('cash', 0):,.2f})."); return
-
+        if invested_usd <= 0 or invested_usd > trader.state.get('cash', 0):
+            print("❌ Vốn không hợp lệ."); return
+        tactic_cfg = Config.TACTICS_LAB.get(tactic_name, {})
+        risk_dist = entry_price * Config.RISK_RULES_CONFIG["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval, 0.07)
+        sl_price = entry_price - risk_dist
+        tp_price = entry_price + (risk_dist * tactic_cfg.get("RR", 2.0))
         new_trade = {
             "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
-            "opened_by_tactic": tactic, "trade_type": "LONG", "entry_price": entry_price,
-            "quantity": invested_usd / entry_price, "tp": tp, "sl": sl, "initial_sl": sl,
+            "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": entry_price,
+            "quantity": invested_usd / entry_price, "tp": tp_price, "sl": sl_price, "initial_sl": sl_price,
             "initial_entry": {"price": entry_price, "invested_usd": invested_usd},
             "total_invested_usd": invested_usd, "entry_time": datetime.now(VIETNAM_TZ).isoformat(),
-            "entry_score": 9.99, "entry_zone": zone, "last_zone": zone,
-            "dca_entries": [], "realized_pnl_usd": 0.0, "last_score": 9.99, "peak_pnl_percent": 0.0,
-            "tp1_hit": False, "is_in_warning_zone": False, "partial_closed_by_score": False,
-            "profit_taken": False, "tactic_used": [tactic, "Manual_Entry"]
+            "entry_score": 9.9, "last_score": 9.9, "entry_zone": "Manual", "last_zone": "Manual",
+            "tactic_used": ["Manual_Entry"], "dca_entries": [], "realized_pnl_usd": 0.0,
+            "peak_pnl_percent": 0.0, "tp1_hit": False, "partial_closed_by_score": False, "profit_taken": False
         }
-
         trader.state['cash'] -= invested_usd
-        trader.state.setdefault('active_trades', []).append(new_trade)
+        trader.state['active_trades'].append(new_trade)
         trader._save_state()
-        print(f"\n✅ ĐÃ TẠO LỆNH MỚI CHO {symbol} VỚI VỐN ${invested_usd:,.2f}")
-        print("\n✅ Đã lưu lại trạng thái thành công!")
-    except ValueError:
-        print("❌ Giá trị nhập không hợp lệ.")
+        print(f"\n✅ Đã tạo lệnh mới cho {symbol} và lưu trạng thái.")
+    except (ValueError, TypeError): print("❌ Vui lòng nhập số hợp lệ.")
+    except Exception as e: print(f"❌ Lỗi: {e}")
+
+def extend_stale_check():
+    print("\n" + "🛡️" * 10 + " GIA HẠN LỆNH 'Ì' " + "🛡️" * 10)
+    active_trades = show_dashboard()
+    if not active_trades: return
+    try:
+        trader = PaperTrader()
+        trade_to_extend = select_from_list(active_trades, "👉 Chọn số lệnh cần gia hạn (Enter để hủy): ", [f"{t['symbol']}-{t['interval']}" for t in active_trades])
+        if not trade_to_extend: return
+        hours = float(input("👉 Nhập số giờ muốn gia hạn (ví dụ: 48): "))
+        if hours <= 0: print("❌ Số giờ phải dương."); return
+        trade_found = False
+        for trade in trader.state['active_trades']:
+            if trade['trade_id'] == trade_to_extend['trade_id']:
+                override_until = datetime.now(VIETNAM_TZ) + timedelta(hours=hours)
+                trade['stale_override_until'] = override_until.isoformat()
+                print(f"\n✅ Lệnh {trade['symbol']} đã gia hạn đến: {override_until.strftime('%Y-%m-%d %H:%M:%S')}")
+                trade_found = True
+                break
+        if trade_found: trader._save_state()
+        else: print("❌ Không tìm thấy trade để cập nhật.")
+    except (ValueError, TypeError): print("❌ Vui lòng nhập số hợp lệ.")
+    except Exception as e: print(f"❌ Lỗi: {e}")
+
+def reset_state():
+    print("\n" + "💣" * 10 + " RESET TRẠNG THÁI " + "💣" * 10)
+    print("CẢNH BÁO: Hành động này sẽ XÓA file state và history, đưa bot về trạng thái ban đầu.")
+    if input("👉 Nhập 'RESET' để xác nhận: ") != 'RESET':
+        print("Hủy thao tác."); return
+    if input("👉 Xác nhận lần cuối, nhập 'DELETE ALL DATA' để tiếp tục: ") != 'DELETE ALL DATA':
+        print("Hủy thao tác."); return
+    try:
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE); print(f"✅ Đã xóa file: {os.path.basename(STATE_FILE)}")
+        if os.path.exists(TRADE_HISTORY_CSV_FILE):
+            os.remove(TRADE_HISTORY_CSV_FILE); print(f"✅ Đã xóa file: {os.path.basename(TRADE_HISTORY_CSV_FILE)}")
+        print("\n✅ Reset hoàn tất. Lần chạy tiếp theo sẽ bắt đầu lại từ đầu.")
     except Exception as e:
-        print(f"\n❌ Lỗi không mong muốn: {e}"); traceback.print_exc()
+        print(f"❌ Lỗi khi reset: {e}")
 
-def main_menu():
+def main():
+    menu_actions = { '1': show_dashboard, '2': view_csv_history, '3': show_tactic_analysis, '4': manual_report, '5': open_manual_trade, '6': close_manual_trades, '7': extend_stale_check, '8': reset_state, }
     while True:
-        print("\n" + "="*12 + " 📊 BẢNG ĐIỀU KHIỂN (PAPER-v8.3) 📊 " + "="*12)
-        print("1. Xem tất cả lệnh đang mở")
-        print("2. Đóng một hoặc nhiều lệnh thủ công")
-        print("3. Đóng TẤT CẢ lệnh đang mở")
-        print("4. Gia hạn cho lệnh (bỏ qua 'stale')")
-        print("5. Mở lệnh mới thủ công")
-        print("0. Thoát")
-        print("="*61)
+        print("\n" + "="*15 + " 📊 BẢNG ĐIỀU KHIỂN (PAPER-v2.2) 📊 " + "="*15)
+        print("--- Xem & Phân tích ---"); print(" 1. Dashboard & Trạng thái lệnh"); print(" 2. Lịch sử giao dịch (từ CSV)"); print(" 3. Phân tích Hiệu suất Tactic"); print(" 4. Tạo & Gửi báo cáo thủ công")
+        print("\n--- Hành động Mô phỏng ---"); print(" 5. Mở lệnh mới thủ công"); print(" 6. Đóng lệnh thủ công (chọn một hoặc nhiều)"); print(" 7. Gia hạn kiểm tra cho một lệnh 'ì'")
+        print("\n--- Bảo trì ---"); print(" 8. Reset toàn bộ trạng thái")
+        print("\n 0. Thoát"); print("="*67)
         choice = input("👉 Vui lòng chọn một chức năng: ")
-        if choice == '1': view_open_trades()
-        elif choice == '2': close_manual_trades()
-        elif choice == '3': close_all_trades()
-        elif choice == '4': extend_stale_check()
-        elif choice == '5': open_manual_trade()
-        elif choice == '0': print("👋 Tạm biệt!"); break
+        if choice == '0': print("👋 Tạm biệt!"); break
+        action = menu_actions.get(choice)
+        if action:
+            try: action()
+            except Exception: traceback.print_exc()
         else: print("⚠️ Lựa chọn không hợp lệ.")
-
 if __name__ == "__main__":
-    main_menu()
+    main()
