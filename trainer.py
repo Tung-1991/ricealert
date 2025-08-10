@@ -177,13 +177,21 @@ def create_labels_and_targets(df: pd.DataFrame, fut_off: int, atr_factor: float)
     df_copy = df.copy()
     future_price = df_copy['close'].shift(-fut_off)
     atr_threshold = atr_factor * df_copy['atr']
+
+    # Giữ nguyên logic tạo label cho classification
     df_copy['label'] = 1
     df_copy.loc[(future_price - df_copy['close']) > atr_threshold, 'label'] = 2
     df_copy.loc[(df_copy['close'] - future_price) > atr_threshold, 'label'] = 0
-    atr_smooth = df_copy['atr'].rolling(window=fut_off).mean() + 1e-9
-    df_copy['reg_target'] = (future_price - df_copy['close']) / atr_smooth
-    df_copy['reg_target'] = df_copy['reg_target'].clip(lower=-10, upper=10)
+
+    # THAY ĐỔI: Tính trực tiếp % thay đổi giá làm mục tiêu hồi quy
+    # Mẫu số là giá hiện tại, ổn định hơn ATR rất nhiều
+    df_copy['reg_target'] = ((future_price - df_copy['close']) / (df_copy['close'] + 1e-9)) * 100
+
+    # Clip giá trị phần trăm trong một khoảng hợp lý, ví dụ +/- 20%
+    df_copy['reg_target'] = df_copy['reg_target'].clip(lower=-20, upper=20)
+    
     return df_copy.dropna()
+
 
 def create_sequences(data: pd.DataFrame, feature_cols: list, label_clf_col: str, label_reg_col: str, seq_length: int):
     X, y_clf, y_reg = [], [], []
