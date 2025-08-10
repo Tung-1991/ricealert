@@ -7,7 +7,7 @@ set -euo pipefail
 # --- CẤU HÌNH ---
 # Đường dẫn trên máy LOCAL của bạn
 PROJECT_DIR="/home/tungn/ricealert"
-IMAGE="rice-trainer:tf2502"
+IMAGE="rice-trainer:latest"
 LOG_DIR="$PROJECT_DIR/log"
 DATA_DIR="$PROJECT_DIR/data"
 CONTAINER_NAME="rice-trainer-session"

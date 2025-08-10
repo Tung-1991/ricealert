@@ -1,15 +1,16 @@
-# ===================== trainer.py — PROD v1.6 (Final Fixed Version) =====================
-# KẾT HỢP:
-# - Bộ lọc log C-level mạnh mẽ từ v1.4 để chặn TOÀN BỘ rác.
-# - Tối ưu hiệu năng GPU bằng tf.data và BATCH_SIZE từ v1.5.
-# - Sửa lỗi LightGBM bằng cách loại bỏ device='gpu'.
+# ===================== trainer.py — Keras 3 Modernized Version =====================
+# NÂNG CẤP:
+# - Chuyển đổi hoàn toàn sang Keras 3 (import từ 'keras' thay vì 'tensorflow.keras').
+# - Sử dụng định dạng lưu trữ model mới nhất và hiệu quả nhất là `.keras`.
+# - Import trực tiếp các optimizer, loss, callback từ Keras để code rõ ràng hơn.
+# - Giữ nguyên 100% các tính năng, bộ lọc log, và logic xử lý dữ liệu gốc.
 # ======================================================================================
 
 import os, sys, re, warnings, json, random, time, threading, select
 from datetime import datetime, timedelta, timezone
 from time import sleep
 
-# --- ENV để giảm rác TF/XLA ---
+# --- ENV để giảm rác TF/XLA (GIỮ NGUYÊN) ---
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_XLA_FLAGS", "--tf_xla_auto_jit=0 --tf_xla_enable_xla_devices=false")
@@ -18,7 +19,7 @@ os.environ.setdefault("XLA_FLAGS", "--xla_gpu_use_runtime_fusion=false --xla_gpu
 DEBUG = os.getenv("DEBUG", "0") == "1"
 VERBOSE = 2 if DEBUG else 0
 
-# --- [REVERT] Quay lại bộ lọc C-level mạnh mẽ từ v1.4 ---
+# --- Bộ lọc log C-level mạnh mẽ (GIỮ NGUYÊN) ---
 _PAT_RUBBISH = re.compile(
     r"(\+ptx85|could not open file to read NUMA node|Your kernel may have been built without NUMA support|"
     r"XLA service .* initialized|Compiled cluster using XLA|does not guarantee that XLA will be used|"
@@ -82,18 +83,17 @@ except ImportError:
     pass
 tf.get_logger().setLevel("ERROR")
 from dotenv import load_dotenv
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import (
-    Input, LSTM, Dense, Dropout, LayerNormalization, MultiHeadAttention,
-    GlobalAveragePooling1D, Add, BatchNormalization
-)
-from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+# THAY ĐỔI: Import trực tiếp từ gói 'keras' thay vì 'tensorflow.keras'
+import keras
+from keras import layers, models, callbacks, utils
+
 SEED = 42
-random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
+random.seed(SEED); np.random.seed(SEED);
+# THAY ĐỔI: Thêm seed cho Keras
+keras.utils.set_random_seed(SEED)
 load_dotenv()
 
 SYMBOLS   = os.getenv("SYMBOLS",  "ETHUSDT,BTCUSDT").split(",")
@@ -114,7 +114,6 @@ MIN_MAP  = _load_map("MIN_SAMPLE_MAP",     {"1h":400, "4h":300, "1d":200})
 SEQUENCE_LENGTH = 60
 TRANSFORMER_HEADS = 8
 TRANSFORMER_LAYERS = 4
-# --- [KEEP] Giữ lại tối ưu BATCH_SIZE ---
 BATCH_SIZE = 512
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -194,54 +193,55 @@ def create_sequences(data: pd.DataFrame, feature_cols: list, label_clf_col: str,
         y_reg.append(data[label_reg_col].iloc[i + seq_length])
     return np.array(X), np.array(y_clf), np.array(y_reg)
 
+# THAY ĐỔI: Cập nhật hàm dựng model sử dụng API Keras 3
 def build_lstm_model(input_shape: tuple, model_type: str = 'classifier'):
-    inputs = Input(shape=input_shape)
-    x = LSTM(units=100, return_sequences=True, unroll=True)(inputs)
-    x = Dropout(0.2)(x)
-    x = LSTM(units=50, return_sequences=False, unroll=True)(x)
-    x = Dropout(0.2)(x)
-    x = Dense(units=25)(x)
-    x = BatchNormalization()(x)
+    inputs = layers.Input(shape=input_shape)
+    x = layers.LSTM(units=100, return_sequences=True, unroll=True)(inputs)
+    x = layers.Dropout(0.2)(x)
+    x = layers.LSTM(units=50, return_sequences=False, unroll=True)(x)
+    x = layers.Dropout(0.2)(x)
+    x = layers.Dense(units=25)(x)
+    x = layers.BatchNormalization()(x)
     if model_type == 'classifier':
-        outputs = Dense(units=3, activation='softmax')(x)
-        model = Model(inputs, outputs)
+        outputs = layers.Dense(units=3, activation='softmax')(x)
+        model = models.Model(inputs, outputs)
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     else:
-        outputs = Dense(units=1, activation='linear')(x)
-        model = Model(inputs, outputs)
+        outputs = layers.Dense(units=1, activation='linear')(x)
+        model = models.Model(inputs, outputs)
         model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
     return model
 
+# THAY ĐỔI: Cập nhật hàm dựng model Transformer sử dụng API Keras 3
 def transformer_encoder_block(inputs, head_size, num_heads, ff_dim, dropout=0):
-    x = LayerNormalization(epsilon=1e-6)(inputs)
-    x = MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout)(x, x)
-    x = Dropout(dropout)(x)
-    res = Add()([x, inputs])
-    x = LayerNormalization(epsilon=1e-6)(res)
-    x = Dense(units=ff_dim, activation="relu")(x)
-    x = Dropout(dropout)(x)
-    x = Dense(units=inputs.shape[-1])(x)
-    return Add()([x, res])
+    x = layers.LayerNormalization(epsilon=1e-6)(inputs)
+    x = layers.MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout)(x, x)
+    x = layers.Dropout(dropout)(x)
+    res = layers.Add()([x, inputs])
+    x = layers.LayerNormalization(epsilon=1e-6)(res)
+    x = layers.Dense(units=ff_dim, activation="relu")(x)
+    x = layers.Dropout(dropout)(x)
+    x = layers.Dense(units=inputs.shape[-1])(x)
+    return layers.Add()([x, res])
 
 def build_transformer_model(input_shape, head_size, num_heads, ff_dim, num_layers, dropout=0, model_type='classifier'):
-    inputs = Input(shape=input_shape)
+    inputs = layers.Input(shape=input_shape)
     x = inputs
     for _ in range(num_layers):
         x = transformer_encoder_block(x, head_size, num_heads, ff_dim, dropout)
-    x = GlobalAveragePooling1D(data_format="channels_last")(x)
-    x = Dense(20, activation="relu")(x)
-    x = Dropout(0.1)(x)
+    x = layers.GlobalAveragePooling1D(data_format="channels_last")(x)
+    x = layers.Dense(20, activation="relu")(x)
+    x = layers.Dropout(0.1)(x)
     if model_type == 'classifier':
-        outputs = Dense(3, activation="softmax")(x)
-        model = Model(inputs, outputs)
+        outputs = layers.Dense(3, activation="softmax")(x)
+        model = models.Model(inputs, outputs)
         model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     else:
-        outputs = Dense(1, activation="linear")(x)
-        model = Model(inputs, outputs)
+        outputs = layers.Dense(1, activation="linear")(x)
+        model = models.Model(inputs, outputs)
         model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mae"])
     return model
 
-# --- [KEEP] Giữ lại hàm train tối ưu từ v1.5 ---
 def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     print(f"--- Bắt đầu xử lý {symbol} [{interval}] ---")
     base_features = ['open', 'high', 'low', 'close', 'price']
@@ -250,12 +250,12 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     scaler = StandardScaler()
     df_scaled = df.copy()
     df_scaled[features_to_use] = scaler.fit_transform(df[features_to_use]).astype(np.float32)
+    
     print("  -> (1/3) LightGBM...")
     try:
         X_lgbm, y_clf_lgbm, y_reg_lgbm = df[features_to_use], df['label'], df['reg_target']
         X_train_lgbm, X_test_lgbm, y_train_clf, y_test_clf, y_train_reg, y_test_reg = train_test_split(
             X_lgbm, y_clf_lgbm, y_reg_lgbm, test_size=0.15, shuffle=False)
-        # --- [FIX] Gỡ bỏ device='gpu' để sửa lỗi "No OpenCL device found" ---
         clf_lgbm = lgb.LGBMClassifier(objective='multiclass', num_class=3, is_unbalance=True, n_estimators=1000,
                                       learning_rate=0.05, verbose=-1, n_jobs=-1)
         clf_lgbm.fit(X_train_lgbm, y_train_clf, eval_set=[(X_test_lgbm, y_test_clf)],
@@ -269,11 +269,13 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
         print("     ✅ LightGBM xong.")
     except Exception as e:
         print(f"     ❌ LGBM lỗi: {e}")
+
     print("  -> Dựng dữ liệu chuỗi và pipeline tf.data cho DL...")
     try:
         X_seq, y_clf_seq, y_reg_seq = create_sequences(df_scaled, features_to_use, 'label', 'reg_target', SEQUENCE_LENGTH)
         X_seq = X_seq.astype(np.float32)
-        y_clf_seq_cat = to_categorical(y_clf_seq.astype(np.int32), num_classes=3).astype(np.float32)
+        # THAY ĐỔI: Sử dụng keras.utils.to_categorical
+        y_clf_seq_cat = utils.to_categorical(y_clf_seq.astype(np.int32), num_classes=3).astype(np.float32)
         y_reg_seq = y_reg_seq.astype(np.float32)
         if len(X_seq) < 100: raise ValueError(f"Không đủ chuỗi ({len(X_seq)}).")
         val_size = int(len(X_seq) * 0.15)
@@ -290,29 +292,40 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
         joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
         with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f: json.dump(meta, f, indent=2)
         return
+
     input_shape = (X_seq.shape[1], X_seq.shape[2])
+    # THAY ĐỔI: Sử dụng callbacks từ Keras 3
+    es_callback_clf = callbacks.EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)
+    es_callback_reg = callbacks.EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)
+
     print("  -> (2/3) LSTM...")
     try:
         clf_lstm = build_lstm_model(input_shape, model_type='classifier')
-        clf_lstm.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)], verbose=VERBOSE)
-        clf_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.h5"))
+        clf_lstm.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[es_callback_clf], verbose=VERBOSE)
+        # THAY ĐỔI: Lưu model với định dạng .keras
+        clf_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.keras"))
+        
         reg_lstm = build_lstm_model(input_shape, model_type='regressor')
-        reg_lstm.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)], verbose=VERBOSE)
-        reg_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.h5"))
+        reg_lstm.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[es_callback_reg], verbose=VERBOSE)
+        reg_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.keras"))
         print("     ✅ LSTM xong.")
     except Exception as e:
         print(f"     ❌ LSTM lỗi: {e}")
+
     print("  -> (3/3) Transformer...")
     try:
         clf_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='classifier')
-        clf_trans.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)], verbose=VERBOSE)
-        clf_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.h5"))
+        clf_trans.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[es_callback_clf], verbose=VERBOSE)
+        # THAY ĐỔI: Lưu model với định dạng .keras
+        clf_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.keras"))
+        
         reg_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='regressor')
-        reg_trans.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)], verbose=VERBOSE)
-        reg_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.h5"))
+        reg_trans.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[es_callback_reg], verbose=VERBOSE)
+        reg_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.keras"))
         print("     ✅ Transformer xong.")
     except Exception as e:
         print(f"     ❌ Transformer lỗi: {e}")
+
     meta = {"features": features_to_use, "trained_at": datetime.now(timezone.utc).isoformat(), "atr_factor_threshold": LABEL_MAP.get(interval, 0.75), "future_offset": OFFS_MAP.get(interval, 4), "sequence_length": SEQUENCE_LENGTH}
     joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
     with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f: json.dump(meta, f, indent=2)
@@ -331,10 +344,12 @@ if __name__ == "__main__":
             print(f"[WARN] Lỗi set_memory_growth: {e}")
     else:
         print("⚠️ Không phát hiện GPU. Sẽ chạy trên CPU (rất chậm).")
+
     intervals_to_train = [iv.strip() for iv in INTERVALS if iv.strip()]
     if len(sys.argv) > 1:
         intervals_to_train = [iv.strip() for iv in sys.argv[1].split(',') if iv.strip()]
         print(f"🚀 Huấn luyện theo tham số CLI intervals: {intervals_to_train}")
+
     for sym in SYMBOLS:
         for iv in intervals_to_train:
             hist_len   = HIST_MAP.get(iv, 3000)
@@ -358,5 +373,6 @@ if __name__ == "__main__":
                 print(f"[CRITICAL] Lỗi nghiêm trọng khi xử lý {sym} [{iv}]: {e}")
                 import traceback
                 print(traceback.format_exc())
+                
     print("\n🎯 TOÀN BỘ QUÁ TRÌNH HUẤN LUYỆN ĐÃ HOÀN TẤT.")
     print("Có thể nén thư mục 'data' để deploy.")
