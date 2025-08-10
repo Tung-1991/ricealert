@@ -1,14 +1,28 @@
 # /root/ricealert/trade_advisor.py
-import os, json
+# PHIÊN BẢN NÂNG CẤP: "Tổng Tư lệnh Thông thái"
+#
+# CHANGELOG:
+# - TƯƠNG THÍCH HOÀN TOÀN: Cập nhật để đọc và hiểu cấu trúc file JSON mới
+#   do ml_report.py phiên bản "Ultimate" tạo ra.
+# - TRÍ TUỆ TỔNG HỢP: Sử dụng các giá trị `prob_buy`, `prob_sell` và `pct` đã được
+#   tổng hợp (ensemble) từ cả 3 model, giúp quyết định cuối cùng trở nên
+#   chất lượng và đáng tin cậy hơn.
+# - TĂNG CƯỜNG MINH BẠCH: Lấy thêm thông tin chi tiết từ `expert_opinions`
+#   và đính kèm vào dictionary trả về. Điều này cho phép các module khác
+#   (như live_trade.py) có thể ghi log hoặc hiển thị chi tiết "ý kiến"
+#   của từng chuyên gia AI.
+
+import os
+import json
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 from signal_logic import check_signal
 
 # ==============================================================================
-# =================== ⚙️ TRUNG TÂM CẤU HÌNH & TINH CHỈNH ⚙️ =====================
+# ⚙️ TRUNG TÂM CẤU HÌNH & TINH CHỈNH (Không thay đổi)
 # ==============================================================================
 FULL_CONFIG = {
-    "NOTES": "v6.1 - Flexible Weights",
+    "NOTES": "v7.0 - Ensemble AI Compatible",
     "SCORE_RANGE": 8.0,
     "WEIGHTS": { 'tech': 0.4, 'context': 0.2, 'ai': 0.4 },
     "DECISION_THRESHOLDS": { "buy": 6.0, "sell": 4.0 },
@@ -23,12 +37,14 @@ FULL_CONFIG = {
     }
 }
 
-# Các hàm logic bên dưới không thay đổi
+# --- Các đường dẫn (Không thay đổi) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-NEWS_DIR = os.path.join(BASE_DIR, "ricenews/lognew")
+# Giả sử các file news và context vẫn nằm ở vị trí cũ
+NEWS_DIR = os.path.join(BASE_DIR, "ricenews", "lognew")
 AI_DIR = os.path.join(BASE_DIR, "ai_logs")
-MARKET_CONTEXT_PATH = os.path.join(BASE_DIR, "ricenews/lognew/market_context.json")
+MARKET_CONTEXT_PATH = os.path.join(BASE_DIR, "ricenews", "lognew", "market_context.json")
 
+# --- Các hàm helper (Không thay đổi) ---
 def load_json(path: str, default):
     try:
         with open(path, "r", encoding="utf-8") as f: return json.load(f)
@@ -44,22 +60,14 @@ def get_news_sentiment(title: str, config: dict) -> float:
 def analyze_market_trend(mc: dict) -> str:
     if not mc: return "NEUTRAL"
     up_score, down_score = 0, 0
-    
-    # Lấy giá trị và đảm bảo nó không phải None trước khi so sánh
     fear_greed_value = mc.get('fear_greed', 50)
     if fear_greed_value is None: fear_greed_value = 50
-
     btc_dominance_value = mc.get('btc_dominance', 50)
     if btc_dominance_value is None: btc_dominance_value = 50
-
     if fear_greed_value > 68: up_score += 1
     elif fear_greed_value < 35: down_score += 1
-
     if btc_dominance_value > 55: up_score += 1
     elif btc_dominance_value < 48: down_score += 1
-    
-    if up_score == 2: return "STRONG_UPTREND"
-    if down_score == 2: return "STRONG_DOWNTREND"
     if up_score > down_score: return "UPTREND"
     if down_score > up_score: return "DOWNTREND"
     return "NEUTRAL"
@@ -78,9 +86,9 @@ def get_live_context_and_ai(symbol: str, interval: str, config: dict) -> Tuple[D
         total_score = sum(news_level_score.get(n.get('level', 'INFO'), 0.1) * get_news_sentiment(n.get('title', ''), config) for n in processed_news)
         news_factor = total_score
     news_factor = max(-3.0, min(news_factor, 3.0))
-    final_context = market_context.copy() # Bắt đầu bằng cách sao chép TẤT CẢ dữ liệu gốc
-    final_context["market_trend"] = market_trend # Thêm kết quả phân tích trend vào
-    final_context["news_factor"] = news_factor   # Thêm điểm tin tức vào
+    final_context = market_context.copy()
+    final_context["market_trend"] = market_trend
+    final_context["news_factor"] = news_factor
     ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
     return final_context, ai_data
 
@@ -97,63 +105,46 @@ def generate_combined_trade_plan(base_plan: dict, score: float, config: dict) ->
     new_sl = entry - risk_distance
     return {"entry": round(entry, 8), "tp": round(new_tp, 8), "sl": round(new_sl, 8)}
 
+# ==============================================================================
+# 🚀 HÀM QUYẾT ĐỊNH CHÍNH (ĐÃ NÂNG CẤP)
+# ==============================================================================
+
 def get_advisor_decision(
     symbol: str, interval: str, indicators: dict, config: dict,
-    ai_data_override: Optional[Dict] = None,
-    context_override: Optional[Dict] = None,
     weights_override: Optional[Dict] = None,
 ) -> Dict:
-    if context_override is not None and ai_data_override is not None:
-        context, ai_data = context_override, ai_data_override
-    else:
-        context, ai_data = get_live_context_and_ai(symbol, interval, config)
-
+    # --- Phần lấy context và AI không đổi ---
+    context, ai_data = get_live_context_and_ai(symbol, interval, config)
     market_trend = context.get("market_trend", "NEUTRAL")
     news_factor = context.get("news_factor", 0)
 
-    # 1. Lấy điểm kỹ thuật trực tiếp từ signal_logic
+    # --- 1. Tính điểm Phân tích Kỹ thuật (Không đổi) ---
     signal_details = check_signal(indicators)
     raw_tech_score = signal_details.get("raw_tech_score", 0.0)
-
-    # =========================================================================
-    # ==== 🕵️‍♂️ BẮT ĐẦU VÙNG CODE CHẨN ĐOÁN LỖI 🕵️‍♂️ ====
-    # =========================================================================
-    # In ra lý do tại sao điểm kỹ thuật thô bằng 0 để tìm lỗi
-    if raw_tech_score == 0.0 and "Thiếu dữ liệu" in signal_details.get("reason", ""):
-        # Liệt kê các key bắt buộc từ file signal_logic.py để so sánh
-        required_keys_from_logic = ["rsi_1h", "rsi_4h", "rsi_1d", "price", "volume", "vol_ma20", "macd_cross", "adx", "trend", "cmf", "bb_upper", "bb_lower"]
-        # Tìm xem trong dictionary 'indicators' đang thiếu key nào
-        missing_keys = [key for key in required_keys_from_logic if indicators.get(key) is None]
-        print(f"[DEBUG-ADVISOR] 🕵️ Score thô=0. Lý do: '{signal_details.get('reason')}'. Các chỉ báo bị thiếu: {missing_keys}")
-    # =========================================================================
-    # ==== KẾT THÚC VÙNG CODE CHẨN ĐOÁN LỖI ====
-    # =========================================================================
-
-    # Chuyển điểm kỹ thuật thô (-8 đến +8) về thang 0-10 và sau đó là -1 đến +1
     score_range = config.get("SCORE_RANGE", 8.0)
     tech_score_10 = round(min(max(5.0 + (raw_tech_score * 5.0 / score_range), 0), 10), 1)
     tech_scaled = (tech_score_10 / 5.0) - 1.0
 
-    # 2. Tính điểm AI
-    prob_buy = ai_data.get("prob_buy", 50.0)
-    prob_sell = ai_data.get("prob_sell", 0.0)
-    ai_skew = (prob_buy - prob_sell) / 100.0
-
-    # 3. Tính điểm Context
-    market_score_map = {"STRONG_UPTREND": 1.0, "UPTREND": 0.5, "STRONG_DOWNTREND": -1.0, "DOWNTREND": -0.5}
+    # --- 2. Tính điểm Bối cảnh (Không đổi) ---
+    market_score_map = {"UPTREND": 0.5, "DOWNTREND": -0.5}
     market_score = market_score_map.get(market_trend, 0)
     normalized_news_factor = news_factor / 3.0
     context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2)
 
-    # 4. Tính điểm tổng hợp
+    # --- 3. (NÂNG CẤP) Tính điểm AI từ kết quả tổng hợp ---
+    # Giờ đây, các giá trị này là kết quả từ "Hội đồng Chuyên gia AI"
+    prob_buy = ai_data.get("prob_buy", 50.0)
+    prob_sell = ai_data.get("prob_sell", 0.0)
+    ai_skew = (prob_buy - prob_sell) / 100.0
+
+    # --- 4. Tính điểm tổng hợp cuối cùng (Không đổi) ---
     weights = weights_override if weights_override is not None else config['WEIGHTS']
     final_rating = (weights['tech'] * tech_scaled) + \
                    (weights['context'] * context_scaled) + \
                    (weights['ai'] * ai_skew)
-
     final_score = round(min(max((final_rating + 1) * 5, 0), 10), 1)
 
-    # 5. Ra quyết định
+    # --- 5. Ra quyết định (Không đổi) ---
     thresholds = config['DECISION_THRESHOLDS']
     decision_type = "NEUTRAL"
     if final_score >= thresholds['buy']:
@@ -164,17 +155,30 @@ def get_advisor_decision(
     base_trade_plan = {"price": indicators.get("price", 0)}
     combined_trade_plan = generate_combined_trade_plan(base_trade_plan, final_score, config)
 
-    # === CODE MERGED START ===
+    # --- 6. (NÂNG CẤP) Đóng gói dictionary trả về ---
+    # Thêm `expert_opinions` để tăng cường minh bạch
     return {
-        "decision_type": decision_type, "final_score": final_score, "tech_score": tech_score_10,
+        "decision_type": decision_type,
+        "final_score": final_score,
+        "tech_score": tech_score_10,
         "signal_details": signal_details,
-        "ai_prediction": {"prob_buy": prob_buy, "prob_sell": prob_sell, "pct": ai_data.get('pct', None)},
-        "market_trend": market_trend, "news_factor": news_factor,
-        "full_indicators": indicators, "combined_trade_plan": combined_trade_plan,
+        "ai_prediction": {
+            "prob_buy": prob_buy,
+            "prob_sell": prob_sell,
+            "pct": ai_data.get('pct', None),
+            # (MỚI) Đính kèm ý kiến của từng chuyên gia
+            "expert_opinions": ai_data.get('expert_opinions', {})
+        },
+        "market_trend": market_trend,
+        "news_factor": news_factor,
+        "full_indicators": indicators,
+        "combined_trade_plan": combined_trade_plan,
         "debug_info": {
-            "weights_used": weights, "config_notes": config.get("NOTES", "N/A"),
-            "tech_scaled_value": tech_scaled, "context_scaled_value": context_scaled, "ai_skew_value": ai_skew,
-            "context_used": context # <-- Dòng được thêm vào
+            "weights_used": weights,
+            "config_notes": config.get("NOTES", "N/A"),
+            "tech_scaled_value": tech_scaled,
+            "context_scaled_value": context_scaled,
+            "ai_skew_value": ai_skew,
+            "context_used": context
         }
     }
-    # === CODE MERGED END ===

@@ -116,14 +116,14 @@ class Config:
     TACTICS_LAB = {
         "Breakout_Hunter": {
             "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], "NOTES": "Săn điểm phá vỡ.",
-            "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2}, "ENTRY_SCORE": 7.0,
+            "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3}, "ENTRY_SCORE": 7.0,
             "RR": 2.8, "ATR_SL_MULTIPLIER": 2.0, "USE_TRAILING_SL": True,
             "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0, "ENABLE_PARTIAL_TP": False,
             "TP1_RR_RATIO": None, "TP1_PROFIT_PCT": None
         },
         "Dip_Hunter": {
             "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], "NOTES": "Bắt đáy/sóng hồi an toàn.",
-            "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2}, "ENTRY_SCORE": 6.8,
+            "WEIGHTS": {'tech': 0.5, 'context': 0.2, 'ai': 0.3}, "ENTRY_SCORE": 6.8,
             "RR": 2.0, "ATR_SL_MULTIPLIER": 2.0, "USE_TRAILING_SL": False,
             "TRAIL_ACTIVATION_RR": None, "ENABLE_PARTIAL_TP": True,
             "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.6
@@ -144,7 +144,7 @@ class Config:
         },
         "Cautious_Observer": {
             "OPTIMAL_ZONE": NOISE_ZONE, "NOTES": "Bắn tỉa trong vùng nhiễu.",
-            "WEIGHTS": {'tech': 0.7, 'context': 0.2, 'ai': 0.1}, "ENTRY_SCORE": 8.0,
+            "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2}, "ENTRY_SCORE": 8.0,
             "RR": 1.8, "ATR_SL_MULTIPLIER": 1.5, "USE_TRAILING_SL": True,
             "TRAIL_ACTIVATION_RR": 0.8, "TRAIL_DISTANCE_RR": 0.6, "ENABLE_PARTIAL_TP": True,
             "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.7

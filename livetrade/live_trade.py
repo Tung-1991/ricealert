@@ -161,7 +161,7 @@ TACTICS_LAB = {
     "Breakout_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], # Vùng thị trường tối ưu để Tactic này hoạt động.
         "NOTES": "Săn điểm phá vỡ (breakout) từ nền giá đi ngang siết chặt.",
-        "WEIGHTS": {'tech': 0.7, 'context': 0.1, 'ai': 0.2}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
+        "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
         "ENTRY_SCORE": 7.0,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
         "RR": 2.8,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
         "ATR_SL_MULTIPLIER": 2.0,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
@@ -175,7 +175,7 @@ TACTICS_LAB = {
     "Dip_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Bắt đáy/sóng hồi trong một xu hướng lớn đang diễn ra.",
-        "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
+        "WEIGHTS": {'tech': 0.5, 'context': 0.2, 'ai': 0.3},
         "ENTRY_SCORE": 6.8,
         "RR": 2.0,
         "ATR_SL_MULTIPLIER": 2.0,
@@ -216,7 +216,7 @@ TACTICS_LAB = {
     "Cautious_Observer": {
         "OPTIMAL_ZONE": NOISE_ZONE,                      # Chỉ hoạt động ở vùng Nhiễu.
         "NOTES": "Chỉ vào lệnh khi có cơ hội VÀNG (điểm siêu cao) trong vùng nhiễu nguy hiểm.",
-        "WEIGHTS": {'tech': 0.7, 'context': 0.2, 'ai': 0.1}, # Tin vào tín hiệu kỹ thuật thuần túy, ít tin AI.
+        "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2}, # Tin vào tín hiệu kỹ thuật thuần túy, ít tin AI.
         "ENTRY_SCORE": 8.0,                              # Ngưỡng vào lệnh cực kỳ cao để lọc nhiễu.
         "RR": 1.8,                                       # Kỳ vọng RR thấp, ăn nhanh.
         "ATR_SL_MULTIPLIER": 1.5,                        # SL chặt để thoát nhanh nếu sai.

@@ -90,6 +90,7 @@ class AIModelBundle:
 
     def is_valid(self): return self.meta is not None
 
+# === START UPDATE 1: Nâng cấp hàm analyze_ensemble để trả về JSON chi tiết ===
 def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optional[Dict]:
     df = get_price_data(symbol, interval, API_LIMIT)
     if df.empty or len(df) < SEQUENCE_LENGTH + 50: return None
@@ -144,6 +145,7 @@ def analyze_ensemble(symbol: str, interval: str, bundle: AIModelBundle) -> Optio
         "level": lv['level'], "sub_level": lv['sub_level'],
         "expert_opinions": {name: {"pct": round(op['pct'], 4), "prob_buy": round(op['prob_buy'], 1), "prob_sell": round(op['prob_sell'], 1)} for name, op in opinions.items()}
     }
+# === END UPDATE 1 ===
 
 def classify_level(pb: float, ps: float, pct: float, interval: str) -> Dict[str, str]:
     if pb > 70 and pb > ps * 2: return {"level": "STRONG_BUY", "sub_level": "STRONG_BUY"}
@@ -191,6 +193,7 @@ def should_send_overview(state: dict) -> bool:
 def fmt_price(p): return f"{p:.8f}".rstrip('0').rstrip('.') if p < 1 else f"{p:.4f}".rstrip('0').rstrip('.')
 def fmt_pct(x): return f"{x:+.4f}%" if abs(x) < 0.01 and x != 0 else f"{x:+.2f}%"
 
+# === START UPDATE 2: Nâng cấp hàm instant_alert để hiển thị TP/SL cho mọi level ===
 def instant_alert(res: Dict, old_lv: Optional[str], old_sub: Optional[str]):
     from_str = "Tín hiệu mới"
     if old_lv:
@@ -208,12 +211,12 @@ def instant_alert(res: Dict, old_lv: Optional[str], old_sub: Optional[str]):
         {"name": "Xác suất Mua/Bán", "value": f"`{res['prob_buy']:.1f}% / {res['prob_sell']:.1f}%`", "inline": True},
     ]
 
-    if not is_sub_level_alert:
-        fields.extend([
-            {"name": "Mục tiêu (TP)", "value": f"`{fmt_price(res['tp'])}`", "inline": True},
-            {"name": "Cắt lỗ (SL)", "value": f"`{fmt_price(res['sl'])}`", "inline": True},
-            {"name": "\u200b", "value": "\u200b", "inline": True}
-        ])
+    # Thay đổi ở đây: Thêm TP/SL cho TẤT CẢ các tín hiệu
+    fields.extend([
+        {"name": "Mục tiêu (TP)", "value": f"`{fmt_price(res['tp'])}`", "inline": True},
+        {"name": "Cắt lỗ (SL)", "value": f"`{fmt_price(res['sl'])}`", "inline": True},
+        {"name": "\u200b", "value": "\u200b", "inline": True}
+    ])
 
     embed = {
         "title": f"🔔 AI Alert: {res['symbol']} ({res['interval']})",
@@ -223,6 +226,8 @@ def instant_alert(res: Dict, old_lv: Optional[str], old_sub: Optional[str]):
         "footer": {"text": f"AI Model Ensemble | {datetime.now(ZoneInfo('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S')}"}
     }
     send_discord({"embeds": [embed]})
+# === END UPDATE 2 ===
+
 
 def summary_report(results: List[Dict]):
     counts = {"BUY": sum(1 for r in results if "BUY" in r['level']), "SELL": sum(1 for r in results if "SELL" in r['level'])}
