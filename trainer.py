@@ -1,9 +1,8 @@
 # ===================== trainer.py — Keras 3 Modernized Version =====================
-# NÂNG CẤP:
-# - Chuyển đổi hoàn toàn sang Keras 3 (import từ 'keras' thay vì 'tensorflow.keras').
-# - Sử dụng định dạng lưu trữ model mới nhất và hiệu quả nhất là `.keras`.
-# - Import trực tiếp các optimizer, loss, callback từ Keras để code rõ ràng hơn.
-# - Giữ nguyên 100% các tính năng, bộ lọc log, và logic xử lý dữ liệu gốc.
+# PHIÊN BẢN CẬP NHẬT: Tối ưu cho việc chạy cô lập từng tiến trình.
+# - Script sẽ nhận SYMBOL và INTERVAL từ tham số dòng lệnh.
+# - Loại bỏ vòng lặp bên trong, mỗi lần chạy chỉ xử lý một tác vụ duy nhất.
+# - Đảm bảo giải phóng 100% bộ nhớ sau khi hoàn thành.
 # ======================================================================================
 
 import os, sys, re, warnings, json, random, time, threading, select
@@ -19,13 +18,22 @@ os.environ.setdefault("XLA_FLAGS", "--xla_gpu_use_runtime_fusion=false --xla_gpu
 DEBUG = os.getenv("DEBUG", "0") == "1"
 VERBOSE = 2 if DEBUG else 0
 
-# --- Bộ lọc log C-level mạnh mẽ (GIỮ NGUYÊN) ---
+# --- Bộ lọc log C-level mạnh mẽ (ĐÃ CẬP NHẬT) ---
 _PAT_RUBBISH = re.compile(
     r"(\+ptx85|could not open file to read NUMA node|Your kernel may have been built without NUMA support|"
     r"XLA service .* initialized|Compiled cluster using XLA|does not guarantee that XLA will be used|"
     r"StreamExecutor device|retracing\.|All log messages before absl::InitializeLog()|"
     r"^I\d{4} |^W\d{4} |^E\d{4} |^=+\s*TensorFlow\s*=+|NVIDIA Release|Container image Copyright|"
-    r"governed by the NVIDIA|NOTE: The SHMEM allocation limit)",
+    r"governed by the NVIDIA|NOTE: The SHMEM allocation limit|"
+    # --- [CẬP NHẬT] Lọc các log mới từ Keras 3 / TF 2.16+ ---
+    r"Unable to register cu(FFT|DNN|BLAS) factory|" # Lọc cảnh báo đăng ký thư viện CUDA
+    r"This TensorFlow binary is optimized to use|" # Lọc thông báo tối ưu hóa CPU
+    r"Could not identify NUMA node|"              # Lọc thêm cảnh báo về NUMA
+    r"Created device /job:localhost|"             # Lọc thông báo tạo thiết bị GPU
+    r"not a recognized feature for this target|"  # Lọc cảnh báo lạ của LightGBM/XGBoost
+    r"ignoring feature|"                          # Lọc cảnh báo lạ của LightGBM/XGBoost
+    r"disabling MLIR crash reproducer|"           # Lọc thông báo của MLIR
+    r"Loaded cuDNN version)",                      # Lọc thông báo phiên bản cuDNN
     re.IGNORECASE
 )
 _PAT_EPOCH = re.compile(r"^\s*Epoch\s+\d+/\d+")
@@ -96,6 +104,7 @@ random.seed(SEED); np.random.seed(SEED);
 keras.utils.set_random_seed(SEED)
 load_dotenv()
 
+# Các biến môi trường này vẫn được dùng để lấy giá trị mặc định
 SYMBOLS   = os.getenv("SYMBOLS",  "ETHUSDT,BTCUSDT").split(",")
 INTERVALS = os.getenv("INTERVALS","1h,4h,1d").split(",")
 
@@ -184,12 +193,9 @@ def create_labels_and_targets(df: pd.DataFrame, fut_off: int, atr_factor: float)
     df_copy.loc[(df_copy['close'] - future_price) > atr_threshold, 'label'] = 0
 
     # THAY ĐỔI: Tính trực tiếp % thay đổi giá làm mục tiêu hồi quy
-    # Mẫu số là giá hiện tại, ổn định hơn ATR rất nhiều
     df_copy['reg_target'] = ((future_price - df_copy['close']) / (df_copy['close'] + 1e-9)) * 100
-
-    # Clip giá trị phần trăm trong một khoảng hợp lý, ví dụ +/- 20%
     df_copy['reg_target'] = df_copy['reg_target'].clip(lower=-20, upper=20)
-    
+
     return df_copy.dropna()
 
 
@@ -201,7 +207,6 @@ def create_sequences(data: pd.DataFrame, feature_cols: list, label_clf_col: str,
         y_reg.append(data[label_reg_col].iloc[i + seq_length])
     return np.array(X), np.array(y_clf), np.array(y_reg)
 
-# THAY ĐỔI: Cập nhật hàm dựng model sử dụng API Keras 3
 def build_lstm_model(input_shape: tuple, model_type: str = 'classifier'):
     inputs = layers.Input(shape=input_shape)
     x = layers.LSTM(units=100, return_sequences=True, unroll=True)(inputs)
@@ -214,13 +219,12 @@ def build_lstm_model(input_shape: tuple, model_type: str = 'classifier'):
         outputs = layers.Dense(units=3, activation='softmax')(x)
         model = models.Model(inputs, outputs)
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    else:
+    else: # regressor
         outputs = layers.Dense(units=1, activation='linear')(x)
         model = models.Model(inputs, outputs)
         model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
     return model
 
-# THAY ĐỔI: Cập nhật hàm dựng model Transformer sử dụng API Keras 3
 def transformer_encoder_block(inputs, head_size, num_heads, ff_dim, dropout=0):
     x = layers.LayerNormalization(epsilon=1e-6)(inputs)
     x = layers.MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout)(x, x)
@@ -244,7 +248,7 @@ def build_transformer_model(input_shape, head_size, num_heads, ff_dim, num_layer
         outputs = layers.Dense(3, activation="softmax")(x)
         model = models.Model(inputs, outputs)
         model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    else:
+    else: # regressor
         outputs = layers.Dense(1, activation="linear")(x)
         model = models.Model(inputs, outputs)
         model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mae"])
@@ -258,7 +262,7 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     scaler = StandardScaler()
     df_scaled = df.copy()
     df_scaled[features_to_use] = scaler.fit_transform(df[features_to_use]).astype(np.float32)
-    
+
     print("  -> (1/3) LightGBM...")
     try:
         X_lgbm, y_clf_lgbm, y_reg_lgbm = df[features_to_use], df['label'], df['reg_target']
@@ -274,35 +278,36 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
                      callbacks=[lgb.early_stopping(50, verbose=False)])
         joblib.dump(clf_lgbm, os.path.join(DATA_DIR, f"model_{symbol}_lgbm_clf_{interval}.pkl"), compress=3)
         joblib.dump(reg_lgbm, os.path.join(DATA_DIR, f"model_{symbol}_lgbm_reg_{interval}.pkl"), compress=3)
-        print("     ✅ LightGBM xong.")
+        print("      ✅ LightGBM xong.")
     except Exception as e:
-        print(f"     ❌ LGBM lỗi: {e}")
+        print(f"      ❌ LGBM lỗi: {e}")
 
     print("  -> Dựng dữ liệu chuỗi và pipeline tf.data cho DL...")
     try:
         X_seq, y_clf_seq, y_reg_seq = create_sequences(df_scaled, features_to_use, 'label', 'reg_target', SEQUENCE_LENGTH)
         X_seq = X_seq.astype(np.float32)
-        # THAY ĐỔI: Sử dụng keras.utils.to_categorical
         y_clf_seq_cat = utils.to_categorical(y_clf_seq.astype(np.int32), num_classes=3).astype(np.float32)
         y_reg_seq = y_reg_seq.astype(np.float32)
         if len(X_seq) < 100: raise ValueError(f"Không đủ chuỗi ({len(X_seq)}).")
+        
         val_size = int(len(X_seq) * 0.15)
         train_size = len(X_seq) - val_size
+        
         ds_clf = tf.data.Dataset.from_tensor_slices((X_seq, y_clf_seq_cat))
-        train_ds_clf = ds_clf.take(train_size).cache().shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        train_ds_clf = ds_clf.take(train_size).shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
         val_ds_clf = ds_clf.skip(train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        
         ds_reg = tf.data.Dataset.from_tensor_slices((X_seq, y_reg_seq))
-        train_ds_reg = ds_reg.take(train_size).cache().shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
+        train_ds_reg = ds_reg.take(train_size).shuffle(buffer_size=train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
         val_ds_reg = ds_reg.skip(train_size).batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
     except Exception as e:
-        print(f"     ❌ Tạo chuỗi/pipeline lỗi: {e}. Bỏ qua DL.")
+        print(f"      ❌ Tạo chuỗi/pipeline lỗi: {e}. Bỏ qua DL.")
         meta = {"features": features_to_use, "trained_at": datetime.now(timezone.utc).isoformat(), "atr_factor_threshold": LABEL_MAP.get(interval, 0.75), "future_offset": OFFS_MAP.get(interval, 4), "sequence_length": SEQUENCE_LENGTH}
         joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
         with open(os.path.join(DATA_DIR, f"meta_{symbol}_{interval}.json"), "w") as f: json.dump(meta, f, indent=2)
         return
 
     input_shape = (X_seq.shape[1], X_seq.shape[2])
-    # THAY ĐỔI: Sử dụng callbacks từ Keras 3
     es_callback_clf = callbacks.EarlyStopping(patience=10, monitor='val_accuracy', mode='max', restore_best_weights=True)
     es_callback_reg = callbacks.EarlyStopping(patience=10, monitor='val_loss', mode='min', restore_best_weights=True)
 
@@ -310,29 +315,27 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     try:
         clf_lstm = build_lstm_model(input_shape, model_type='classifier')
         clf_lstm.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[es_callback_clf], verbose=VERBOSE)
-        # THAY ĐỔI: Lưu model với định dạng .keras
         clf_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_clf_{interval}.keras"))
-        
+
         reg_lstm = build_lstm_model(input_shape, model_type='regressor')
         reg_lstm.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[es_callback_reg], verbose=VERBOSE)
         reg_lstm.save(os.path.join(DATA_DIR, f"model_{symbol}_lstm_reg_{interval}.keras"))
-        print("     ✅ LSTM xong.")
+        print("      ✅ LSTM xong.")
     except Exception as e:
-        print(f"     ❌ LSTM lỗi: {e}")
+        print(f"      ❌ LSTM lỗi: {e}")
 
     print("  -> (3/3) Transformer...")
     try:
         clf_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='classifier')
         clf_trans.fit(train_ds_clf, validation_data=val_ds_clf, epochs=50, callbacks=[es_callback_clf], verbose=VERBOSE)
-        # THAY ĐỔI: Lưu model với định dạng .keras
         clf_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_clf_{interval}.keras"))
-        
+
         reg_trans = build_transformer_model(input_shape, head_size=256, num_heads=TRANSFORMER_HEADS, ff_dim=4, num_layers=TRANSFORMER_LAYERS, model_type='regressor')
         reg_trans.fit(train_ds_reg, validation_data=val_ds_reg, epochs=50, callbacks=[es_callback_reg], verbose=VERBOSE)
         reg_trans.save(os.path.join(DATA_DIR, f"model_{symbol}_transformer_reg_{interval}.keras"))
-        print("     ✅ Transformer xong.")
+        print("      ✅ Transformer xong.")
     except Exception as e:
-        print(f"     ❌ Transformer lỗi: {e}")
+        print(f"      ❌ Transformer lỗi: {e}")
 
     meta = {"features": features_to_use, "trained_at": datetime.now(timezone.utc).isoformat(), "atr_factor_threshold": LABEL_MAP.get(interval, 0.75), "future_offset": OFFS_MAP.get(interval, 4), "sequence_length": SEQUENCE_LENGTH}
     joblib.dump(scaler, os.path.join(DATA_DIR, f"scaler_{symbol}_{interval}.pkl"))
@@ -340,8 +343,19 @@ def train_and_save_all_models(symbol: str, interval: str, df: pd.DataFrame):
     counts = pd.Series(df['label']).value_counts()
     print(f"--- ✅ Xong {symbol} [{interval}] | Tổng: {len(df)} (S:{counts.get(0,0)}, H:{counts.get(1,0)}, B:{counts.get(2,0)}) ---\n")
 
+# ======================== KHỐI MAIN ĐÃ ĐƯỢC THAY THẾ HOÀN TOÀN ========================
 if __name__ == "__main__":
-    print("--- BẮT ĐẦU QUÁ TRÌNH HUẤN LUYỆN ---")
+    # Script bây giờ sẽ nhận chính xác 2 tham số: SYMBOL và INTERVAL
+    if len(sys.argv) != 3:
+        print("Lỗi: Cần cung cấp chính xác 2 tham số: SYMBOL và INTERVAL")
+        print("Cách dùng: python trainer.py <SYMBOL> <INTERVAL>")
+        print("Ví dụ: python trainer.py ETHUSDT 1h")
+        sys.exit(1)
+
+    target_symbol = sys.argv[1].strip().upper()
+    target_interval = sys.argv[2].strip().lower()
+
+    print(f"--- BẮT ĐẦU QUÁ TRÌNH HUẤN LUYỆN CHO {target_symbol} [{target_interval}] ---")
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
         try:
@@ -353,34 +367,34 @@ if __name__ == "__main__":
     else:
         print("⚠️ Không phát hiện GPU. Sẽ chạy trên CPU (rất chậm).")
 
-    intervals_to_train = [iv.strip() for iv in INTERVALS if iv.strip()]
-    if len(sys.argv) > 1:
-        intervals_to_train = [iv.strip() for iv in sys.argv[1].split(',') if iv.strip()]
-        print(f"🚀 Huấn luyện theo tham số CLI intervals: {intervals_to_train}")
+    # Lấy cấu hình cho đúng interval
+    hist_len   = HIST_MAP.get(target_interval, 3000)
+    fut_off    = OFFS_MAP.get(target_interval, 4)
+    atr_factor = LABEL_MAP.get(target_interval, 0.75)
+    step_size  = STEP_MAP.get(target_interval, 1000)
+    min_rows   = MIN_MAP.get(target_interval, 500)
+    
+    try:
+        print(f"\n🔄 Dựng dữ liệu cho {target_symbol} [{target_interval}]...")
+        df_raw = get_full_price_history(target_symbol, target_interval, hist_len + fut_off + SEQUENCE_LENGTH, step_size)
+        if len(df_raw) < min_rows:
+            print(f"❌ Bỏ qua {target_symbol} [{target_interval}] – chỉ có {len(df_raw)} nến (< {min_rows}).")
+            sys.exit(0)
 
-    for sym in SYMBOLS:
-        for iv in intervals_to_train:
-            hist_len   = HIST_MAP.get(iv, 3000)
-            fut_off    = OFFS_MAP.get(iv, 4)
-            atr_factor = LABEL_MAP.get(iv, 0.75)
-            step_size  = STEP_MAP.get(iv, 1000)
-            min_rows   = MIN_MAP.get(iv, 500)
-            print(f"\n🔄 Dựng dữ liệu cho {sym} [{iv}]...")
-            try:
-                df_raw = get_full_price_history(sym, iv, hist_len + fut_off + SEQUENCE_LENGTH, step_size)
-                if len(df_raw) < min_rows:
-                    print(f"❌ Bỏ qua {sym} [{iv}] – chỉ có {len(df_raw)} nến (< {min_rows}).")
-                    continue
-                df_features = add_features(df_raw)
-                df_dataset  = create_labels_and_targets(df_features, fut_off, atr_factor)
-                if len(df_dataset) < (min_rows // 2):
-                    print(f"⚠️ Bỏ qua {sym} [{iv}] – mẫu hợp lệ sau khi tạo nhãn quá ít: {len(df_dataset)}.")
-                    continue
-                train_and_save_all_models(sym, iv, df_dataset)
-            except Exception as e:
-                print(f"[CRITICAL] Lỗi nghiêm trọng khi xử lý {sym} [{iv}]: {e}")
-                import traceback
-                print(traceback.format_exc())
-                
-    print("\n🎯 TOÀN BỘ QUÁ TRÌNH HUẤN LUYỆN ĐÃ HOÀN TẤT.")
-    print("Có thể nén thư mục 'data' để deploy.")
+        df_features = add_features(df_raw)
+        df_dataset  = create_labels_and_targets(df_features, fut_off, atr_factor)
+        
+        if len(df_dataset) < (min_rows // 2):
+            print(f"⚠️ Bỏ qua {target_symbol} [{target_interval}] – mẫu hợp lệ sau khi tạo nhãn quá ít: {len(df_dataset)}.")
+            sys.exit(0)
+
+        # Bây giờ, không cần dọn dẹp thủ công nữa vì tiến trình sẽ tự kết thúc
+        train_and_save_all_models(target_symbol, target_interval, df_dataset)
+
+    except Exception as e:
+        print(f"[CRITICAL] Lỗi nghiêm trọng khi xử lý {target_symbol} [{target_interval}]: {e}")
+        import traceback
+        print(traceback.format_exc())
+        sys.exit(1)
+
+    print(f"\n🎯 HOÀN TẤT HUẤN LUYỆN CHO {target_symbol} [{target_interval}]. Tiến trình sẽ thoát và giải phóng bộ nhớ.")
