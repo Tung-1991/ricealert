@@ -480,30 +480,38 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
         return final_df
     return existing_df if existing_df is not None else None
 
-# Thay thế hàm này trong file live_trade.py
-
 def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, state: Dict, close_pct: float = 1.0) -> bool:
     symbol = trade['symbol']
     side = "SELL"
     qty_in_state = float(trade.get('quantity', 0))
     final_quantity_to_sell = 0.0
+
+    # <<< BẮT ĐẦU KHỐI LOGIC MỚI AN TOÀN HƠN >>>
     try:
         asset_code = symbol.replace("USDT", "")
         balances = bnc.get_account_balance().get("balances", [])
         asset_on_binance = next((b for b in balances if b["asset"] == asset_code), None)
-        if asset_on_binance and float(asset_on_binance.get('free', 0)) > 0:
-            qty_on_binance = float(asset_on_binance['free'])
-            log_message(f"ℹ️ Đối soát {symbol}: Bot ghi {qty_in_state:.8f}, Sàn có {qty_on_binance:.8f}", state)
-            final_quantity_to_sell = min(qty_in_state, qty_on_binance) * close_pct
-        else:
-            final_quantity_to_sell = qty_in_state * close_pct
-            log_message(f"⚠️ Không lấy được số dư {symbol}, tạm dùng số lượng bot ghi nhận.", state)
+
+        # Kiểm tra nghiêm ngặt: Nếu không thấy tài sản hoặc số dư là 0 trên sàn
+        if not asset_on_binance or float(asset_on_binance.get('free', 0)) <= 0:
+            log_error(f"Lỗi Đối soát: Không tìm thấy {asset_code} hoặc số dư = 0 trên sàn. Hủy đóng lệnh.", state=state)
+            return False # Dừng lại ngay lập tức
+
+        qty_on_binance = float(asset_on_binance['free'])
+        log_message(f"ℹ️ Đối soát {symbol}: Bot ghi {qty_in_state:.8f}, Sàn có {qty_on_binance:.8f}", state)
+        # Luôn lấy số lượng nhỏ hơn giữa state và số dư thực tế trên sàn
+        final_quantity_to_sell = min(qty_in_state, qty_on_binance) * close_pct
+
     except Exception as e:
-        log_error(f"Lỗi khi lấy số dư {symbol}. Tạm dùng số lượng bot ghi nhận.", error_details=str(e), state=state)
-        final_quantity_to_sell = qty_in_state * close_pct
+        # Nếu có bất kỳ lỗi API nào (mạng, Binance lag...), dừng lại ngay lập tức
+        log_error(f"Lỗi API nghiêm trọng khi lấy số dư {symbol} để đóng lệnh. Hủy để đảm bảo an toàn.", error_details=str(e), state=state, send_to_discord=True)
+        return False
+    # <<< KẾT THÚC KHỐI LOGIC MỚI >>>
+
     if final_quantity_to_sell <= 0:
         log_message(f"⚠️ Bỏ qua đóng lệnh {symbol} vì số lượng tính toán là zero hoặc âm.", state=state)
         return False
+        
     trade.setdefault('close_retry_count', 0)
     try:
         market_close_order = bnc.place_market_order(symbol=symbol, side=side, quantity=final_quantity_to_sell)
@@ -515,19 +523,21 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
             log_error(message=f"Không thể đóng lệnh {symbol} sau {trade['close_retry_count']} lần thử. CẦN CAN THIỆP THỦ CÔNG!", error_details=traceback.format_exc(), send_to_discord=True, force_discord=True, state=state)
             trade['close_retry_count'] = 0
         return False
+        
     if not (market_close_order and float(market_close_order.get('executedQty', 0)) > 0):
         log_error(f"Lệnh đóng {symbol} được gửi nhưng không khớp. Kiểm tra trên sàn.", state=state)
         return False
+        
     closed_qty = float(market_close_order['executedQty'])
     money_gained = float(market_close_order['cummulativeQuoteQty'])
     exit_price = money_gained / closed_qty if closed_qty > 0 else trade['entry_price']
     state['money_gained_from_trades_last_session'] += money_gained
     pnl_usd = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd
+    
     if close_pct >= 0.999:
         pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100 if trade['entry_price'] > 0 else 0
         
-        # <<< SỬA LỖI Ở ĐÂY: TÍNH TOÁN VÀ LƯU holding_duration_hours NGAY LẬP TỨC >>>
         exit_time_dt = datetime.now(VIETNAM_TZ)
         entry_time_dt = datetime.fromisoformat(trade['entry_time'])
         holding_hours = round((exit_time_dt - entry_time_dt).total_seconds() / 3600, 2)
@@ -536,11 +546,10 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
             'status': f'Closed ({reason})',
             'exit_price': exit_price,
             'exit_time': exit_time_dt.isoformat(),
-            'holding_duration_hours': holding_hours, # Thêm giá trị đã tính
+            'holding_duration_hours': holding_hours,
             'pnl_usd': trade.get('realized_pnl_usd', 0.0) + pnl_usd,
             'pnl_percent': pnl_percent
         })
-        # <<< KẾT THÚC SỬA LỖI >>>
 
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
@@ -550,12 +559,10 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         symbol_cooldowns = cooldown_dict.setdefault(symbol, {})
         symbol_cooldowns[trade_interval] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
         
-        # GỌI HÀM GHI CSV SAU KHI ĐÃ CẬP NHẬT ĐẦY ĐỦ DỮ LIỆU
         export_trade_history_to_csv([trade]) 
         
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
     else:
-        # Phần partial close giữ nguyên, không cần sửa
         trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_usd
         if 'total_invested_usd' in trade and trade['total_invested_usd'] > 0:
             original_qty = qty_in_state
@@ -564,6 +571,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         trade['quantity'] -= closed_qty
         trade.setdefault('tactic_used', []).append(f"Partial_Close_{reason}")
         state.setdefault('temp_newly_closed_trades', []).append(f"💰 {symbol} (Đóng {close_pct*100:.0f}% - {reason}): PnL ${pnl_usd:,.2f}")
+        
     return True
 
 
@@ -1150,7 +1158,7 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                 continue
 
     trade_history = state.get('trade_history', [])
-    closed_trades_in_history = [t for t in trade_history if 'Closed' in t.get('status', '')]
+    closed_trades_in_history = [t for t in trade_history if 'Closed' in t.get('status', '') and 'Desynced' not in t.get('status', '')]
     total_closed = len(closed_trades_in_history)
     wins = sum(1 for t in closed_trades_in_history if t.get('pnl_usd', 0) > 0)
     win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
@@ -1227,19 +1235,39 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
         report.append("\n--- **Lịch sử giao dịch gần nhất** ---")
         sorted_by_pnl = sorted(closed_trades_in_history, key=lambda x: x.get('pnl_usd', 0), reverse=True)
         top_5_wins = [t for t in sorted_by_pnl if t.get('pnl_usd', 0) > 0][:5]
-        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) <= 0], key=lambda x: x.get('pnl_usd', 0))[:5]
+        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) < 0], key=lambda x: x.get('pnl_usd', 0))[:5]
         if top_5_wins:
             report.append("\n**✅ Top 5 lệnh lãi gần nhất**")
             for trade in top_5_wins:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
+                try:
+                    hold_display_h = trade.get('holding_duration_hours')
+                    if not hold_display_h: # Nếu không có trường này hoặc bằng 0
+                        entry_dt = datetime.fromisoformat(trade.get('entry_time'))
+                        exit_dt = datetime.fromisoformat(trade.get('exit_time'))
+                        hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
+                except:
+                    hold_display_h = 0.0
                 report.append(f"  • ✅ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {trade.get('holding_duration_hours', 0):.1f}h`")
+                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
         if top_5_losses:
-            report.append("\n**❌ Top 5 lệnh lỗ/hòa vốn gần nhất**")
+            # Tên báo cáo vẫn là "lỗ/hòa vốn" để bao quát
+            report.append("\n**❌ Top 5 lệnh lỗ gần nhất**") # Có thể đổi tiêu đề nếu muốn
             for trade in top_5_losses:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
+                # <<< COPY LOGIC TÍNH TOÁN VÀO ĐÂY >>>
+                try:
+                    hold_display_h = trade.get('holding_duration_hours')
+                    if not hold_display_h: # Nếu không có trường này hoặc bằng 0
+                        entry_dt = datetime.fromisoformat(trade.get('entry_time'))
+                        exit_dt = datetime.fromisoformat(trade.get('exit_time'))
+                        hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
+                except:
+                    hold_display_h = 0.0
+                # <<< KẾT THÚC COPY >>>
                 report.append(f"  • ❌ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {trade.get('holding_duration_hours', 0):.1f}h`")
+                # Sửa dòng dưới để dùng biến đã tính
+                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
     
     return '\n'.join(report)
 
@@ -1453,3 +1481,4 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
+
