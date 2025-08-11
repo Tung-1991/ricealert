@@ -1,4 +1,6 @@
 # === Python & Virtual Env ===
+livetrade/data_cache/
+livetrade/backtest_results/
 rice_news_env/*
 __pycache__/
 *.py[cod]
