@@ -1,5 +1,6 @@
 # /root/ricealert/trade_advisor.py
-import os, json
+import os
+import json
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 from signal_logic import check_signal
@@ -8,26 +9,29 @@ from signal_logic import check_signal
 # =================== ⚙️ TRUNG TÂM CẤU HÌNH & TINH CHỈNH ⚙️ =====================
 # ==============================================================================
 FULL_CONFIG = {
-    "NOTES": "v7.0 - Integrated News Score from rice_news",
+    "NOTES": "v8.0 - Advanced News Context Analysis",
     "SCORE_RANGE": 8.0,
-    "WEIGHTS": { 'tech': 0.45, 'context': 0.2, 'ai': 0.35 }, # Tinh chỉnh lại trọng số một chút
+    "WEIGHTS": { 'tech': 0.45, 'context': 0.2, 'ai': 0.35 },
     "DECISION_THRESHOLDS": { "buy": 6.0, "sell": 4.0 },
     "TRADE_PLAN_RULES": {
         "default_rr_ratio": 1.8, "high_score_rr_ratio": 2.2,
         "critical_score_rr_ratio": 2.8, "default_sl_percent": 0.03
     },
-    # *** NÂNG CẤP 1: TINH GỌN CẤU HÌNH ***
-    # Logic tính điểm tin tức đã được chuyển hoàn toàn sang rice_news.py.
-    # Các từ khóa và điểm theo level ở đây không còn cần thiết nữa.
+    # <<< NÂNG CẤP V8.0: Cấu hình mới cho việc phân tích bối cảnh tin tức >>>
     "CONTEXT_SETTINGS": {
-        # Hệ số này cho phép bạn tăng/giảm tầm ảnh hưởng của điểm tin tức một cách nhanh chóng.
-        # > 1.0: Tăng ảnh hưởng của tin tức. < 1.0: Giảm ảnh hưởng.
-        "NEWS_SCORE_MULTIPLIER": 1.0
+        # Con số này dùng để chuẩn hóa điểm tin tức. Thay vì / 20.0, giờ nó là một biến số.
+        # Nếu tổng điểm tin trong ngày thường xuyên vượt quá 25, hãy tăng con số này lên.
+        "NEWS_NORMALIZATION_CAP": 25.0,
+        
+        # Logic tổng hợp tin tức.
+        # "HIGHEST_ABS": Chỉ dùng tin có điểm tuyệt đối cao nhất. (Khuyến nghị)
+        # "NET_SCORE": Cộng dồn tất cả điểm tin tức. (Logic cũ)
+        "NEWS_AGGREGATION_METHOD": "HIGHEST_ABS"
     }
 }
 
 # ==============================================================================
-# =================== 💻 LOGIC CHƯƠNG TRÌNH (ĐÃ NÂNG CẤP) 💻 ====================
+# =================== 💻 LOGIC CHƯƠNG TRÌNH (KHÔNG THAY ĐỔI) 💻 ===================
 # ==============================================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,9 +43,6 @@ def load_json(path: str, default):
     try:
         with open(path, "r", encoding="utf-8") as f: return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError): return default
-
-# *** NÂNG CẤP 2: HÀM get_news_sentiment ĐÃ BỊ LOẠI BỎ ***
-# Logic này giờ đây được xử lý hoàn toàn bên trong rice_news.py.
 
 def analyze_market_trend(mc: dict) -> str:
     if not mc: return "NEUTRAL"
@@ -65,7 +66,7 @@ def analyze_market_trend(mc: dict) -> str:
     if down_score > up_score: return "DOWNTREND"
     return "NEUTRAL"
 
-# *** NÂNG CẤP 3: HÀM SỬ DỤNG TRỰC TIẾP ĐIỂM SỐ TỪ RICE_NEWS ***
+# <<< NÂNG CẤP V8.0: Hàm này được viết lại hoàn toàn để xử lý tin tức thông minh hơn >>>
 def get_live_context_and_ai(symbol: str, interval: str, config: dict) -> Tuple[Dict, Dict]:
     market_context = load_json(MARKET_CONTEXT_PATH, {})
     market_trend = analyze_market_trend(market_context)
@@ -74,21 +75,24 @@ def get_live_context_and_ai(symbol: str, interval: str, config: dict) -> Tuple[D
     
     tag_clean = symbol.lower().replace("usdt", "").strip()
     
-    # Lấy tin tức liên quan đến coin hoặc tin vĩ mô/chung
     relevant_news = [n for n in news_data if n.get("category_tag", "").lower() == tag_clean or n.get("category_tag") in {"MACRO", "GENERAL"}]
     
-    # === LOGIC CỐT LÕI ĐƯỢC THAY ĐỔI TẠI ĐÂY ===
-    # Thay vì tự tính toán phức tạp, nó chỉ cần cộng tổng trường 'news_score' đã có sẵn.
     news_factor = 0.0
-    if relevant_news:
-        news_factor = sum(n.get('news_score', 0.0) for n in relevant_news)
+    aggregation_method = config['CONTEXT_SETTINGS'].get("NEWS_AGGREGATION_METHOD", "HIGHEST_ABS")
 
-    # Áp dụng hệ số nhân để tinh chỉnh ảnh hưởng của tin tức nếu cần
-    news_factor *= config['CONTEXT_SETTINGS'].get('NEWS_SCORE_MULTIPLIER', 1.0)
-    
+    if relevant_news:
+        if aggregation_method == "HIGHEST_ABS":
+            # Cách 1 (Khuyến nghị): Tìm tin có ảnh hưởng lớn nhất (điểm tuyệt đối cao nhất).
+            # Điều này tránh việc tin tốt và tin xấu triệt tiêu nhau.
+            most_impactful_news = max(relevant_news, key=lambda n: abs(n.get('news_score', 0)))
+            news_factor = most_impactful_news.get('news_score', 0.0)
+        else: # "NET_SCORE" hoặc mặc định
+            # Cách 2 (Logic cũ): Cộng dồn tất cả điểm.
+            news_factor = sum(n.get('news_score', 0.0) for n in relevant_news)
+
     final_context = market_context.copy()
     final_context["market_trend"] = market_trend
-    final_context["news_factor"] = news_factor   # news_factor giờ là tổng điểm từ rice_news
+    final_context["news_factor"] = news_factor
     
     ai_data = load_json(os.path.join(AI_DIR, f"{symbol}_{interval}.json"), {})
     return final_context, ai_data
@@ -106,6 +110,7 @@ def generate_combined_trade_plan(base_plan: dict, score: float, config: dict) ->
     new_sl = entry - risk_distance
     return {"entry": round(entry, 8), "tp": round(new_tp, 8), "sl": round(new_sl, 8)}
 
+# <<< NÂNG CẤP V8.0: Sửa một dòng để sử dụng logic chuẩn hóa mới >>>
 def get_advisor_decision(
     symbol: str, interval: str, indicators: dict, config: dict,
     ai_data_override: Optional[Dict] = None,
@@ -139,9 +144,9 @@ def get_advisor_decision(
     market_score_map = {"STRONG_UPTREND": 1.0, "UPTREND": 0.5, "STRONG_DOWNTREND": -1.0, "DOWNTREND": -0.5}
     market_score = market_score_map.get(market_trend, 0)
     
-    # Chuẩn hóa news_factor. Giả định rằng tổng điểm tin tức hiếm khi vượt quá 20.
-    # Con số này có thể được điều chỉnh sau khi quan sát thực tế.
-    normalized_news_factor = news_factor / 20.0 
+    # Sử dụng biến số từ config thay vì số 20.0 cứng nhắc
+    normalization_cap = config['CONTEXT_SETTINGS'].get('NEWS_NORMALIZATION_CAP', 25.0)
+    normalized_news_factor = news_factor / normalization_cap
     
     context_scaled = round(min(max((market_score + normalized_news_factor) / 2, -1.0), 1.0), 2)
 

@@ -261,25 +261,27 @@ def main():
         prev = state.get(key, {})
         new_sub_level = res['sub_level']
 
-        # Chỉ xử lý khi tín hiệu thay đổi
+        # Đoạn code sửa lại
         if new_sub_level != prev.get('last_sub_level'):
             
-            # Lấy timestamp của lần alert trước đó
+            # BƯỚC 1: Lưu lại trạng thái CŨ vào các biến tạm
+            old_level_to_report = prev.get('last_level')
+            old_sub_level_to_report = prev.get('last_sub_level')
+
             last_alert_ts = prev.get('last_alert_timestamp', 0)
             cooldown_duration = COOLDOWN_BY_LEVEL.get(res['level'], 3600)
 
-            # Luôn cập nhật tín hiệu mới vào state
-            # setdefault đảm bảo key tồn tại trong state trước khi gán
+            # BƯỚC 2: Cập nhật state với tín hiệu MỚI
             state.setdefault(key, {})
             state[key]['last_level'] = res['level']
             state[key]['last_sub_level'] = new_sub_level
             
-            # Kiểm tra xem đã hết thời gian cooldown chưa
             if now_utc_ts - last_alert_ts > cooldown_duration:
                 print(f"     - Gửi ALERT cho {key} (Tín hiệu mới: {new_sub_level})")
-                instant_alert(res, prev.get('last_level'), prev.get('last_sub_level'))
                 
-                # CHỈ cập nhật timestamp KHI gửi alert thành công
+                # BƯỚC 3: Gọi hàm alert với các biến tạm chứa trạng thái CŨ
+                instant_alert(res, old_level_to_report, old_sub_level_to_report) 
+                
                 state[key]['last_alert_timestamp'] = now_utc_ts
             else:
                 remaining = int(cooldown_duration - (now_utc_ts - last_alert_ts))
@@ -298,3 +300,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
