@@ -380,6 +380,8 @@ def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tupl
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
     return pnl_usd, pnl_percent
 
+# Thay thế hàm này trong file live_trade.py
+
 def export_trade_history_to_csv(closed_trades: List[Dict]):
     if not closed_trades: return
     try:
@@ -387,23 +389,33 @@ def export_trade_history_to_csv(closed_trades: List[Dict]):
         full_columns_list = [
             "trade_id", "symbol", "interval", "status",
             "opened_by_tactic", "tactic_used", "trade_type",
-            "entry_price", "exit_price", "tp", "sl",
+            "entry_price", "exit_price", "tp", "sl", "initial_sl",
             "total_invested_usd", "pnl_usd", "pnl_percent",
             "entry_time", "exit_time", "holding_duration_hours",
             "entry_score", "last_score", "entry_zone", "last_zone",
-            "dca_entries", "realized_pnl_usd"
+            "dca_entries", "realized_pnl_usd",
+            "binance_market_order_id", "initial_entry"
         ]
         for col in full_columns_list:
             if col not in df.columns:
                 df[col] = None
+        
         df = df[full_columns_list]
-        df['entry_time'] = pd.to_datetime(df['entry_time']).dt.tz_convert(VIETNAM_TZ)
-        df['exit_time'] = pd.to_datetime(df['exit_time']).dt.tz_convert(VIETNAM_TZ)
+        df['entry_time'] = pd.to_datetime(df['entry_time'], errors='coerce').dt.tz_convert(VIETNAM_TZ)
+        df['exit_time'] = pd.to_datetime(df['exit_time'], errors='coerce').dt.tz_convert(VIETNAM_TZ)
+        
+        # LOGIC GỐC CỦA BẠN ĐÃ TÍNH TOÁN Ở ĐÂY - NÓ ĐÚNG VÀ CẦN ĐƯỢC KHÔI PHỤC
         df['holding_duration_hours'] = round((df['exit_time'] - df['entry_time']).dt.total_seconds() / 3600, 2)
-        file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE)
+
+        file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE) and os.path.getsize(TRADE_HISTORY_CSV_FILE) > 0
         df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a', header=not file_exists, index=False, encoding="utf-8")
     except Exception as e:
-        log_error(f"Lỗi xuất lịch sử giao dịch ra CSV", error_details=traceback.format_exc())
+        # Dùng hàm log_error nếu có, nếu không thì in ra
+        try:
+            log_error(f"Lỗi xuất lịch sử giao dịch ra CSV", error_details=traceback.format_exc())
+        except NameError:
+            print(f"Lỗi xuất lịch sử giao dịch ra CSV: {e}")
+
 
 def get_interval_in_milliseconds(interval: str) -> Optional[int]:
     try:
@@ -468,6 +480,8 @@ def get_price_data_with_cache(symbol: str, interval: str, limit: int) -> Optiona
         return final_df
     return existing_df if existing_df is not None else None
 
+# Thay thế hàm này trong file live_trade.py
+
 def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, state: Dict, close_pct: float = 1.0) -> bool:
     symbol = trade['symbol']
     side = "SELL"
@@ -512,13 +526,22 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
     state['temp_pnl_from_closed_trades'] += pnl_usd
     if close_pct >= 0.999:
         pnl_percent = (exit_price - trade['entry_price']) / trade['entry_price'] * 100 if trade['entry_price'] > 0 else 0
+        
+        # <<< SỬA LỖI Ở ĐÂY: TÍNH TOÁN VÀ LƯU holding_duration_hours NGAY LẬP TỨC >>>
+        exit_time_dt = datetime.now(VIETNAM_TZ)
+        entry_time_dt = datetime.fromisoformat(trade['entry_time'])
+        holding_hours = round((exit_time_dt - entry_time_dt).total_seconds() / 3600, 2)
+
         trade.update({
             'status': f'Closed ({reason})',
             'exit_price': exit_price,
-            'exit_time': datetime.now(VIETNAM_TZ).isoformat(),
+            'exit_time': exit_time_dt.isoformat(),
+            'holding_duration_hours': holding_hours, # Thêm giá trị đã tính
             'pnl_usd': trade.get('realized_pnl_usd', 0.0) + pnl_usd,
             'pnl_percent': pnl_percent
         })
+        # <<< KẾT THÚC SỬA LỖI >>>
+
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
         state['trade_history'] = state['trade_history'][-100:]
@@ -526,9 +549,13 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         cooldown_dict = state.setdefault('cooldown_until', {})
         symbol_cooldowns = cooldown_dict.setdefault(symbol, {})
         symbol_cooldowns[trade_interval] = (datetime.now(VIETNAM_TZ) + timedelta(hours=GENERAL_CONFIG["TRADE_COOLDOWN_HOURS"])).isoformat()
-        export_trade_history_to_csv([trade])
+        
+        # GỌI HÀM GHI CSV SAU KHI ĐÃ CẬP NHẬT ĐẦY ĐỦ DỮ LIỆU
+        export_trade_history_to_csv([trade]) 
+        
         state.setdefault('temp_newly_closed_trades', []).append(f"🎬 {'✅' if pnl_usd >= 0 else '❌'} {symbol} (Đóng toàn bộ - {reason}): PnL ${pnl_usd:,.2f}")
     else:
+        # Phần partial close giữ nguyên, không cần sửa
         trade['realized_pnl_usd'] = trade.get('realized_pnl_usd', 0.0) + pnl_usd
         if 'total_invested_usd' in trade and trade['total_invested_usd'] > 0:
             original_qty = qty_in_state
@@ -538,6 +565,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         trade.setdefault('tactic_used', []).append(f"Partial_Close_{reason}")
         state.setdefault('temp_newly_closed_trades', []).append(f"💰 {symbol} (Đóng {close_pct*100:.0f}% - {reason}): PnL ${pnl_usd:,.2f}")
     return True
+
 
 def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
     active_trades = state.get("active_trades", [])[:]
