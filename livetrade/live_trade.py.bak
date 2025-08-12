@@ -68,16 +68,6 @@ GENERAL_CONFIG = {
     "ORPHAN_ASSET_MIN_VALUE_USDT": 10.0,         # Giá trị (USD) tối thiểu của một tài sản "mồ côi" để bot cảnh báo
     "TOP_N_OPPORTUNITIES_TO_CHECK": 5,           # Số cơ hội hàng đầu để xem xét, mặc định là 3
 
-    #cơ chế lọc nhiễu
-    "MOMENTUM_FILTER_CONFIG": {
-        "ENABLED": True,  # Bật (True) hoặc Tắt (False) bộ lọc trên toàn cục
-        "RULES_BY_TIMEFRAME": {
-            "1h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 1h
-            "4h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 4h
-            "1d": {"WINDOW": 4, "REQUIRED_CANDLES": 2}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
-        }
-    },
-
     # --- ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) ---
     "DEPOSIT_DETECTION_MIN_USD": 10.0,           # Ngưỡng USD tối thiểu để phát hiện bạn Nạp/Rút tiền
     "DEPOSIT_DETECTION_THRESHOLD_PCT": 0.01,     # Ngưỡng % tối thiểu để phát hiện bạn Nạp/Rút tiền (0.5%)
@@ -183,10 +173,9 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": True,                         # Bật/Tắt Cắt lỗ động (Trailing Stop Loss).
         "TRAIL_ACTIVATION_RR": 1.5,                      # Kích hoạt TSL khi lợi nhuận đạt 1R (gấp 1 lần rủi ro ban đầu).
         "TRAIL_DISTANCE_RR": 1.0,                        # Giữ khoảng cách TSL cách giá hiện tại một khoảng bằng 0.8R.
-        "ENABLE_PARTIAL_TP": False,                      # Bật/Tắt Chốt lời một phần.
-        "TP1_RR_RATIO": None,                            # Chốt lời phần 1 tại mức 1R.
-        "TP1_PROFIT_PCT": None,                          # Chốt 50% khối lượng lệnh tại TP1.
-        "USE_MOMENTUM_FILTER": True                      # Cơ chế lọc nhiễu    
+        "ENABLE_PARTIAL_TP": False,                       # Bật/Tắt Chốt lời một phần.
+        "TP1_RR_RATIO": None,                             # Chốt lời phần 1 tại mức 1R.
+        "TP1_PROFIT_PCT": None                            # Chốt 50% khối lượng lệnh tại TP1.
     },
     "Dip_Hunter": {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
@@ -199,8 +188,7 @@ TACTICS_LAB = {
         "TRAIL_ACTIVATION_RR": None,
         "ENABLE_PARTIAL_TP": True,
         "TP1_RR_RATIO": 0.8,                             # Chốt lời sớm hơn (0.8R) để bảo vệ lợi nhuận.
-        "TP1_PROFIT_PCT": 0.6,                            # Chốt phần lớn hơn (60%) tại TP1.
-        "USE_MOMENTUM_FILTER": False                      # Cơ chế lọc nhiễu
+        "TP1_PROFIT_PCT": 0.6                            # Chốt phần lớn hơn (60%) tại TP1.
     },
     "AI_Aggressor": {
         "OPTIMAL_ZONE": COINCIDENT_ZONE,                 # Chỉ hoạt động ở vùng COINCIDENT, nơi tín hiệu mạnh nhất.
@@ -214,8 +202,7 @@ TACTICS_LAB = {
         "TRAIL_DISTANCE_RR": 1.0,
         "ENABLE_PARTIAL_TP": True,
         "TP1_RR_RATIO": 1.2,
-        "TP1_PROFIT_PCT": 0.4,
-        "USE_MOMENTUM_FILTER": True                      # Cơ chế lọc nhiễu
+        "TP1_PROFIT_PCT": 0.4
     },
     "Balanced_Trader": {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
@@ -229,8 +216,7 @@ TACTICS_LAB = {
         "TRAIL_DISTANCE_RR": 1.2,                        # Kéo TSL xa hơn.
         "ENABLE_PARTIAL_TP": True,
         "TP1_RR_RATIO": 1.4,
-        "TP1_PROFIT_PCT": 0.4,
-        "USE_MOMENTUM_FILTER": True                      # Cơ chế lọc nhiễu
+        "TP1_PROFIT_PCT": 0.4
     },
     "Cautious_Observer": {
         "OPTIMAL_ZONE": NOISE_ZONE,                      # Chỉ hoạt động ở vùng Nhiễu.
@@ -244,8 +230,7 @@ TACTICS_LAB = {
         "TRAIL_DISTANCE_RR": 0.6,                        # Kéo TSL rất sát.
         "ENABLE_PARTIAL_TP": True,
         "TP1_RR_RATIO": 0.8,
-        "TP1_PROFIT_PCT": 0.7,
-        "USE_MOMENTUM_FILTER": True                      # Cơ chế lọc nhiễu
+        "TP1_PROFIT_PCT": 0.7
     },
 }
 
@@ -736,45 +721,6 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         except Exception as e:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
-def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -> bool:
-    """
-    Hàm kiểm tra xác nhận động lượng.
-    Nó sẽ đọc các quy tắc từ GENERAL_CONFIG để quyết định độ khó của bộ lọc.
-    """
-    config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
-    if not config.get("ENABLED", False):
-        return True
-
-    rules_by_tf = config.get("RULES_BY_TIMEFRAME", {})
-    default_rule = {"WINDOW": 3, "REQUIRED_CANDLES": 2}
-    rule = rules_by_tf.get(interval, default_rule)
-    
-    window = rule.get("WINDOW", 3)
-    required_candles = rule.get("REQUIRED_CANDLES", 2)
-
-    try:
-        df = price_dataframes.get(symbol, {}).get(interval)
-        if df is None or len(df) < window + 1:
-            return True 
-
-        recent_candles = df.iloc[-window-1:-1].copy()
-        if len(recent_candles) < window:
-            return True
-
-        if direction == "LONG":
-            green_candles = (recent_candles['close'] > recent_candles['open']).sum()
-            
-            trigger_candle = recent_candles.iloc[-1]
-            candle_range = trigger_candle['high'] - trigger_candle['low']
-            if candle_range > 0:
-                upper_wick = trigger_candle['high'] - trigger_candle['close']
-                if green_candles >= required_candles and upper_wick < (candle_range * 0.6):
-                    return True
-    except Exception:
-        return True 
-
-    return False
-
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
@@ -856,29 +802,11 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
         mtf_coeff = adjusted_score / raw_score if raw_score > 0 else 1.0
         log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {opportunity['tactic_name']} | Gốc: {raw_score:.2f} | Cuối: {adjusted_score:.2f} (MTF x{mtf_coeff:.2f}) (Ngưỡng: {entry_score_threshold})", state=state)
         if score >= entry_score_threshold:
-            # --- BẮT ĐẦU KHỐI LOGIC MỚI ---
-            tactic_cfg = opportunity.get('tactic_cfg', {})
-            tactic_name = opportunity.get('tactic_name', 'Unknown')
-            
-            # Kiểm tra xem Tactic này có yêu cầu bộ lọc không
-            if not tactic_cfg.get("USE_MOMENTUM_FILTER", False):
-                log_message(f"      => ✅ Đạt ngưỡng! Tactic '{tactic_name}' không cần lọc. Đưa vào hàng chờ.", state=state)
-                state['pending_trade_opportunity'] = opportunity
-                state['pending_trade_opportunity']['retry_count'] = 0
-                found_executable_trade = True
-                break # Dừng quét và thực thi cơ hội này
-
-            # Nếu Tactic có yêu cầu, gọi hàm "vệ sĩ"
-            elif is_momentum_confirmed(opportunity['symbol'], opportunity['interval']):
-                log_message(f"      => ✅ Đạt ngưỡng VÀ Tactic '{tactic_name}' đã được xác nhận động lượng! Đưa vào hàng chờ.", state=state)
-                state['pending_trade_opportunity'] = opportunity
-                state['pending_trade_opportunity']['retry_count'] = 0
-                found_executable_trade = True
-                break # Dừng quét và thực thi cơ hội này
-            
-            else:
-                log_message(f"      => ⚠️ Đạt ngưỡng NHƯNG Tactic '{tactic_name}' không vượt qua bộ lọc động lượng. Bỏ qua.", state=state)
-                continue # Bỏ qua và xét cơ hội tiếp theo trong top N
+            log_message("      => ✅ Đạt ngưỡng! Đưa vào hàng chờ thực thi. Dừng quét.", state=state)
+            state['pending_trade_opportunity'] = opportunity
+            state['pending_trade_opportunity']['retry_count'] = 0
+            found_executable_trade = True
+            break
         else:
             log_message("      => 📉 Không đạt ngưỡng. Xem xét cơ hội tiếp theo...", state=state)
     if not found_executable_trade:
@@ -1553,5 +1481,4 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
-
 
