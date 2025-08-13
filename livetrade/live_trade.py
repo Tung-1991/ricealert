@@ -395,41 +395,42 @@ def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tupl
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
     return pnl_usd, pnl_percent
 
-# Thay thế hàm này trong file live_trade.py
-
 def export_trade_history_to_csv(closed_trades: List[Dict]):
     if not closed_trades: return
     try:
         df = pd.DataFrame(closed_trades)
+        
+        # ĐỊNH NGHĨA CẤU TRÚC CỘT CHUẨN - Đây là khuôn mẫu bắt buộc cho mọi dòng
         full_columns_list = [
-            "trade_id", "symbol", "interval", "status",
-            "opened_by_tactic", "tactic_used", "trade_type",
-            "entry_price", "exit_price", "tp", "sl", "initial_sl",
-            "total_invested_usd", "pnl_usd", "pnl_percent",
-            "entry_time", "exit_time", "holding_duration_hours",
-            "entry_score", "last_score", "entry_zone", "last_zone",
-            "dca_entries", "realized_pnl_usd",
-            "binance_market_order_id", "initial_entry"
+            "trade_id", "symbol", "interval", "status", "opened_by_tactic",
+            "tactic_used", "trade_type", "entry_price", "exit_price", "tp", "sl",
+            "initial_sl", "total_invested_usd", "pnl_usd", "pnl_percent",
+            "entry_time", "exit_time", "holding_duration_hours", "entry_score",
+            "last_score", "entry_zone", "last_zone", "dca_entries",
+            "realized_pnl_usd", "binance_market_order_id", "initial_entry"
         ]
+        
+        # Đảm bảo mọi cột trong danh sách chuẩn đều tồn tại
         for col in full_columns_list:
             if col not in df.columns:
                 df[col] = None
         
+        # Ép DataFrame phải theo đúng thứ tự cột chuẩn
         df = df[full_columns_list]
-        df['entry_time'] = pd.to_datetime(df['entry_time'], errors='coerce').dt.tz_convert(VIETNAM_TZ)
-        df['exit_time'] = pd.to_datetime(df['exit_time'], errors='coerce').dt.tz_convert(VIETNAM_TZ)
-        
-        # LOGIC GỐC CỦA BẠN ĐÃ TÍNH TOÁN Ở ĐÂY - NÓ ĐÚNG VÀ CẦN ĐƯỢC KHÔI PHỤC
+
+        # Xử lý lại thời gian một cách an toàn
+        df['entry_time'] = pd.to_datetime(df['entry_time'], errors='coerce', utc=True).dt.tz_convert(VIETNAM_TZ)
+        df['exit_time'] = pd.to_datetime(df['exit_time'], errors='coerce', utc=True).dt.tz_convert(VIETNAM_TZ)
         df['holding_duration_hours'] = round((df['exit_time'] - df['entry_time']).dt.total_seconds() / 3600, 2)
 
         file_exists = os.path.exists(TRADE_HISTORY_CSV_FILE) and os.path.getsize(TRADE_HISTORY_CSV_FILE) > 0
         df.to_csv(TRADE_HISTORY_CSV_FILE, mode='a', header=not file_exists, index=False, encoding="utf-8")
     except Exception as e:
-        # Dùng hàm log_error nếu có, nếu không thì in ra
-        try:
-            log_error(f"Lỗi xuất lịch sử giao dịch ra CSV", error_details=traceback.format_exc())
-        except NameError:
-            print(f"Lỗi xuất lịch sử giao dịch ra CSV: {e}")
+        log_error(f"Lỗi xuất lịch sử giao dịch ra CSV", error_details=traceback.format_exc())
+
+
+
+
 
 
 def get_interval_in_milliseconds(interval: str) -> Optional[int]:
@@ -1199,8 +1200,12 @@ def build_dynamic_alert_text(state: Dict, total_usdt: float, available_usdt: flo
 
 
 
+# Thay thế toàn bộ hàm này trong file live_trade.py
+
 def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: float, prices: dict, equity: float) -> str:
-    # Helper function nội bộ để định dạng giá, giữ nguyên từ bản gốc
+    # --- BẮT ĐẦU: CODE HOÀN TOÀN ĐỘC LẬP, KHÔNG GỌI HÀM BÊN NGOÀI ---
+
+    # Helper function định dạng giá, nằm bên trong để không gây lỗi
     def _format_price_internal(price, no_symbol=False):
         if price is None: return "N/A"
         prefix = "" if no_symbol else "$"
@@ -1243,50 +1248,42 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
     avg_win = sum(win_pnls) / len(win_pnls) if win_pnls else 0
     avg_loss = sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0
 
-    # === PHẦN SỬA LỖI QUAN TRỌNG ===
-    # 1. Tính toán lại PnL của các lệnh đã đóng từ lịch sử giao dịch.
     closed_trades_pnl = sum(t.get('pnl_usd', 0.0) for t in closed_trades_in_history)
-    
-    # 2. Tính toán lại PnL từ việc chốt lời một phần (TP1, Protect Profit, etc.) từ các lệnh ĐANG MỞ.
     tp1_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in state.get('active_trades', []))
-    # === KẾT THÚC PHẦN SỬA LỖI ===
-
+    
     # --- BẮT ĐẦU TẠO CHUỖI BÁO CÁO ---
     report = [
         f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY ({TRADING_MODE.upper()})** - `{datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')}` 📊",
         f"💰 Vốn BĐ: **${initial_capital:,.2f}** | 💵 Tiền mặt (USDT): **${available_usdt:,.2f}**",
         f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_emote_total} **${pnl_total_usd:+.2f} ({pnl_total_percent:+.2f}%)**",
         "",
-        # Sử dụng các biến đã được tính toán lại chính xác ở trên
         f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${closed_trades_pnl:+.2f}** | 📈 PnL Mở: **${open_trades_pnl:+.2f}**",
         f"🎯 AVG Lãi: **${avg_win:,.2f}** | 🛡️ AVG Lỗ: **${avg_loss:,.2f}** | 💎 PnL TP1: **${tp1_pnl:,.2f}**",
         "\n--- **Chi tiết trong phiên** ---"
     ]
+    newly_opened = state.get('temp_newly_opened_trades', [])
+    if newly_opened:
+        report.append(f"✨ Lệnh mới mở: {len(newly_opened)}")
+        for trade in newly_opened: # Sửa lại để duyệt qua danh sách dict
+            report.append(f"  🔥 **{trade['symbol']}-{trade.get('interval','N/A')}** ({trade.get('opened_by_tactic', 'N/A')}): Mua với vốn **${trade.get('total_invested_usd', 0):.2f}**")
+    else: report.append("✨ Lệnh mới mở: 0")
 
-    newly_opened_msgs = state.get('temp_newly_opened_trades', [])
-    report.append(f"✨ Lệnh mới mở: {len(newly_opened_msgs)}")
-    if newly_opened_msgs:
-        for msg in newly_opened_msgs:
-            report.append(f"  {msg}")
+    newly_closed = state.get('temp_newly_closed_trades', [])
+    if newly_closed:
+        report.append(f"🎬 Lệnh đã đóng/chốt lời: {len(newly_closed)}")
+        for msg in newly_closed: # Sửa lại để duyệt qua danh sách message đã format
+             report.append(f"  {msg}")
+    else: report.append("🎬 Lệnh đã đóng/chốt lời: 0")
 
-    newly_closed_msgs = state.get('temp_newly_closed_trades', [])
-    report.append(f"🎬 Lệnh đã đóng/chốt lời: {len(newly_closed_msgs)}")
-    if newly_closed_msgs:
-        for msg in newly_closed_msgs:
-            report.append(f"  {msg}")
-
+    # --- LOGIC HIỂN THỊ LỆNH ĐANG MỞ (ĐƯỢC VIẾT HẾT VÀO ĐÂY) ---
     active_trades = state.get('active_trades', [])
     if active_trades:
         report.append("\n--- **Vị thế đang mở** ---")
         active_trades_lines = []
         for trade in sorted(active_trades, key=lambda x: x.get('entry_time', '')):
-            symbol = trade.get('symbol', 'N/A')
-            interval = trade.get('interval', 'N/A')
-            current_price = prices.get(symbol)
-            pnl_usd, pnl_percent = 0.0, 0.0
-            invested_usd = trade.get('total_invested_usd', 0)
-            entry_price = trade.get('entry_price', 0)
-
+            symbol = trade.get('symbol', 'N/A'); interval = trade.get('interval', 'N/A')
+            current_price = prices.get(symbol); pnl_usd, pnl_percent = 0.0, 0.0
+            invested_usd = trade.get('total_invested_usd', 0); entry_price = trade.get('entry_price', 0)
             if current_price and entry_price > 0:
                 pnl_percent = ((current_price - entry_price) / entry_price) * 100
                 pnl_usd = invested_usd * (pnl_percent / 100)
@@ -1296,59 +1293,72 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                 entry_time = datetime.fromisoformat(trade.get('entry_time')).astimezone(VIETNAM_TZ)
                 holding_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
                 hold_display = f"Giữ:{holding_hours:.1f}h"
-            except:
-                hold_display = ""
-            
+            except: hold_display = ""
             entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
             score_change_icon = "📉" if last_score < entry_score else "📈" if last_score > entry_score else ""
             score_display = f"{entry_score:.1f}→{last_score:.1f}{score_change_icon}"
-            entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
-            zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
-            
-            # Xử lý hiển thị TP1 và TSL
-            tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
-            tsl_info = f" TSL:{_format_price_internal(trade.get('sl'))}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
-            
-            line1 = f"  {pnl_emote_trade} **{symbol}-{interval}** ({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display}) PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)** | {hold_display}{tp1_info}"
-            line2 = f"    Vốn:${invested_usd:,.2f} -> **${(invested_usd + pnl_usd):,.2f}** | Entry:{_format_price_internal(entry_price)} Cur:{_format_price_internal(current_price)} TP:{_format_price_internal(trade.get('tp'))} SL:{_format_price_internal(trade.get('sl'))}{tsl_info}"
+            zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone')}" if trade.get('last_zone') and trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
+            line1 = f"  {pnl_emote_trade} **{symbol}-{interval}** ({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display}) PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)** | {hold_display}"
+            line2 = f"    Vốn:${invested_usd:,.2f} -> **${(invested_usd + pnl_usd):,.2f}** | Entry:{_format_price_internal(entry_price)} Cur:{_format_price_internal(current_price)} TP:{_format_price_internal(trade.get('tp'))} SL:{_format_price_internal(trade.get('sl'))}"
             active_trades_lines.extend([line1, line2])
         report.append('\n'.join(active_trades_lines))
 
+    # --- LOGIC LỊCH SỬ GIAO DỊCH (ĐƯỢC VIẾT HẾT VÀO ĐÂY) ---
     if trade_history:
         report.append("\n--- **Lịch sử giao dịch gần nhất** ---")
         sorted_by_pnl = sorted(closed_trades_in_history, key=lambda x: x.get('pnl_usd', 0), reverse=True)
         top_5_wins = [t for t in sorted_by_pnl if t.get('pnl_usd', 0) > 0][:5]
-        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) <= 0], key=lambda x: x.get('pnl_usd', 0))[:5]
+        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) < 0], key=lambda x: x.get('pnl_usd', 0))[:5]
         
+        # === PHẦN SỬA LỖI TÍNH VỐN HIỂN THỊ ===
+        def get_initial_capital_from_history(trade_dict):
+            try:
+                # Ưu tiên đọc từ 'initial_entry' nếu có
+                initial_entry_data = trade_dict.get('initial_entry')
+                if initial_entry_data:
+                    # Chuyển đổi từ chuỗi string sang dict nếu cần
+                    if isinstance(initial_entry_data, str):
+                        initial_entry_data = json.loads(initial_entry_data.replace("'", "\""))
+                    return float(initial_entry_data['invested_usd'])
+                # Nếu không, dùng 'total_invested_usd' làm dự phòng
+                return float(trade_dict.get('total_invested_usd', 0))
+            except:
+                return float(trade_dict.get('total_invested_usd', 0))
+        # === KẾT THÚC PHẦN SỬA LỖI ===
+
         if top_5_wins:
             report.append("\n**✅ Top 5 lệnh lãi gần nhất**")
             for trade in top_5_wins:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
+                # Lấy vốn ban đầu thay vì vốn còn lại
+                capital = get_initial_capital_from_history(trade)
                 try:
-                    hold_display_h = trade.get('holding_duration_hours', 0.0)
-                    if not hold_display_h or hold_display_h == 0.0:
+                    hold_display_h = trade.get('holding_duration_hours')
+                    if not hold_display_h:
                         entry_dt = datetime.fromisoformat(trade.get('entry_time'))
                         exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                         hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
                 except:
                     hold_display_h = 0.0
                 report.append(f"  • ✅ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
+                report.append(f"    `Vốn: ${_format_price_internal(capital)} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
         
         if top_5_losses:
             report.append("\n**❌ Top 5 lệnh lỗ gần nhất**")
             for trade in top_5_losses:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
+                # Lấy vốn ban đầu thay vì vốn còn lại
+                capital = get_initial_capital_from_history(trade)
                 try:
-                    hold_display_h = trade.get('holding_duration_hours', 0.0)
-                    if not hold_display_h or hold_display_h == 0.0:
+                    hold_display_h = trade.get('holding_duration_hours')
+                    if not hold_display_h:
                         entry_dt = datetime.fromisoformat(trade.get('entry_time'))
                         exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                         hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
                 except:
                     hold_display_h = 0.0
                 report.append(f"  • ❌ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-                report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
+                report.append(f"    `Vốn: ${_format_price_internal(capital)} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
     
     return '\n'.join(report)
 

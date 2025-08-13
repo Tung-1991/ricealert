@@ -275,6 +275,10 @@ def show_full_dashboard(bnc: BinanceConnector):
                 print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | {score_display} | Tactic: {best_tactic} (Ngưỡng: {entry_threshold})")
     print("="*80)
 
+
+
+# Thay thế hàm này trong file: control_live.py
+
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
@@ -286,22 +290,36 @@ def view_csv_history():
             'exit_time', 'symbol', 'interval', 'entry_price', 'exit_price', 
             'total_invested_usd', 'pnl_usd', 'pnl_percent', 'holding_duration_hours',
             'entry_score', 'last_score', 'entry_zone', 'last_zone',
-            'opened_by_tactic', 'status'
+            'opened_by_tactic', 'status', 'initial_entry'
         ]
         existing_cols = [c for c in cols_to_use if c in df.columns]
         df_display = df[existing_cols].copy()
         
-        df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], errors='coerce').dt.tz_convert(VIETNAM_TZ).dt.strftime('%m-%d %H:%M')
+        # Sửa lỗi timezone: Thêm utc=True để xử lý đúng múi giờ
+        df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], errors='coerce', utc=True).dt.tz_convert(VIETNAM_TZ).dt.strftime('%m-%d %H:%M')
+        
         for col in ['total_invested_usd', 'pnl_usd', 'pnl_percent', 'entry_price', 'exit_price', 'entry_score', 'last_score', 'holding_duration_hours']:
-            df_display[col] = pd.to_numeric(df_display[col], errors='coerce')
+            if col in df_display.columns:
+                df_display[col] = pd.to_numeric(df_display[col], errors='coerce')
 
-        df_display['Vốn'] = df_display['total_invested_usd'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+        # SỬA LỖI HIỂN THỊ VỐN
+        def get_initial_capital(row):
+            try:
+                initial_entry_str = row['initial_entry']
+                if pd.isna(initial_entry_str): return row['total_invested_usd']
+                initial_entry_data = json.loads(str(initial_entry_str).replace("'", "\""))
+                return float(initial_entry_data['invested_usd'])
+            except:
+                return row['total_invested_usd']
+        df_display['Vốn'] = df_display.apply(get_initial_capital, axis=1).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+        # KẾT THÚC SỬA LỖI
+
         df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${x:+.2f}" if pd.notna(x) else "N/A")
         df_display['PnL %'] = df_display['pnl_percent'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
         df_display['Giá vào'] = df_display['entry_price'].apply(lambda x: f"{x:,.4f}" if pd.notna(x) else "N/A")
         df_display['Giá ra'] = df_display['exit_price'].apply(lambda x: f"{x:,.4f}" if pd.notna(x) else "N/A")
         df_display['Score'] = df_display.apply(lambda row: f"{row['entry_score']:.1f}→{row['last_score']:.1f}" if pd.notna(row['entry_score']) and pd.notna(row['last_score']) else "N/A", axis=1)
-        df_display['Zone'] = df_display.apply(lambda row: f"{row['entry_zone']}→{row['last_zone']}" if pd.notna(row['entry_zone']) and pd.notna(row['last_zone']) else "N/A", axis=1)
+        df_display['Zone'] = df_display.apply(lambda row: f"{row['entry_zone']}→{row['last_zone']}" if pd.notna(row['entry_zone']) and pd.notna(row['last_zone']) else row.get('entry_zone', 'N/A'), axis=1)
             
         df_display.rename(columns={'holding_duration_hours': 'Hold (h)', 'opened_by_tactic': 'Tactic', 'exit_time': 'Time Close'}, inplace=True)
         
@@ -311,6 +329,7 @@ def view_csv_history():
         print(df_display.sort_values(by='Time Close', ascending=False).head(20).to_string(index=False))
     except Exception as e:
         print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
+
 
 def manual_report(bnc: BinanceConnector):
     print("\n" + "📜" * 10 + " TẠO BÁO CÁO THỦ CÔNG " + "📜" * 10)
