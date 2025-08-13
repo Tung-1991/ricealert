@@ -209,14 +209,14 @@ def show_full_dashboard(bnc: BinanceConnector):
             else:
                 invested_usd = trade.get('total_invested_usd', 0)
                 price_info = f"Vốn: ${invested_usd:,.2f} | Entry: {format_price_dynamically(trade.get('entry_price'))} (Không thể tính PnL)"
-            
+
             try:
                 entry_time = datetime.fromisoformat(trade.get('entry_time')).astimezone(VIETNAM_TZ)
                 holding_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
                 hold_display = f"| Giữ: {holding_hours:.1f}h"
             except:
                 hold_display = ""
-            
+
             pnl_icon = "⚪️" if is_desynced else ("🟢" if pnl_usd >= 0 else "🔴")
             score_display = f"{trade.get('entry_score', 0.0):.1f}→{trade.get('last_score', 0.0):.1f}"
             entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
@@ -260,14 +260,14 @@ def show_full_dashboard(bnc: BinanceConnector):
                             best_tactic = tactic_name
                             entry_threshold = tactic_cfg.get("ENTRY_SCORE", "N/A")
                             mtf_coeff = temp_mtf_coeff
-                
+
                 if best_raw_score == 0:
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
                     best_raw_score = decision.get("final_score", 0.0)
                     mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
                     best_adj_score = best_raw_score * mtf_coeff
                     best_tactic = "Default"
-                
+
                 is_strong_signal = isinstance(entry_threshold, (int, float)) and best_adj_score >= entry_threshold
                 icon = "🟢" if is_strong_signal else ("🟡" if best_adj_score >= 5.5 else "🔴")
                 mtf_display = f"x{mtf_coeff:.2f}"
@@ -276,59 +276,65 @@ def show_full_dashboard(bnc: BinanceConnector):
     print("="*80)
 
 
-
-# Thay thế hàm này trong file: control_live.py
+# Dán đè hàm này vào control_live.py
 
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
-        if not os.path.exists(TRADE_HISTORY_CSV_FILE): print("ℹ️ Không tìm thấy file trade_history.csv."); return
+        if not os.path.exists(TRADE_HISTORY_CSV_FILE):
+            print("ℹ️ Không tìm thấy file trade_history.csv.")
+            return
         df = pd.read_csv(TRADE_HISTORY_CSV_FILE)
-        if df.empty: print("ℹ️ File lịch sử trống."); return
+        if df.empty:
+            print("ℹ️ File lịch sử trống.")
+            return
 
-        cols_to_use = [
-            'exit_time', 'symbol', 'interval', 'entry_price', 'exit_price', 
-            'total_invested_usd', 'pnl_usd', 'pnl_percent', 'holding_duration_hours',
-            'entry_score', 'last_score', 'entry_zone', 'last_zone',
-            'opened_by_tactic', 'status', 'initial_entry'
-        ]
-        existing_cols = [c for c in cols_to_use if c in df.columns]
-        df_display = df[existing_cols].copy()
+        # Tạo cột datetime tạm thời để xử lý và sắp xếp
+        df['exit_time_dt'] = pd.to_datetime(df['exit_time'], errors='coerce')
+
+        # Lọc bỏ những dòng không thể parse được thời gian
+        df_display = df.dropna(subset=['exit_time_dt']).copy()
+
+        # <<< SỬA LỖI LOGIC QUAN TRỌNG Ở ĐÂY >>>
+        # 1. SẮP XẾP TRƯỚC khi làm bất cứ điều gì khác, dùng cột datetime object để đảm bảo đúng thứ tự
+        df_sorted = df_display.sort_values(by='exit_time_dt', ascending=False).head(20)
+
+        # 2. BÂY GIỜ mới bắt đầu format lại các cột để hiển thị cho đẹp
+        df_formatted = df_sorted.copy()
         
-        # Sửa lỗi timezone: Thêm utc=True để xử lý đúng múi giờ
-        df_display['exit_time'] = pd.to_datetime(df_display['exit_time'], errors='coerce', utc=True).dt.tz_convert(VIETNAM_TZ).dt.strftime('%m-%d %H:%M')
+        df_formatted['Time Close'] = df_formatted['exit_time_dt'].dt.tz_convert(VIETNAM_TZ).dt.strftime('%m-%d %H:%M')
         
         for col in ['total_invested_usd', 'pnl_usd', 'pnl_percent', 'entry_price', 'exit_price', 'entry_score', 'last_score', 'holding_duration_hours']:
-            if col in df_display.columns:
-                df_display[col] = pd.to_numeric(df_display[col], errors='coerce')
-
-        # SỬA LỖI HIỂN THỊ VỐN
+            if col in df_formatted.columns:
+                df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce')
+        
         def get_initial_capital(row):
             try:
                 initial_entry_str = row['initial_entry']
-                if pd.isna(initial_entry_str): return row['total_invested_usd']
+                if pd.isna(initial_entry_str) or not initial_entry_str: return row['total_invested_usd']
                 initial_entry_data = json.loads(str(initial_entry_str).replace("'", "\""))
-                return float(initial_entry_data['invested_usd'])
+                return float(initial_entry_data.get('invested_usd', row['total_invested_usd']))
             except:
                 return row['total_invested_usd']
-        df_display['Vốn'] = df_display.apply(get_initial_capital, axis=1).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
-        # KẾT THÚC SỬA LỖI
-
-        df_display['pnl_usd'] = df_display['pnl_usd'].apply(lambda x: f"${x:+.2f}" if pd.notna(x) else "N/A")
-        df_display['PnL %'] = df_display['pnl_percent'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
-        df_display['Giá vào'] = df_display['entry_price'].apply(lambda x: f"{x:,.4f}" if pd.notna(x) else "N/A")
-        df_display['Giá ra'] = df_display['exit_price'].apply(lambda x: f"{x:,.4f}" if pd.notna(x) else "N/A")
-        df_display['Score'] = df_display.apply(lambda row: f"{row['entry_score']:.1f}→{row['last_score']:.1f}" if pd.notna(row['entry_score']) and pd.notna(row['last_score']) else "N/A", axis=1)
-        df_display['Zone'] = df_display.apply(lambda row: f"{row['entry_zone']}→{row['last_zone']}" if pd.notna(row['entry_zone']) and pd.notna(row['last_zone']) else row.get('entry_zone', 'N/A'), axis=1)
-            
-        df_display.rename(columns={'holding_duration_hours': 'Hold (h)', 'opened_by_tactic': 'Tactic', 'exit_time': 'Time Close'}, inplace=True)
         
-        final_order = ['Time Close', 'symbol', 'interval', 'Giá vào', 'Giá ra', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status']
-        df_display = df_display[[c for c in final_order if c in df_display.columns]]
+        df_formatted['Vốn'] = df_formatted.apply(get_initial_capital, axis=1).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+        df_formatted['pnl_usd'] = df_formatted['pnl_usd'].apply(lambda x: f"${x:+.2f}" if pd.notna(x) else "N/A")
+        df_formatted['PnL %'] = df_formatted['pnl_percent'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
+        df_formatted['Giá vào'] = df_formatted['entry_price'].apply(format_price_dynamically)
+        df_formatted['Giá ra'] = df_formatted['exit_price'].apply(format_price_dynamically)
+        df_formatted['Score'] = df_formatted.apply(lambda row: f"{row.get('entry_score', 0.0):.1f}→{row.get('last_score', 0.0):.1f}" if pd.notna(row.get('entry_score')) and pd.notna(row.get('last_score')) else "N/A", axis=1)
+        df_formatted['Zone'] = df_formatted.apply(lambda row: f"{row.get('entry_zone', 'N/A')}→{row.get('last_zone', 'N/A')}" if pd.notna(row.get('entry_zone')) and pd.notna(row.get('last_zone')) else row.get('entry_zone', 'N/A'), axis=1)
+        df_formatted.rename(columns={'holding_duration_hours': 'Hold (h)', 'opened_by_tactic': 'Tactic'}, inplace=True)
 
-        print(df_display.sort_values(by='Time Close', ascending=False).head(20).to_string(index=False))
+        # 3. CHỌN CÁC CỘT CUỐI CÙNG ĐỂ IN RA
+        final_order = ['Time Close', 'symbol', 'interval', 'Giá vào', 'Giá ra', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status']
+        df_final_display = df_formatted[[c for c in final_order if c in df_formatted.columns]]
+
+        print(df_final_display.to_string(index=False))
     except Exception as e:
         print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
+
+
 
 
 def manual_report(bnc: BinanceConnector):
@@ -362,7 +368,7 @@ def show_tactic_analysis():
         df['pnl_usd'] = pd.to_numeric(df['pnl_usd'], errors='coerce')
         df.dropna(subset=['pnl_usd', 'opened_by_tactic'], inplace=True)
         df = df[df['status'].str.contains('Closed', na=False, case=False)]
-        
+
         if df.empty:
             print("ℹ️ Không có dữ liệu hợp lệ để phân tích hiệu suất.")
             return
@@ -401,13 +407,13 @@ def show_tactic_analysis():
 
         total_df = pd.DataFrame([total_row]).set_index('Tactic')
         analysis_df = pd.concat([grouped, total_df.fillna(0)])
-        
+
         final_df = analysis_df.reset_index().rename(columns={'index': 'Tactic'})
-        
+
         # Đổi tên cột ở bước cuối cùng để hiển thị, tránh lỗi cú pháp
         final_df.rename(columns={'Max_Win': 'Max_Win_$', 'Max_Loss': 'Max_Loss_$'}, inplace=True)
         final_cols = ['Tactic', 'Total_Trades', 'Win_Rate_%', 'Total_PnL', 'Expectancy_$', 'Payoff_Ratio', 'Avg_Win_PnL', 'Avg_Loss_PnL', 'Max_Win_$', 'Max_Loss_$']
-        
+
         pd.options.display.float_format = '{:,.2f}'.format
         print("Chú thích:")
         print("  - Expectancy_$: Lợi nhuận kỳ vọng cho mỗi lần vào lệnh bằng Tactic này.")
@@ -483,8 +489,10 @@ def close_manual_trade(bnc: BinanceConnector):
     try:
         state = load_state()
         if not state: return
+        # Mấy dòng này không cần thiết nếu state được quản lý tốt, nhưng cứ để cho chắc
         state.setdefault('money_gained_from_trades_last_session', 0.0)
         state.setdefault('temp_pnl_from_closed_trades', 0.0)
+
         valid_trades, _ = reconcile_state(bnc, state)
         if not valid_trades:
             print("ℹ️ Không có lệnh hợp lệ để đóng.")
@@ -498,17 +506,23 @@ def close_manual_trade(bnc: BinanceConnector):
 
         create_backup(STATE_FILE)
         print(f"⚡️ Đang yêu cầu đóng lệnh {trade_to_close['symbol']}...")
-        success = close_trade_on_binance(bnc, trade_to_close, "Panel Manual", state, close_pct=1.0)
         
+        # Hàm close_trade_on_binance bên live_trade.py sẽ tự lo việc ghi CSV
+        # Mình chỉ cần gọi nó và save state là đủ.
+        success = close_trade_on_binance(bnc, trade_to_close, "Panel Manual", state, close_pct=1.0)
+
         if success:
             print(f"✅ Yêu cầu đóng {trade_to_close['symbol']} đã được xử lý thành công.")
-            closed_trade_data = next((t for t in reversed(state.get('trade_history', [])) if t['trade_id'] == trade_to_close['trade_id']), None)
-            if closed_trade_data:
-                 export_trade_history_to_csv([closed_trade_data])
-            save_state(state)
+            # ### BỎ ĐOẠN NÀY ĐI, NÓ GÂY DUPLICATE ###
+            # closed_trade_data = next((t for t in reversed(state.get('trade_history', [])) if t['trade_id'] == trade_to_close['trade_id']), None)
+            # if closed_trade_data:
+            #      export_trade_history_to_csv([closed_trade_data])
+            # ###########################################
+            save_state(state) # Chỉ cần lưu state là đủ
         else:
             print(f"❌ Xử lý yêu cầu đóng {trade_to_close['symbol']} thất bại. Vui lòng kiểm tra log.")
     finally: release_lock()
+
 
 def close_all_trades(bnc: BinanceConnector):
     if not acquire_lock(): return
@@ -524,7 +538,7 @@ def close_all_trades(bnc: BinanceConnector):
         if input(f"⚠️ CẢNH BÁO: Sẽ đóng {len(valid_trades)} lệnh. Tiếp tục? (y/n): ").lower() != 'y':
             print("Hủy thao tác.")
             return
-        
+
         create_backup(STATE_FILE)
         closed_for_csv = []
         for trade in list(valid_trades):
@@ -554,9 +568,9 @@ def extend_stale_check(bnc: BinanceConnector):
 
         hours = float(input("👉 Nhập số giờ muốn gia hạn: "))
         if hours <= 0: print("❌ Số giờ phải dương."); return
-        
+
         create_backup(STATE_FILE)
-        
+
         trade_found = False
         for trade in state.get('active_trades', []):
             if trade.get('trade_id') == trade_to_extend.get('trade_id'):
@@ -565,7 +579,7 @@ def extend_stale_check(bnc: BinanceConnector):
                 trade_found = True
                 print(f"\n✅ Lệnh {trade['symbol']} đã gia hạn đến: {override_until.strftime('%Y-%m-%d %H:%M:%S')}")
                 break
-        
+
         if trade_found:
             save_state(state)
         else:
@@ -652,7 +666,7 @@ def reconcile_manually(bnc: BinanceConnector):
         if not desynced_trades:
             print("\n✅ Trạng thái đã đồng bộ, không có 'lệnh ma'.")
             return
-        
+
         create_backup(STATE_FILE)
         print("\n" + "⚠️" * 5 + " CÁC LỆNH BẤT ĐỒNG BỘ ĐÃ TÌM THẤY " + "⚠️" * 5)
         for i, trade in enumerate(desynced_trades): print(f"{i+1}. {trade['symbol']}")
@@ -665,7 +679,7 @@ def reconcile_manually(bnc: BinanceConnector):
             state.setdefault('trade_history', []).append(trade)
             closed_for_csv.append(trade)
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] not in trade_ids_to_remove]
-        
+
         export_trade_history_to_csv(closed_for_csv)
         save_state(state)
         print(f"✅ Đã xóa {len(closed_for_csv)} 'lệnh ma' và cập nhật lịch sử.")
@@ -719,10 +733,10 @@ def main_menu():
                     '7': close_all_trades, '8': extend_stale_check, '9': adopt_orphan_asset,
                     '10': reconcile_manually, '11': sell_manual_assets,
                 }
-                
+
                 if choice == '0':
                     print("👋 Tạm biệt!"); break
-                
+
                 action = menu_actions.get(choice)
                 if action:
                     if choice in ['1', '4', '5', '6', '7', '8', '9', '10', '11']:
