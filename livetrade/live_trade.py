@@ -74,7 +74,7 @@ GENERAL_CONFIG = {
         "RULES_BY_TIMEFRAME": {
             "1h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 1h
             "4h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 4h
-            "1d": {"WINDOW": 4, "REQUIRED_CANDLES": 2}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
+            "1d": {"WINDOW": 5, "REQUIRED_CANDLES": 2}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
         }
     },
 
@@ -736,43 +736,47 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         except Exception as e:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
+
 def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -> bool:
-    """
-    Hàm kiểm tra xác nhận động lượng.
-    Nó sẽ đọc các quy tắc từ GENERAL_CONFIG để quyết định độ khó của bộ lọc.
-    """
+    """Kiểm tra động lượng nâng cao: nến xanh HOẶC có nỗ lực phục hồi."""
     config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
 
     rules_by_tf = config.get("RULES_BY_TIMEFRAME", {})
-    default_rule = {"WINDOW": 3, "REQUIRED_CANDLES": 2}
-    rule = rules_by_tf.get(interval, default_rule)
-    
+    rule = rules_by_tf.get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
     window = rule.get("WINDOW", 3)
     required_candles = rule.get("REQUIRED_CANDLES", 2)
 
     try:
         df = price_dataframes.get(symbol, {}).get(interval)
         if df is None or len(df) < window + 1:
-            return True 
+            return True
 
-        recent_candles = df.iloc[-window-1:-1].copy()
+        recent_candles = df.iloc[-window-1:-1]
         if len(recent_candles) < window:
             return True
 
+        good_candles_count = 0
         if direction == "LONG":
-            green_candles = (recent_candles['close'] > recent_candles['open']).sum()
+            for _, candle in recent_candles.iterrows():
+                candle_range = candle['high'] - candle['low']
+                if candle_range == 0:
+                    continue
+                
+                is_green = candle['close'] > candle['open']
+                closing_position_ratio = (candle['close'] - candle['low']) / candle_range
+                
+                # Nến tốt: là nến xanh HOẶC đóng cửa ở 60% phía trên (như Hammer).
+                if is_green or closing_position_ratio > 0.6:
+                    good_candles_count += 1
             
-            trigger_candle = recent_candles.iloc[-1]
-            candle_range = trigger_candle['high'] - trigger_candle['low']
-            if candle_range > 0:
-                upper_wick = trigger_candle['high'] - trigger_candle['close']
-                if green_candles >= required_candles and upper_wick < (candle_range * 0.6):
-                    return True
-    except Exception:
-        return True 
+            return good_candles_count >= required_candles
 
+    except Exception as e:
+        log_error(f"Lỗi trong is_momentum_confirmed cho {symbol}-{interval}", error_details=str(e))
+        return True 
+        
     return False
 
 
@@ -1196,9 +1200,7 @@ def build_dynamic_alert_text(state: Dict, total_usdt: float, available_usdt: flo
 
 
 def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: float, prices: dict, equity: float) -> str:
-    # --- BẮT ĐẦU: CODE HOÀN TOÀN ĐỘC LẬP, KHÔNG GỌI HÀM BÊN NGOÀI ---
-
-    # Helper function định dạng giá, nằm bên trong để không gây lỗi
+    # Helper function nội bộ để định dạng giá, giữ nguyên từ bản gốc
     def _format_price_internal(price, no_symbol=False):
         if price is None: return "N/A"
         prefix = "" if no_symbol else "$"
@@ -1241,48 +1243,50 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
     avg_win = sum(win_pnls) / len(win_pnls) if win_pnls else 0
     avg_loss = sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0
 
-    closed_trades_pnl = state.get('realized_pnl_all_time', 0.0)
-    tp1_pnl = state.get('total_pnl_from_tp1', 0.0)
+    # === PHẦN SỬA LỖI QUAN TRỌNG ===
+    # 1. Tính toán lại PnL của các lệnh đã đóng từ lịch sử giao dịch.
+    closed_trades_pnl = sum(t.get('pnl_usd', 0.0) for t in closed_trades_in_history)
     
+    # 2. Tính toán lại PnL từ việc chốt lời một phần (TP1, Protect Profit, etc.) từ các lệnh ĐANG MỞ.
+    tp1_pnl = sum(t.get('realized_pnl_usd', 0.0) for t in state.get('active_trades', []))
+    # === KẾT THÚC PHẦN SỬA LỖI ===
+
     # --- BẮT ĐẦU TẠO CHUỖI BÁO CÁO ---
     report = [
         f"📊 **BÁO CÁO TỔNG KẾT HÀNG NGÀY ({TRADING_MODE.upper()})** - `{datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')}` 📊",
         f"💰 Vốn BĐ: **${initial_capital:,.2f}** | 💵 Tiền mặt (USDT): **${available_usdt:,.2f}**",
         f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_emote_total} **${pnl_total_usd:+.2f} ({pnl_total_percent:+.2f}%)**",
         "",
+        # Sử dụng các biến đã được tính toán lại chính xác ở trên
         f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${closed_trades_pnl:+.2f}** | 📈 PnL Mở: **${open_trades_pnl:+.2f}**",
         f"🎯 AVG Lãi: **${avg_win:,.2f}** | 🛡️ AVG Lỗ: **${avg_loss:,.2f}** | 💎 PnL TP1: **${tp1_pnl:,.2f}**",
         "\n--- **Chi tiết trong phiên** ---"
     ]
-    newly_opened = state.get('temp_newly_opened_trades', [])
-    if newly_opened:
-        report.append(f"✨ Lệnh mới mở: {len(newly_opened)}")
-        for trade in newly_opened:
-            report.append(f"  🔥 **{trade['symbol']}-{trade.get('interval','N/A')}** ({trade.get('opened_by_tactic', 'N/A')}): Mua với vốn **${trade.get('total_invested_usd', 0):.2f}**")
-    else: report.append("✨ Lệnh mới mở: 0")
 
-    newly_closed = state.get('temp_newly_closed_trades', [])
-    if newly_closed:
-        report.append(f"🎬 Lệnh đã đóng/chốt lời: {len(newly_closed)}")
-        for trade in newly_closed:
-            pnl_usd = trade.get('pnl_usd', 0.0) - trade.get('realized_pnl_usd', 0.0)
-            pnl_percent = trade.get('pnl_percent', 0.0)
-            status = trade.get('status', 'N/A')
-            close_reason = status[status.find('(')+1:status.find(')')] if '(' in status else 'N/A'
-            emote = '✅' if pnl_usd > 0 else '❌'
-            report.append(f"  🎬 {emote} **{trade['symbol']}-{trade.get('interval', 'N/A')}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-            report.append(f"     Vốn: **${trade.get('total_invested_usd', 0):.2f}** | Lý do: **{close_reason}**")
-    else: report.append("🎬 Lệnh đã đóng/chốt lời: 0")
+    newly_opened_msgs = state.get('temp_newly_opened_trades', [])
+    report.append(f"✨ Lệnh mới mở: {len(newly_opened_msgs)}")
+    if newly_opened_msgs:
+        for msg in newly_opened_msgs:
+            report.append(f"  {msg}")
 
-    # --- LOGIC HIỂN THỊ LỆNH ĐANG MỞ (ĐƯỢC VIẾT HẾT VÀO ĐÂY) ---
+    newly_closed_msgs = state.get('temp_newly_closed_trades', [])
+    report.append(f"🎬 Lệnh đã đóng/chốt lời: {len(newly_closed_msgs)}")
+    if newly_closed_msgs:
+        for msg in newly_closed_msgs:
+            report.append(f"  {msg}")
+
     active_trades = state.get('active_trades', [])
     if active_trades:
         report.append("\n--- **Vị thế đang mở** ---")
         active_trades_lines = []
         for trade in sorted(active_trades, key=lambda x: x.get('entry_time', '')):
-            symbol = trade.get('symbol', 'N/A'); interval = trade.get('interval', 'N/A')
-            current_price = prices.get(symbol); pnl_usd, pnl_percent = 0.0, 0.0
-            invested_usd = trade.get('total_invested_usd', 0); entry_price = trade.get('entry_price', 0)
+            symbol = trade.get('symbol', 'N/A')
+            interval = trade.get('interval', 'N/A')
+            current_price = prices.get(symbol)
+            pnl_usd, pnl_percent = 0.0, 0.0
+            invested_usd = trade.get('total_invested_usd', 0)
+            entry_price = trade.get('entry_price', 0)
+
             if current_price and entry_price > 0:
                 pnl_percent = ((current_price - entry_price) / entry_price) * 100
                 pnl_usd = invested_usd * (pnl_percent / 100)
@@ -1292,29 +1296,37 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                 entry_time = datetime.fromisoformat(trade.get('entry_time')).astimezone(VIETNAM_TZ)
                 holding_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
                 hold_display = f"Giữ:{holding_hours:.1f}h"
-            except: hold_display = ""
+            except:
+                hold_display = ""
+            
             entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
             score_change_icon = "📉" if last_score < entry_score else "📈" if last_score > entry_score else ""
             score_display = f"{entry_score:.1f}→{last_score:.1f}{score_change_icon}"
-            zone_display = f"{trade.get('entry_zone', 'N/A')}→{trade.get('last_zone')}" if trade.get('last_zone') and trade.get('last_zone') != trade.get('entry_zone') else trade.get('entry_zone', 'N/A')
-            line1 = f"  {pnl_emote_trade} **{symbol}-{interval}** ({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display}) PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)** | {hold_display}"
-            line2 = f"    Vốn:${invested_usd:,.2f} -> **${(invested_usd + pnl_usd):,.2f}** | Entry:{_format_price_internal(entry_price)} Cur:{_format_price_internal(current_price)} TP:{_format_price_internal(trade.get('tp'))} SL:{_format_price_internal(trade.get('sl'))}"
+            entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
+            zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
+            
+            # Xử lý hiển thị TP1 và TSL
+            tp1_info = " TP1✅" if trade.get('tp1_hit', False) or trade.get('profit_taken', False) else ""
+            tsl_info = f" TSL:{_format_price_internal(trade.get('sl'))}" if "Trailing_SL_Active" in trade.get('tactic_used', []) else ""
+            
+            line1 = f"  {pnl_emote_trade} **{symbol}-{interval}** ({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display}) PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)** | {hold_display}{tp1_info}"
+            line2 = f"    Vốn:${invested_usd:,.2f} -> **${(invested_usd + pnl_usd):,.2f}** | Entry:{_format_price_internal(entry_price)} Cur:{_format_price_internal(current_price)} TP:{_format_price_internal(trade.get('tp'))} SL:{_format_price_internal(trade.get('sl'))}{tsl_info}"
             active_trades_lines.extend([line1, line2])
         report.append('\n'.join(active_trades_lines))
 
-    # --- LOGIC LỊCH SỬ GIAO DỊCH (ĐƯỢC VIẾT HẾT VÀO ĐÂY) ---
     if trade_history:
         report.append("\n--- **Lịch sử giao dịch gần nhất** ---")
         sorted_by_pnl = sorted(closed_trades_in_history, key=lambda x: x.get('pnl_usd', 0), reverse=True)
         top_5_wins = [t for t in sorted_by_pnl if t.get('pnl_usd', 0) > 0][:5]
-        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) < 0], key=lambda x: x.get('pnl_usd', 0))[:5]
+        top_5_losses = sorted([t for t in sorted_by_pnl if t.get('pnl_usd', 0) <= 0], key=lambda x: x.get('pnl_usd', 0))[:5]
+        
         if top_5_wins:
             report.append("\n**✅ Top 5 lệnh lãi gần nhất**")
             for trade in top_5_wins:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
                 try:
-                    hold_display_h = trade.get('holding_duration_hours')
-                    if not hold_display_h: # Nếu không có trường này hoặc bằng 0
+                    hold_display_h = trade.get('holding_duration_hours', 0.0)
+                    if not hold_display_h or hold_display_h == 0.0:
                         entry_dt = datetime.fromisoformat(trade.get('entry_time'))
                         exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                         hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
@@ -1322,23 +1334,20 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                     hold_display_h = 0.0
                 report.append(f"  • ✅ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
                 report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
+        
         if top_5_losses:
-            # Tên báo cáo vẫn là "lỗ/hòa vốn" để bao quát
-            report.append("\n**❌ Top 5 lệnh lỗ gần nhất**") # Có thể đổi tiêu đề nếu muốn
+            report.append("\n**❌ Top 5 lệnh lỗ gần nhất**")
             for trade in top_5_losses:
                 pnl_usd, pnl_percent = trade.get('pnl_usd', 0), trade.get('pnl_percent', 0)
-                # <<< COPY LOGIC TÍNH TOÁN VÀO ĐÂY >>>
                 try:
-                    hold_display_h = trade.get('holding_duration_hours')
-                    if not hold_display_h: # Nếu không có trường này hoặc bằng 0
+                    hold_display_h = trade.get('holding_duration_hours', 0.0)
+                    if not hold_display_h or hold_display_h == 0.0:
                         entry_dt = datetime.fromisoformat(trade.get('entry_time'))
                         exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                         hold_display_h = round((exit_dt - entry_dt).total_seconds() / 3600, 1)
                 except:
                     hold_display_h = 0.0
-                # <<< KẾT THÚC COPY >>>
                 report.append(f"  • ❌ **{trade['symbol']}-{trade['interval']}** | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**")
-                # Sửa dòng dưới để dùng biến đã tính
                 report.append(f"    `Vốn: ${trade.get('total_invested_usd', 0):.2f} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
     
     return '\n'.join(report)
@@ -1553,5 +1562,4 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
-
 
