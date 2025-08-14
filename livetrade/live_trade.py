@@ -72,9 +72,9 @@ GENERAL_CONFIG = {
     "MOMENTUM_FILTER_CONFIG": {
         "ENABLED": True,  # Bật (True) hoặc Tắt (False) bộ lọc trên toàn cục
         "RULES_BY_TIMEFRAME": {
-            "1h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 1h
-            "4h": {"WINDOW": 3, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 4h
-            "1d": {"WINDOW": 5, "REQUIRED_CANDLES": 2}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
+            "1h": {"WINDOW": 5, "REQUIRED_CANDLES": 3}, # Cần 2/3 nến TỐT cho khung 1h
+            "4h": {"WINDOW": 5, "REQUIRED_CANDLES": 3}, # Cần 2/3 nến TỐT cho khung 4h
+            "1d": {"WINDOW": 5, "REQUIRED_CANDLES": 3}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
         }
     },
 
@@ -97,8 +97,8 @@ MTF_ANALYSIS_CONFIG = {
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
-    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.30,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 5.0,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.27,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
     "PARTIAL_EARLY_CLOSE_PCT": 0.5,              # Tỷ lệ % của lệnh sẽ được đóng nếu điểm sụt giảm (đóng 50%)
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # Bật/Tắt tính năng bảo vệ lợi nhuận
@@ -118,7 +118,7 @@ DYNAMIC_ALERT_CONFIG = {
 
 # --- LUẬT RỦI RO ---
 RISK_RULES_CONFIG = {
-    "MAX_ACTIVE_TRADES": 12,                     # Số lượng lệnh được phép mở cùng một lúc
+    "MAX_ACTIVE_TRADES": 7,                     # Số lượng lệnh được phép mở cùng một lúc
     "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.07, "4h": 0.10, "1d": 0.13}, # Mức cắt lỗ tối đa (%) cho phép theo từng khung thời gian
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.14, "4h": 0.18, "1d": 0.23}, # Mức chốt lời tối đa (%) để tránh kỳ vọng phi thực tế
     "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.03, "4h": 0.04, "1d": 0.05}, # SL không bao giờ được gần hơn 2.5% giá vào lệnh
@@ -179,7 +179,7 @@ TACTICS_LAB = {
         "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
         "ENTRY_SCORE": 7.0,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
         "RR": 2.8,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
-        "ATR_SL_MULTIPLIER": 2.0,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
+        "ATR_SL_MULTIPLIER": 2.2,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
         "USE_TRAILING_SL": True,                         # Bật/Tắt Cắt lỗ động (Trailing Stop Loss).
         "TRAIL_ACTIVATION_RR": 1.5,                      # Kích hoạt TSL khi lợi nhuận đạt 1R (gấp 1 lần rủi ro ban đầu).
         "TRAIL_DISTANCE_RR": 1.0,                        # Giữ khoảng cách TSL cách giá hiện tại một khoảng bằng 0.8R.
@@ -223,7 +223,7 @@ TACTICS_LAB = {
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, # Trọng số cân bằng.
         "ENTRY_SCORE": 6.3,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
         "RR": 2.5,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
-        "ATR_SL_MULTIPLIER": 3.0,                        # SL rất rộng, bám theo trend dài.
+        "ATR_SL_MULTIPLIER": 2.8,                        # SL rất rộng, bám theo trend dài.
         "USE_TRAILING_SL": True,
         "TRAIL_ACTIVATION_RR": 1.5,
         "TRAIL_DISTANCE_RR": 1.2,                        # Kéo TSL xa hơn.
@@ -414,7 +414,7 @@ def export_trade_history_to_csv(closed_trades: List[Dict]):
         for col in full_columns_list:
             if col not in df.columns:
                 df[col] = None
-        
+
         # Chuyển đổi partial_pnl_details thành chuỗi JSON
         if 'partial_pnl_details' in df.columns:
             df['partial_pnl_details'] = df['partial_pnl_details'].apply(lambda x: json.dumps(x) if x else None)
@@ -543,7 +543,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
     state['money_gained_from_trades_last_session'] += money_gained
     pnl_usd_final_part = (exit_price - trade['entry_price']) * closed_qty
     state['temp_pnl_from_closed_trades'] += pnl_usd_final_part
-    
+
     if 'partial_pnl_details' in trade:
         previous_realized_pnl = sum(trade['partial_pnl_details'].values())
     else:
@@ -735,49 +735,40 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
         except Exception as e:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
-
 def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -> bool:
-    """Kiểm tra động lượng nâng cao: nến xanh HOẶC có nỗ lực phục hồi."""
     config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
-
     rules_by_tf = config.get("RULES_BY_TIMEFRAME", {})
     rule = rules_by_tf.get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
     window = rule.get("WINDOW", 3)
     required_candles = rule.get("REQUIRED_CANDLES", 2)
-
     try:
         df = price_dataframes.get(symbol, {}).get(interval)
         if df is None or len(df) < window + 1:
             return True
-
         recent_candles = df.iloc[-window-1:-1]
         if len(recent_candles) < window:
             return True
-
+        last_closed_candle = recent_candles.iloc[-1]
+        last_candle_range = last_closed_candle['high'] - last_closed_candle['low']
+        is_last_green = last_closed_candle['close'] > last_closed_candle['open']
+        is_last_strong_recovery = (last_closed_candle['close'] - last_closed_candle['low']) / last_candle_range > 0.6 if last_candle_range > 0 else False
+        if not (is_last_green or is_last_strong_recovery):
+            return False
         good_candles_count = 0
-        if direction == "LONG":
-            for _, candle in recent_candles.iterrows():
-                candle_range = candle['high'] - candle['low']
-                if candle_range == 0:
-                    continue
-
-                is_green = candle['close'] > candle['open']
-                closing_position_ratio = (candle['close'] - candle['low']) / candle_range
-
-                # Nến tốt: là nến xanh HOẶC đóng cửa ở 60% phía trên (như Hammer).
-                if is_green or closing_position_ratio > 0.6:
-                    good_candles_count += 1
-
-            return good_candles_count >= required_candles
-
+        for _, candle in recent_candles.iterrows():
+            candle_range = candle['high'] - candle['low']
+            if candle_range == 0: continue
+            is_green = candle['close'] > candle['open']
+            closing_position_ratio = (candle['close'] - candle['low']) / candle_range
+            if is_green or closing_position_ratio > 0.6:
+                good_candles_count += 1
+        return good_candles_count >= required_candles
     except Exception as e:
         log_error(f"Lỗi trong is_momentum_confirmed cho {symbol}-{interval}", error_details=str(e))
         return True
-
     return False
-
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
@@ -1195,7 +1186,7 @@ def build_dynamic_alert_text(state: Dict, total_usdt: float, available_usdt: flo
             entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
             zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
             tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
-            
+
             status_tags = []
             if trade.get('tp1_hit', False): status_tags.append("TP1✅")
             if trade.get('profit_taken', False): status_tags.append("PP✅")
@@ -1308,13 +1299,11 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
             return " " + " ".join(status_tags) if status_tags else ""
 
         def get_hold_duration(trade):
-            # *** FIX: Tính lại thời gian giữ lệnh để đảm bảo chính xác ***
             try:
                 entry_dt = datetime.fromisoformat(trade.get('entry_time'))
                 exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                 return (exit_dt - entry_dt).total_seconds() / 3600
             except (TypeError, ValueError):
-                # Fallback nếu dữ liệu thời gian bị lỗi
                 return float(trade.get('holding_duration_hours', 0.0))
 
         if recent_wins:
@@ -1324,6 +1313,11 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                 pnl_usd, pnl_percent = float(trade.get('pnl_usd', 0)), float(trade.get('pnl_percent', 0))
                 status_display = build_history_line(trade)
                 hold_display_h = get_hold_duration(trade)
+                entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
+                entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone', 'N/A')
+                zone_display = f"{entry_zone}→{last_zone}" if last_zone != entry_zone else entry_zone
+                score_change_icon = "📉" if last_score < entry_score else ("📈" if last_score > entry_score else "")
+                score_display = f"{entry_score:.1f}→{last_score:.1f}{score_change_icon}"
                 try:
                     exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                     time_str = exit_dt.astimezone(VIETNAM_TZ).strftime('%d-%m %H:%M')
@@ -1331,6 +1325,7 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                     time_str = "N/A"
                 report.append(f"  • ✅ **{trade.get('symbol', 'N/A')}-{trade.get('interval', 'N/A')}** | Đóng: `{time_str}` | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**{status_display}")
                 report.append(f"    `Vốn: {_format_price_internal(capital)} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
+                report.append(f"    `Zone: {zone_display} | Score: {score_display}`") # <<< DÒNG MỚI ĐƯỢC THÊM VÀO
 
         if recent_losses:
             report.append("\n**❌ 5 lệnh LỖ gần nhất**")
@@ -1339,6 +1334,11 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                 pnl_usd, pnl_percent = float(trade.get('pnl_usd', 0)), float(trade.get('pnl_percent', 0))
                 status_display = build_history_line(trade)
                 hold_display_h = get_hold_duration(trade)
+                entry_score, last_score = trade.get('entry_score', 0.0), trade.get('last_score', 0.0)
+                entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone', 'N/A')
+                zone_display = f"{entry_zone}→{last_zone}" if last_zone != entry_zone else entry_zone
+                score_change_icon = "📉" if last_score < entry_score else ("📈" if last_score > entry_score else "")
+                score_display = f"{entry_score:.1f}→{last_score:.1f}{score_change_icon}"
                 try:
                     exit_dt = datetime.fromisoformat(trade.get('exit_time'))
                     time_str = exit_dt.astimezone(VIETNAM_TZ).strftime('%d-%m %H:%M')
@@ -1346,6 +1346,7 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
                     time_str = "N/A"
                 report.append(f"  • ❌ **{trade.get('symbol', 'N/A')}-{trade.get('interval', 'N/A')}** | Đóng: `{time_str}` | PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**{status_display}")
                 report.append(f"    `Vốn: {_format_price_internal(capital)} | Entry: {_format_price_internal(trade.get('entry_price'), no_symbol=True)} -> Exit: {_format_price_internal(trade.get('exit_price'), no_symbol=True)} | Hold: {hold_display_h:.1f}h`")
+                report.append(f"    `Zone: {zone_display} | Score: {score_display}`") # <<< DÒNG MỚI ĐƯỢC THÊM VÀO
 
     return '\n'.join(report)
 
