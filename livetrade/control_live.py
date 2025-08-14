@@ -12,6 +12,7 @@ import pytz
 import pandas as pd
 import traceback
 import shutil
+import csv
 import signal
 from datetime import datetime, timedelta
 
@@ -172,66 +173,55 @@ def refresh_market_data_for_panel():
                 price_dataframes[symbol][interval] = df
     print("... Tải dữ liệu hoàn tất ...")
 
+
 def show_full_dashboard(bnc: BinanceConnector):
     print("\n" + "="*80)
     print(f"📊 BÁO CÁO TỔNG QUAN & RADAR THỊ TRƯỜNG - {datetime.now(VIETNAM_TZ).strftime('%H:%M %d-%m-%Y')} 📊")
     state = load_state()
     if not state: print("❌ Không thể tải state."); return
+    
+    # Dọn dẹp các key tạm thời có thể còn sót lại từ phiên trước để báo cáo được sạch
+    state.pop('temp_newly_opened_trades', None)
+    state.pop('temp_newly_closed_trades', None)
+    
+    # Lấy dữ liệu cần thiết
     valid_trades, desynced_trades = reconcile_state(bnc, state)
-    _, total_usdt = get_usdt_fund(bnc)
-    prices = {s['symbol']: get_current_price(s['symbol']) for s in valid_trades}
-    value_open = sum(float(t.get('quantity', 0)) * prices.get(t['symbol'], 0) for t in valid_trades if prices.get(t['symbol']))
-    equity = total_usdt + value_open
-    initial_capital = state.get('initial_capital', equity or 1)
-    if initial_capital <= 0: initial_capital = 1
-    pnl_total_usd = equity - initial_capital
-    pnl_total_percent = (pnl_total_usd / initial_capital) * 100
+    available_usdt, total_usdt = get_usdt_fund(bnc)
+    
+    active_symbols = {t['symbol'] for t in valid_trades}
+    realtime_prices = {s: get_current_price(s) for s in active_symbols}
+    
+    equity = calculate_total_equity(state, total_usdt, realtime_prices)
+    if equity is None:
+        print("❌ Lỗi khi tính toán tổng tài sản. Vui lòng thử lại.")
+        return
 
-    print(f"\n💰 Vốn BĐ: ${initial_capital:,.2f} | 💵 Tiền mặt (USDT): ${total_usdt:,.2f}")
-    print(f"📊 Tổng TS: ${equity:,.2f} | 📈 PnL Tổng: {'🟢' if pnl_total_usd >= 0 else '🔴'} ${pnl_total_usd:,.2f} ({pnl_total_percent:+.2f}%)")
-    print("\n" + "---" * 10 + " 🛰️ DANH SÁCH LỆNH ĐANG MỞ 🛰️ " + "---" * 10)
-    all_trades = sorted(valid_trades + desynced_trades, key=lambda t: t.get('entry_time', ''))
-    if not all_trades: print("ℹ️ Không có lệnh nào đang mở.");
-    else:
-        for trade in all_trades:
-            is_desynced = any(t['trade_id'] == trade['trade_id'] for t in desynced_trades)
-            symbol = trade.get('symbol', 'N/A')
-            current_price = prices.get(symbol)
-            pnl_usd, pnl_percent = 0, 0
-            if current_price and not is_desynced:
-                entry_price = trade.get('entry_price', 0)
-                invested_usd = trade.get('total_invested_usd', 0)
-                if entry_price > 0:
-                    pnl_percent = ((current_price - entry_price) / entry_price) * 100
-                    pnl_usd = invested_usd * (pnl_percent / 100)
-                current_value = invested_usd + pnl_usd
-                price_info = f"Vốn: ${invested_usd:,.2f} → ${current_value:,.2f} | Entry: {format_price_dynamically(entry_price)} | Cur: {format_price_dynamically(current_price)} | TP: {format_price_dynamically(trade.get('tp'))} | SL: {format_price_dynamically(trade.get('sl'))}"
-            else:
-                invested_usd = trade.get('total_invested_usd', 0)
-                price_info = f"Vốn: ${invested_usd:,.2f} | Entry: {format_price_dynamically(trade.get('entry_price'))} (Không thể tính PnL)"
+    # --- GỌI HÀM TẠO BÁO CÁO TỪ live_trade.py ---
+    # build_dynamic_alert_text giờ là "nguồn chân lý" cho định dạng hiển thị
+    report_content = build_dynamic_alert_text(state, total_usdt, available_usdt, realtime_prices, equity)
 
-            try:
-                entry_time = datetime.fromisoformat(trade.get('entry_time')).astimezone(VIETNAM_TZ)
-                holding_hours = (datetime.now(VIETNAM_TZ) - entry_time).total_seconds() / 3600
-                hold_display = f"| Giữ: {holding_hours:.1f}h"
-            except:
-                hold_display = ""
+    # In báo cáo ra terminal, loại bỏ các ký tự markdown của Discord
+    print(report_content.replace('**', '').replace('`', ''))
 
-            pnl_icon = "⚪️" if is_desynced else ("🟢" if pnl_usd >= 0 else "🔴")
-            score_display = f"{trade.get('entry_score', 0.0):.1f}→{trade.get('last_score', 0.0):.1f}"
-            entry_zone, last_zone = trade.get('entry_zone', 'N/A'), trade.get('last_zone')
-            zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
-            tactic_info = f"({trade.get('opened_by_tactic', 'N/A')} | {score_display} | {zone_display})"
-            print(f"{pnl_icon}{' ⚠️ DESYNC' if is_desynced else ''} {symbol}-{trade.get('interval', 'N/A')} {tactic_info} PnL: ${pnl_usd:,.2f} ({pnl_percent:+.2f}%) {hold_display}")
-            print(f"   {price_info}")
-
-    if input("\n👉 Hiển thị Radar thị trường? (y/n): ").lower() != 'y': print("="*80); return
+    # Xử lý các lệnh bất đồng bộ (nếu có)
+    if desynced_trades:
+        print("\n" + "---" * 10 + " ⚠️ LỆNH BẤT ĐỒNG BỘ ⚠️ " + "---" * 10)
+        for trade in desynced_trades:
+            print(f"  ⚪️ {trade.get('symbol', 'N/A')} - Lệnh này có trong state nhưng không có trên sàn. Dùng chức năng 10 để dọn dẹp.")
+        print("-" * 80)
+    
+    # --- PHẦN RADAR THỊ TRƯỜNG (GIỮ NGUYÊN) ---
+    if input("\n👉 Hiển thị Radar thị trường? (y/n): ").lower() != 'y':
+        print("="*80)
+        return
+        
     print("\n" + "---" * 10 + " 📡 RADAR QUÉT THỊ TRƯỜNG 📡 " + "---" * 10)
     refresh_market_data_for_panel()
     symbols_to_scan = parse_env_variable("SYMBOLS_TO_SCAN")
-    symbols_in_trades = {t['symbol'] for t in all_trades}
+    symbols_in_trades = {t['symbol'] for t in (valid_trades + desynced_trades)}
 
-    if not symbols_to_scan: print("ℹ️ Không có symbol nào trong .env để quét.")
+    if not symbols_to_scan:
+        print("ℹ️ Không có symbol nào trong .env để quét.")
     else:
         for symbol in symbols_to_scan:
             trade_status_tag = " [MỞ]" if symbol in symbols_in_trades else ""
@@ -255,12 +245,9 @@ def show_full_dashboard(bnc: BinanceConnector):
                         temp_mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
                         adjusted_score = raw_score * temp_mtf_coeff
                         if adjusted_score > best_adj_score:
-                            best_raw_score = raw_score
-                            best_adj_score = adjusted_score
-                            best_tactic = tactic_name
-                            entry_threshold = tactic_cfg.get("ENTRY_SCORE", "N/A")
-                            mtf_coeff = temp_mtf_coeff
-
+                            best_raw_score, best_adj_score, best_tactic = raw_score, adjusted_score, tactic_name
+                            entry_threshold, mtf_coeff = tactic_cfg.get("ENTRY_SCORE", "N/A"), temp_mtf_coeff
+                
                 if best_raw_score == 0:
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
                     best_raw_score = decision.get("final_score", 0.0)
@@ -276,47 +263,68 @@ def show_full_dashboard(bnc: BinanceConnector):
     print("="*80)
 
 
-# Dán đè hàm này vào control_live.py
-
 def view_csv_history():
     print("\n--- 📜 20 Giao dịch cuối cùng (từ file CSV) 📜 ---")
     try:
         if not os.path.exists(TRADE_HISTORY_CSV_FILE):
             print("ℹ️ Không tìm thấy file trade_history.csv.")
             return
-        df = pd.read_csv(TRADE_HISTORY_CSV_FILE)
+
+        # *** GIẢI PHÁP CUỐI CÙNG: Đọc và chuẩn hóa CSV bằng tay ***
+        # Định nghĩa cấu trúc cột mới nhất làm "chân lý"
+        CORRECT_HEADER = [
+            "trade_id", "symbol", "interval", "status", "opened_by_tactic",
+            "tactic_used", "trade_type", "entry_price", "exit_price", "tp", "sl",
+            "initial_sl", "total_invested_usd", "pnl_usd", "pnl_percent",
+            "entry_time", "exit_time", "holding_duration_hours", "entry_score",
+            "last_score", "dca_entries", "partial_pnl_details",
+            "realized_pnl_usd", "binance_market_order_id", "entry_zone", "last_zone", "initial_entry"
+        ]
+        # Tìm vị trí của cột mới để chèn vào dữ liệu cũ
+        PARTIAL_PNL_DETAILS_INDEX = CORRECT_HEADER.index('partial_pnl_details')
+
+        all_rows_normalized = []
+        with open(TRADE_HISTORY_CSV_FILE, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.reader(f)
+            next(reader, None)  # Bỏ qua dòng header trong file
+
+            for i, row in enumerate(reader, 2):
+                if len(row) == 26:  # Dữ liệu cũ
+                    row.insert(PARTIAL_PNL_DETAILS_INDEX, None) # Chèn giá trị rỗng
+                    all_rows_normalized.append(row)
+                elif len(row) == 27: # Dữ liệu mới
+                    all_rows_normalized.append(row)
+                # Các dòng lỗi khác sẽ bị bỏ qua
+        
+        # Bây giờ, tạo DataFrame từ dữ liệu đã SẠCH và ĐỒNG NHẤT
+        df = pd.DataFrame(all_rows_normalized, columns=CORRECT_HEADER)
+
         if df.empty:
-            print("ℹ️ File lịch sử trống.")
+            print("ℹ️ Không có dữ liệu hợp lệ nào được tìm thấy trong file CSV.")
             return
 
-        # Tạo cột datetime tạm thời để xử lý và sắp xếp
+        # Từ đây, logic giữ nguyên vì DataFrame đã hoàn hảo
         df['exit_time_dt'] = pd.to_datetime(df['exit_time'], errors='coerce')
-
-        # Lọc bỏ những dòng không thể parse được thời gian
         df_display = df.dropna(subset=['exit_time_dt']).copy()
-
-        # <<< SỬA LỖI LOGIC QUAN TRỌNG Ở ĐÂY >>>
-        # 1. SẮP XẾP TRƯỚC khi làm bất cứ điều gì khác, dùng cột datetime object để đảm bảo đúng thứ tự
         df_sorted = df_display.sort_values(by='exit_time_dt', ascending=False).head(20)
 
-        # 2. BÂY GIỜ mới bắt đầu format lại các cột để hiển thị cho đẹp
         df_formatted = df_sorted.copy()
-        
         df_formatted['Time Close'] = df_formatted['exit_time_dt'].dt.tz_convert(VIETNAM_TZ).dt.strftime('%m-%d %H:%M')
-        
+
         for col in ['total_invested_usd', 'pnl_usd', 'pnl_percent', 'entry_price', 'exit_price', 'entry_score', 'last_score', 'holding_duration_hours']:
             if col in df_formatted.columns:
                 df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce')
-        
+
         def get_initial_capital(row):
             try:
                 initial_entry_str = row['initial_entry']
                 if pd.isna(initial_entry_str) or not initial_entry_str: return row['total_invested_usd']
+                # Chú ý xử lý chuỗi JSON có thể bị lỗi
                 initial_entry_data = json.loads(str(initial_entry_str).replace("'", "\""))
                 return float(initial_entry_data.get('invested_usd', row['total_invested_usd']))
             except:
                 return row['total_invested_usd']
-        
+
         df_formatted['Vốn'] = df_formatted.apply(get_initial_capital, axis=1).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
         df_formatted['pnl_usd'] = df_formatted['pnl_usd'].apply(lambda x: f"${x:+.2f}" if pd.notna(x) else "N/A")
         df_formatted['PnL %'] = df_formatted['pnl_percent'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
@@ -326,14 +334,13 @@ def view_csv_history():
         df_formatted['Zone'] = df_formatted.apply(lambda row: f"{row.get('entry_zone', 'N/A')}→{row.get('last_zone', 'N/A')}" if pd.notna(row.get('entry_zone')) and pd.notna(row.get('last_zone')) else row.get('entry_zone', 'N/A'), axis=1)
         df_formatted.rename(columns={'holding_duration_hours': 'Hold (h)', 'opened_by_tactic': 'Tactic'}, inplace=True)
 
-        # 3. CHỌN CÁC CỘT CUỐI CÙNG ĐỂ IN RA
         final_order = ['Time Close', 'symbol', 'interval', 'Giá vào', 'Giá ra', 'Vốn', 'pnl_usd', 'PnL %', 'Hold (h)', 'Score', 'Zone', 'Tactic', 'status']
-        df_final_display = df_formatted[[c for c in final_order if c in df_formatted.columns]]
+        existing_cols = [c for c in final_order if c in df_formatted.columns]
+        df_final_display = df_formatted[existing_cols]
 
         print(df_final_display.to_string(index=False))
     except Exception as e:
         print(f"⚠️ Lỗi khi đọc file CSV: {e}"); traceback.print_exc()
-
 
 
 
@@ -358,13 +365,41 @@ def manual_report(bnc: BinanceConnector):
     if ALERT_CONFIG.get("DISCORD_WEBHOOK_URL") and input("\n👉 Gửi báo cáo này lên Discord? (y/n): ").lower() == 'y':
         print("... Đang gửi lên Discord..."); send_discord_message_chunks(report_content, force=True); print("✅ Đã gửi.")
 
+
 def show_tactic_analysis():
     print("\n" + "="*15, "📊 BẢNG PHÂN TÍCH HIỆU SUẤT TACTIC 📊", "="*15)
     if not os.path.exists(TRADE_HISTORY_CSV_FILE):
         print("ℹ️ Không tìm thấy file trade_history.csv.")
         return
     try:
-        df = pd.read_csv(TRADE_HISTORY_CSV_FILE)
+        # *** BẮT ĐẦU ĐOẠN CODE SỬA LỖI ĐỌC FILE ***
+        # Định nghĩa cấu trúc cột mới nhất làm "chân lý"
+        CORRECT_HEADER = [
+            "trade_id", "symbol", "interval", "status", "opened_by_tactic",
+            "tactic_used", "trade_type", "entry_price", "exit_price", "tp", "sl",
+            "initial_sl", "total_invested_usd", "pnl_usd", "pnl_percent",
+            "entry_time", "exit_time", "holding_duration_hours", "entry_score",
+            "last_score", "dca_entries", "partial_pnl_details",
+            "realized_pnl_usd", "binance_market_order_id", "entry_zone", "last_zone", "initial_entry"
+        ]
+        PARTIAL_PNL_DETAILS_INDEX = CORRECT_HEADER.index('partial_pnl_details')
+
+        all_rows_normalized = []
+        with open(TRADE_HISTORY_CSV_FILE, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.reader(f)
+            next(reader, None)  # Bỏ qua dòng header trong file
+            for row in reader:
+                if len(row) == 26: # Dữ liệu cũ
+                    row.insert(PARTIAL_PNL_DETAILS_INDEX, None)
+                    all_rows_normalized.append(row)
+                elif len(row) == 27: # Dữ liệu mới
+                    all_rows_normalized.append(row)
+                # Bỏ qua các dòng lỗi khác một cách lặng lẽ
+        
+        # Tạo DataFrame từ dữ liệu đã được chuẩn hóa
+        df = pd.DataFrame(all_rows_normalized, columns=CORRECT_HEADER)
+        # *** KẾT THÚC ĐOẠN CODE SỬA LỖI ĐỌC FILE ***
+
         df['pnl_usd'] = pd.to_numeric(df['pnl_usd'], errors='coerce')
         df.dropna(subset=['pnl_usd', 'opened_by_tactic'], inplace=True)
         df = df[df['status'].str.contains('Closed', na=False, case=False)]
@@ -373,13 +408,13 @@ def show_tactic_analysis():
             print("ℹ️ Không có dữ liệu hợp lệ để phân tích hiệu suất.")
             return
 
+        # Phần logic phân tích giữ nguyên vì giờ nó đã nhận được DataFrame sạch
         grouped = df.groupby('opened_by_tactic').agg(
             Total_Trades=('pnl_usd', 'count'),
             Total_PnL=('pnl_usd', 'sum'),
             Wins=('pnl_usd', lambda x: (x > 0).sum()),
             Avg_Win_PnL=('pnl_usd', lambda x: x[x > 0].mean()),
             Avg_Loss_PnL=('pnl_usd', lambda x: x[x <= 0].mean()),
-            # Sửa lỗi cú pháp ở đây: Dùng tên hợp lệ, không có ký tự '$'
             Max_Win=('pnl_usd', lambda x: x[x > 0].max()),
             Max_Loss=('pnl_usd', lambda x: x[x <= 0].min())
         ).fillna(0)
@@ -409,8 +444,7 @@ def show_tactic_analysis():
         analysis_df = pd.concat([grouped, total_df.fillna(0)])
 
         final_df = analysis_df.reset_index().rename(columns={'index': 'Tactic'})
-
-        # Đổi tên cột ở bước cuối cùng để hiển thị, tránh lỗi cú pháp
+        
         final_df.rename(columns={'Max_Win': 'Max_Win_$', 'Max_Loss': 'Max_Loss_$'}, inplace=True)
         final_cols = ['Tactic', 'Total_Trades', 'Win_Rate_%', 'Total_PnL', 'Expectancy_$', 'Payoff_Ratio', 'Avg_Win_PnL', 'Avg_Loss_PnL', 'Max_Win_$', 'Max_Loss_$']
 
