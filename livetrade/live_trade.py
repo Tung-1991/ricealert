@@ -121,7 +121,7 @@ RISK_RULES_CONFIG = {
     "MAX_ACTIVE_TRADES": 7,                     # Số lượng lệnh được phép mở cùng một lúc
     "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.07, "4h": 0.10, "1d": 0.13}, # Mức cắt lỗ tối đa (%) cho phép theo từng khung thời gian
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.14, "4h": 0.18, "1d": 0.23}, # Mức chốt lời tối đa (%) để tránh kỳ vọng phi thực tế
-    "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.03, "4h": 0.04, "1d": 0.05}, # SL không bao giờ được gần hơn 2.5% giá vào lệnh
+    "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.035, "4h": 0.05, "1d": 0.065}, # SL không bao giờ được gần hơn 2.5% giá vào lệnh
     "STALE_TRADE_RULES": {                       # Quy tắc xử lý các lệnh "ì", không chạy
         "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 1h sau 48h mà lãi < 25% so với kỳ vọng -> xem xét đóng
         "4h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 20.0}, # Lệnh 4h sau 72h mà lãi < 25% so với kỳ vọng -> xem xét đóng
