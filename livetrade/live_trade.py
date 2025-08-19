@@ -98,7 +98,7 @@ MTF_ANALYSIS_CONFIG = {
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 5.0,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.27,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
     "PARTIAL_EARLY_CLOSE_PCT": 0.5,              # Tỷ lệ % của lệnh sẽ được đóng nếu điểm sụt giảm (đóng 50%)
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # Bật/Tắt tính năng bảo vệ lợi nhuận
@@ -177,7 +177,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], # Vùng thị trường tối ưu để Tactic này hoạt động.
         "NOTES": "Săn điểm phá vỡ (breakout) từ nền giá đi ngang siết chặt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
-        "ENTRY_SCORE": 7.0,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
+        "ENTRY_SCORE": 7.2,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
         "RR": 2.8,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
         "ATR_SL_MULTIPLIER": 2.2,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
         "USE_TRAILING_SL": True,                         # Bật/Tắt Cắt lỗ động (Trailing Stop Loss).
@@ -192,7 +192,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Bắt đáy/sóng hồi trong một xu hướng lớn đang diễn ra.",
         "WEIGHTS": {'tech': 0.5, 'context': 0.2, 'ai': 0.3},
-        "ENTRY_SCORE": 6.8,
+        "ENTRY_SCORE": 7.0,
         "RR": 2.0,
         "ATR_SL_MULTIPLIER": 2.0,
         "USE_TRAILING_SL": False,                        # Tactic này không dùng TSL.
@@ -206,7 +206,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": COINCIDENT_ZONE,                 # Chỉ hoạt động ở vùng COINCIDENT, nơi tín hiệu mạnh nhất.
         "NOTES": "Tấn công quyết liệt khi điểm AI rất cao và có xác nhận mạnh mẽ.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6}, # Rất tin tưởng vào điểm AI.
-        "ENTRY_SCORE": 6.6,
+        "ENTRY_SCORE": 6.8,
         "RR": 2.3,
         "ATR_SL_MULTIPLIER": 2.5,                        # Đặt SL rộng hơn để tránh bị quét.
         "USE_TRAILING_SL": True,
@@ -221,7 +221,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh chủ lực, đi theo xu hướng đã rõ ràng, cân bằng giữa các yếu tố.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, # Trọng số cân bằng.
-        "ENTRY_SCORE": 6.3,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
+        "ENTRY_SCORE": 6.5,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
         "RR": 2.5,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
         "ATR_SL_MULTIPLIER": 2.8,                        # SL rất rộng, bám theo trend dài.
         "USE_TRAILING_SL": True,
