@@ -97,7 +97,7 @@ MTF_ANALYSIS_CONFIG = {
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
-    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 5.0,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # Ngưỡng điểm tuyệt đối để đóng lệnh sớm (nếu điểm < 4.8)
     "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,       # Ngưỡng % sụt giảm của điểm so với lúc vào lệnh để đóng một phần (27%)
     "PARTIAL_EARLY_CLOSE_PCT": 0.5,              # Tỷ lệ % của lệnh sẽ được đóng nếu điểm sụt giảm (đóng 50%)
     "PROFIT_PROTECTION": {
