@@ -736,26 +736,17 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
 def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -> bool:
-    config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
+    config = GENERAL_config.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
-    rules_by_tf = config.get("RULES_BY_TIMEFRAME", {})
-    rule = rules_by_tf.get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
-    window = rule.get("WINDOW", 3)
-    required_candles = rule.get("REQUIRED_CANDLES", 2)
+    rules = config.get("RULES_BY_TIMEFRAME", {}).get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
+    window = rules.get("WINDOW", 3)
+    required_candles = rules.get("REQUIRED_CANDLES", 2)
     try:
         df = price_dataframes.get(symbol, {}).get(interval)
-        if df is None or len(df) < window + 1:
+        if df is None or len(df) < window:
             return True
-        recent_candles = df.iloc[-window-1:-1]
-        if len(recent_candles) < window:
-            return True
-        last_closed_candle = recent_candles.iloc[-1]
-        last_candle_range = last_closed_candle['high'] - last_closed_candle['low']
-        is_last_green = last_closed_candle['close'] > last_closed_candle['open']
-        is_last_strong_recovery = (last_closed_candle['close'] - last_closed_candle['low']) / last_candle_range > 0.6 if last_candle_range > 0 else False
-        if not (is_last_green or is_last_strong_recovery):
-            return False
+        recent_candles = df.iloc[-window:]
         good_candles_count = 0
         for _, candle in recent_candles.iterrows():
             candle_range = candle['high'] - candle['low']
@@ -768,7 +759,6 @@ def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -
     except Exception as e:
         log_error(f"Lỗi trong is_momentum_confirmed cho {symbol}-{interval}", error_details=str(e))
         return True
-    return False
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
