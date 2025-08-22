@@ -73,8 +73,8 @@ GENERAL_CONFIG = {
         "ENABLED": True,  # Bật (True) hoặc Tắt (False) bộ lọc trên toàn cục
         "RULES_BY_TIMEFRAME": {
             "1h": {"WINDOW": 5, "REQUIRED_CANDLES": 3}, # Cần 2/3 nến TỐT cho khung 1h
-            "4h": {"WINDOW": 5, "REQUIRED_CANDLES": 3}, # Cần 2/3 nến TỐT cho khung 4h
-            "1d": {"WINDOW": 5, "REQUIRED_CANDLES": 3}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
+            "4h": {"WINDOW": 5, "REQUIRED_CANDLES": 2}, # Cần 2/3 nến TỐT cho khung 4h
+            "1d": {"WINDOW": 4, "REQUIRED_CANDLES": 1}  # Nới lỏng: Cần 2/4 nến TỐT cho khung 1d
         }
     },
 
@@ -177,7 +177,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LEADING_ZONE, COINCIDENT_ZONE], # Vùng thị trường tối ưu để Tactic này hoạt động.
         "NOTES": "Săn điểm phá vỡ (breakout) từ nền giá đi ngang siết chặt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3}, # Trọng số để tính điểm tín hiệu, tùy chỉnh cho từng Tactic.
-        "ENTRY_SCORE": 7.2,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
+        "ENTRY_SCORE": 7.0,                              # Điểm số tối thiểu để vào lệnh bằng Tactic này.
         "RR": 2.8,                                       # Tỷ lệ Rủi ro/Lợi nhuận (Risk/Reward) mong muốn.
         "ATR_SL_MULTIPLIER": 2.2,                        # Hệ số nhân với chỉ báo ATR để đặt Stop Loss (Ví dụ: SL = Giá vào - ATR * 1.8).
         "USE_TRAILING_SL": True,                         # Bật/Tắt Cắt lỗ động (Trailing Stop Loss).
@@ -206,7 +206,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": COINCIDENT_ZONE,                 # Chỉ hoạt động ở vùng COINCIDENT, nơi tín hiệu mạnh nhất.
         "NOTES": "Tấn công quyết liệt khi điểm AI rất cao và có xác nhận mạnh mẽ.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6}, # Rất tin tưởng vào điểm AI.
-        "ENTRY_SCORE": 6.8,
+        "ENTRY_SCORE": 6.6,
         "RR": 2.3,
         "ATR_SL_MULTIPLIER": 2.5,                        # Đặt SL rộng hơn để tránh bị quét.
         "USE_TRAILING_SL": True,
@@ -221,7 +221,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh chủ lực, đi theo xu hướng đã rõ ràng, cân bằng giữa các yếu tố.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4}, # Trọng số cân bằng.
-        "ENTRY_SCORE": 6.5,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
+        "ENTRY_SCORE": 6.3,                              # Ngưỡng vào lệnh thấp hơn, chấp nhận các tín hiệu "đủ tốt".
         "RR": 2.5,                                       # Kỳ vọng RR thấp hơn, phù hợp với việc đi theo trend.
         "ATR_SL_MULTIPLIER": 2.8,                        # SL rất rộng, bám theo trend dài.
         "USE_TRAILING_SL": True,
@@ -736,7 +736,7 @@ def handle_dca_opportunities(bnc: BinanceConnector, state: Dict, available_usdt:
             log_error(f"Lỗi nghiêm trọng khi DCA {symbol}", error_details=traceback.format_exc(), send_to_discord=True, state=state)
 
 def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -> bool:
-    config = GENERAL_config.get("MOMENTUM_FILTER_CONFIG", {})
+    config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
     rules = config.get("RULES_BY_TIMEFRAME", {}).get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
