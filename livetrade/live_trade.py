@@ -129,7 +129,7 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.2,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,              # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
