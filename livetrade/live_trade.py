@@ -212,7 +212,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh SWING TRADE chủ lực. Vào lệnh sớm hơn, gồng lệnh lì đòn qua các đợt điều chỉnh.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
-        "ENTRY_SCORE": 6.3,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
+        "ENTRY_SCORE": 6.5,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
         "RR": 1.5,                                       # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
         "ATR_SL_MULTIPLIER": 2.5,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.6, "TRAIL_DISTANCE_RR": 1.2,
