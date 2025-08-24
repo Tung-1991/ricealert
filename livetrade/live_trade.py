@@ -99,37 +99,25 @@ MTF_ANALYSIS_CONFIG = {
 # --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
     "ENABLED": True,
-    "MAX_BONUS_COEFF": 1.07,                   # [Cân bằng] - Mức thưởng TỐI ĐA, tránh bonus quá lớn ảnh hưởng điểm gốc.
-    "MIN_PENALTY_COEFF": 0.90,                   # [An toàn] - Mức phạt TỐI ĐA, đảm bảo không loại bỏ tín hiệu tốt một cách cực đoan.
-    
-    # --- Hệ thống tính điểm linh hoạt ---
-    "SCORING_WEIGHTS": {                       # [Linh hoạt] - Trọng số cho từng yếu tố cấu thành điểm EZ. Tổng không cần bằng 1.
+    "MAX_BONUS_COEFF": 1.10,                   # Thưởng tối đa +10%, quyết đoán hơn ở đáy.
+    "MIN_PENALTY_COEFF": 0.88,                   # Phạt tối đa -12%, rất nghiêm khắc ở đỉnh.
+    "SCORING_WEIGHTS": {                       # Trọng số cho từng bằng chứng, ưu tiên Nến và SR.
         "RSI": 0.4,
         "BB_POS": 0.4,
-        "CANDLE": 0.2,
-        "SR_LEVEL": 0.2
+        "CANDLE": 0.35,
+        "SR_LEVEL": 0.35
     },
-    "BASE_IMPACT": {                           # [Tinh chỉnh] - Mức độ ảnh hưởng cơ bản của điểm thưởng/phạt.
-        "BONUS_PER_POINT": 0.05,               # Thưởng +5% trên hệ số cho mỗi điểm bonus_score.
-        "PENALTY_PER_POINT": -0.07             # Phạt -7% trên hệ số cho mỗi điểm penalty_score.
+    "BASE_IMPACT": {                           # Mức độ tác động cơ bản, đã được tăng cường.
+        "BONUS_PER_POINT": 0.08,               # Thưởng +8% cho mỗi điểm bonus.
+        "PENALTY_PER_POINT": -0.10             # Phạt -10% cho mỗi điểm phạt, tác động mạnh.
     },
-    "CONFLUENCE_MULTIPLIER": 1.5,              # [Khuếch đại] - Nhân hệ số điểm khi các yếu tố chính (RSI+BB) đồng thuận.
-
-    "RULES_BY_TIMEFRAME": {
-        "1h": {
-            "OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98},
-            "OVERSOLD": {"RSI_BELOW": 25, "BB_POS_BELOW": 0.05}
-        },
-        "4h": {
-            "OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95},
-            "OVERSOLD": {"RSI_BELOW": 28, "BB_POS_BELOW": 0.08}
-        },
-        "1d": {
-            "OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95},
-            "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}
-        }
+    "CONFLUENCE_MULTIPLIER": 1.8,              # Khuếch đại x1.8 khi các yếu tố chính (RSI+BB) đồng thuận.
+    "RULES_BY_TIMEFRAME": {                    # Ngưỡng kích hoạt cho từng khung thời gian.
+        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 25, "BB_POS_BELOW": 0.05}},
+        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 28, "BB_POS_BELOW": 0.08}},
+        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}}
     },
-    "CONFIRMATION_BOOST": {
+    "CONFIRMATION_BOOST": {                    # Danh sách các yếu tố xác nhận.
         "ENABLED": True,
         "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"],
         "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],
@@ -138,11 +126,10 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
     }
 }
 
-
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.23,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.2,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,              # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
@@ -164,9 +151,9 @@ DYNAMIC_ALERT_CONFIG = {
 # --- LUẬT RỦI RO ---
 RISK_RULES_CONFIG = {
     "MAX_ACTIVE_TRADES": 7,                      # [Quản lý rủi ro] - Giới hạn số lệnh mở cùng lúc để tránh rủi ro quá mức.
-    "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.08, "4h": 0.12, "1d": 0.16}, # [Phanh khẩn cấp] - Mức lỗ TỐI ĐA cho phép, đủ rộng cho các Tactic.
-    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.11, "4h": 0.17, "1d": 0.22}, # [Thực tế hóa] - Mức lãi TỐI ĐA, tránh các mục tiêu viển vông.
-    "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.06, "4h": 0.08, "1d": 0.10}, # [SÀN AN TOÀN] - Mức lỗ TỐI THIỂU, tránh SL quá gần khi ATR thấp.
+    "MAX_SL_PERCENT_BY_TIMEFRAME": {"1h": 0.10, "4h": 0.15, "1d": 0.20}, # [Phanh khẩn cấp] - Mức lỗ TỐI ĐA cho phép, đủ rộng cho các Tactic.
+    "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.15, "4h": 0.25, "1d": 0.30}, # [Thực tế hóa] - Mức lãi TỐI ĐA, tránh các mục tiêu viển vông.
+    "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.08, "4h": 0.10, "1d": 0.15}, # [SÀN AN TOÀN] - Mức lỗ TỐI THIỂU, tránh SL quá gần khi ATR thấp.
     "STALE_TRADE_RULES": {                       # [GỒNG LỆNH] - Cho các lệnh "ì", không chạy thêm thời gian.
         "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 5.0},
         "4h": {"HOURS": 96, "PROGRESS_THRESHOLD_PCT": 8.0},
@@ -185,9 +172,9 @@ DCA_CONFIG = {
     "ENABLED": True,                             # [Sửa sai] - Bật DCA như một công cụ sửa sai chiến lược.
     "MAX_DCA_ENTRIES": 2,                        # Tối đa 2 lần DCA cho một lệnh.
     "TRIGGER_DROP_PCT_BY_TIMEFRAME": {           # [Logic] - Ngưỡng DCA luôn "nông" hơn Min SL để bot có cơ hội hành động.
-        "1h": -5.0,
-        "4h": -7.0,
-        "1d": -9.0
+        "1h": -6.0,
+        "4h": -8.0,
+        "1d": -10.0
     },
     "SCORE_MIN_THRESHOLD": 6.5,                  # [Logic] - Hạ ngưỡng để DCA có thể hoạt động cho các lệnh có điểm vào thấp.
     "CAPITAL_MULTIPLIER": 0.5,                  # [Quản lý rủi ro] - Giảm vốn DCA để tránh "lỗ kép".
@@ -212,10 +199,10 @@ ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 # --- QUẢN LÝ VỐN THEO VÙNG ---
 ZONE_BASED_POLICIES = {
     # Giảm nhẹ vốn trên mỗi lệnh để quản lý rủi ro tốt hơn khi SL rộng hơn.
-    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.040},
-    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.060},
-    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.050},
-    NOISE_ZONE: {"NOTES": "Nguy hiểm, vốn siêu nhỏ.", "CAPITAL_PCT": 0.030}
+    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.025},
+    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.040},
+    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.035},
+    NOISE_ZONE: {"NOTES": "Nguy hiểm, vốn siêu nhỏ.", "CAPITAL_PCT": 0.020}
 }
 
 # --- PHÒNG THÍ NGHIỆM CHIẾN THUẬT (TACTICS LAB) ---
