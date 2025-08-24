@@ -99,7 +99,7 @@ MTF_ANALYSIS_CONFIG = {
 # --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
     "ENABLED": True,
-    "MAX_BONUS_COEFF": 1.1,                   # [Cân bằng] - Mức thưởng TỐI ĐA, tránh bonus quá lớn ảnh hưởng điểm gốc.
+    "MAX_BONUS_COEFF": 1.07,                   # [Cân bằng] - Mức thưởng TỐI ĐA, tránh bonus quá lớn ảnh hưởng điểm gốc.
     "MIN_PENALTY_COEFF": 0.90,                   # [An toàn] - Mức phạt TỐI ĐA, đảm bảo không loại bỏ tín hiệu tốt một cách cực đoan.
     
     # --- Hệ thống tính điểm linh hoạt ---
@@ -168,8 +168,8 @@ RISK_RULES_CONFIG = {
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.11, "4h": 0.17, "1d": 0.22}, # [Thực tế hóa] - Mức lãi TỐI ĐA, tránh các mục tiêu viển vông.
     "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.06, "4h": 0.08, "1d": 0.10}, # [SÀN AN TOÀN] - Mức lỗ TỐI THIỂU, tránh SL quá gần khi ATR thấp.
     "STALE_TRADE_RULES": {                       # [GỒNG LỆNH] - Cho các lệnh "ì", không chạy thêm thời gian.
-        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 15.0},
-        "4h": {"HOURS": 96, "PROGRESS_THRESHOLD_PCT": 15.0},
+        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 5.0},
+        "4h": {"HOURS": 96, "PROGRESS_THRESHOLD_PCT": 8.0},
         "1d": {"HOURS": 240, "PROGRESS_THRESHOLD_PCT": 10.0},
         "STAY_OF_EXECUTION_SCORE": 6.8           # [Ân xá] - Điểm số tối thiểu để "ân xá", không đóng lệnh "ì".
     }
@@ -225,9 +225,9 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh SWING TRADE chủ lực. Vào lệnh sớm hơn, gồng lệnh lì đòn qua các đợt điều chỉnh.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
-        "ENTRY_SCORE": 6.3,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
+        "ENTRY_SCORE": 6.5,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
         "RR": 1.5,                                       # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
-        "ATR_SL_MULTIPLIER": 2.6,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
+        "ATR_SL_MULTIPLIER": 2.5,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.6, "TRAIL_DISTANCE_RR": 1.2,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
@@ -264,13 +264,13 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [COINCIDENT_ZONE],
         "NOTES": "Chuyên gia chớp nhoáng: Tận dụng điểm AI siêu cao để vào nhanh, ăn ngắn, thoát nhanh.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6},
-        "ENTRY_SCORE": 6.6,                              # [SIẾT CHẶT] - Đã dựa vào AI thì tín hiệu phải thực sự xuất sắc.
+        "ENTRY_SCORE": 6.8,                              # [SIẾT CHẶT] - Đã dựa vào AI thì tín hiệu phải thực sự xuất sắc.
         "RR": 1.5,                                       # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
         "ATR_SL_MULTIPLIER": 2.2,                        # [CHIẾN LƯỢC] - SL chặt hơn, phù hợp với việc đánh nhanh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 0.9,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.6,
         "USE_MOMENTUM_FILTER": True,
-        "USE_EXTREME_ZONE_FILTER": True
+        "USE_EXTREME_ZONE_FILTER": False
     },
     # == TACTIC 5: Tay Bắn Tỉa ==
     "Cautious_Observer": {
