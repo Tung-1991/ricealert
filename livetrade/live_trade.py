@@ -644,7 +644,7 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                     close_pct = 1.0
                 if close_trade_on_binance(bnc, trade, f"EC_Rel_{last_score:.1f}", state, close_pct=close_pct):
                     trade['partial_closed_by_score'] = True
-                    if close_pct < 1.0: trade['sl'] = trade['entry_price']
+                    #if close_pct < 1.0: trade['sl'] = trade['entry_price']
         _, pnl_percent = get_current_pnl(trade, realtime_price=current_price)
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
         initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
