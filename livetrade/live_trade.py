@@ -96,6 +96,49 @@ MTF_ANALYSIS_CONFIG = {
     "SIDEWAYS_PENALTY_COEFFICIENT": 0.97,        # [Phạt nhẹ] - Phạt nhẹ khi khung lớn đi ngang.
 }
 
+# --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
+EXTREME_ZONE_ADJUSTMENT_CONFIG = {
+    "ENABLED": True,
+    "MAX_BONUS_COEFF": 1.1,                   # [Cân bằng] - Mức thưởng TỐI ĐA, tránh bonus quá lớn ảnh hưởng điểm gốc.
+    "MIN_PENALTY_COEFF": 0.90,                   # [An toàn] - Mức phạt TỐI ĐA, đảm bảo không loại bỏ tín hiệu tốt một cách cực đoan.
+    
+    # --- Hệ thống tính điểm linh hoạt ---
+    "SCORING_WEIGHTS": {                       # [Linh hoạt] - Trọng số cho từng yếu tố cấu thành điểm EZ. Tổng không cần bằng 1.
+        "RSI": 0.4,
+        "BB_POS": 0.4,
+        "CANDLE": 0.2,
+        "SR_LEVEL": 0.2
+    },
+    "BASE_IMPACT": {                           # [Tinh chỉnh] - Mức độ ảnh hưởng cơ bản của điểm thưởng/phạt.
+        "BONUS_PER_POINT": 0.05,               # Thưởng +5% trên hệ số cho mỗi điểm bonus_score.
+        "PENALTY_PER_POINT": -0.07             # Phạt -7% trên hệ số cho mỗi điểm penalty_score.
+    },
+    "CONFLUENCE_MULTIPLIER": 1.5,              # [Khuếch đại] - Nhân hệ số điểm khi các yếu tố chính (RSI+BB) đồng thuận.
+
+    "RULES_BY_TIMEFRAME": {
+        "1h": {
+            "OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98},
+            "OVERSOLD": {"RSI_BELOW": 25, "BB_POS_BELOW": 0.05}
+        },
+        "4h": {
+            "OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95},
+            "OVERSOLD": {"RSI_BELOW": 28, "BB_POS_BELOW": 0.08}
+        },
+        "1d": {
+            "OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95},
+            "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}
+        }
+    },
+    "CONFIRMATION_BOOST": {
+        "ENABLED": True,
+        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"],
+        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],
+        "RESISTANCE_PROXIMITY_PCT": 0.015,
+        "SUPPORT_PROXIMITY_PCT": 0.015
+    }
+}
+
+
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
@@ -116,6 +159,7 @@ DYNAMIC_ALERT_CONFIG = {
     "FORCE_UPDATE_HOURS": 10,
     "PNL_CHANGE_THRESHOLD_PCT": 2.0
 }
+
 
 # --- LUẬT RỦI RO ---
 RISK_RULES_CONFIG = {
@@ -186,7 +230,8 @@ TACTICS_LAB = {
         "ATR_SL_MULTIPLIER": 2.6,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.6, "TRAIL_DISTANCE_RR": 1.2,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.5,
-        "USE_MOMENTUM_FILTER": True
+        "USE_MOMENTUM_FILTER": True,
+        "USE_EXTREME_ZONE_FILTER": True
     },
     # == TACTIC 2: Kẻ Săn Mồi Bùng Nổ ==
     "Breakout_Hunter": {
@@ -198,7 +243,8 @@ TACTICS_LAB = {
         "ATR_SL_MULTIPLIER": 2.4,                        # [CHỊU ĐÒN] - SL đủ rộng để không bị cú retest đá ra khỏi lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.5,
-        "USE_MOMENTUM_FILTER": True                      # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
+        "USE_MOMENTUM_FILTER": True,                      # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
+        "USE_EXTREME_ZONE_FILTER": False 
     },
     # == TACTIC 3: Bậc Thầy Bắt Sóng Hồi ==
     "Dip_Hunter": {
@@ -210,7 +256,8 @@ TACTICS_LAB = {
         "ATR_SL_MULTIPLIER": 3.2,                        # [CHỊU ĐÒN] - "Lưới an toàn" dày nhất, cho phép giá quét sâu trước khi đảo chiều.
         "USE_TRAILING_SL": False,                        # [LOGIC] - Không kéo SL vì dễ bị quét khi giá hồi.
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
-        "USE_MOMENTUM_FILTER": False                     # [LOGIC] - Khi bắt đáy, động lượng thường đang yếu.
+        "USE_MOMENTUM_FILTER": False,                     # [LOGIC] - Khi bắt đáy, động lượng thường đang yếu.
+        "USE_EXTREME_ZONE_FILTER": True
     },
     # == TACTIC 4: Chuyên Gia Chớp Nhoáng ==
     "AI_Aggressor": {
@@ -222,7 +269,8 @@ TACTICS_LAB = {
         "ATR_SL_MULTIPLIER": 2.2,                        # [CHIẾN LƯỢC] - SL chặt hơn, phù hợp với việc đánh nhanh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 0.9,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.6,
-        "USE_MOMENTUM_FILTER": True
+        "USE_MOMENTUM_FILTER": True,
+        "USE_EXTREME_ZONE_FILTER": True
     },
     # == TACTIC 5: Tay Bắn Tỉa ==
     "Cautious_Observer": {
@@ -234,7 +282,8 @@ TACTICS_LAB = {
         "ATR_SL_MULTIPLIER": 1.8,                        # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.7,
-        "USE_MOMENTUM_FILTER": True
+        "USE_MOMENTUM_FILTER": True,
+        "USE_EXTREME_ZONE_FILTER": True
     },
 }
 
@@ -775,15 +824,13 @@ def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     return max(scores, key=scores.get) if scores and any(v > 0 for v in scores.values()) else NOISE_ZONE
 
 def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
-    if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]:
-        return
+    if len(state.get("active_trades", [])) >= RISK_RULES_CONFIG["MAX_ACTIVE_TRADES"]: return
     potential_opportunities = []
     now_vn = datetime.now(VIETNAM_TZ)
     cooldown_map = state.get('cooldown_until', {})
     timeframe_levels = {"1h": 1, "4h": 2, "1d": 3}
     for symbol in SYMBOLS_TO_SCAN:
-        if any(t['symbol'] == symbol for t in state.get("active_trades", [])):
-            continue
+        if any(t['symbol'] == symbol for t in state.get("active_trades", [])): continue
         symbol_cooldowns = cooldown_map.get(symbol, {})
         for interval in INTERVALS_TO_SCAN:
             is_in_cooldown = False
@@ -797,65 +844,83 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
             market_zone = determine_market_zone_with_scoring(symbol, interval)
             for tactic_name, tactic_cfg in TACTICS_LAB.items():
                 optimal_zones = tactic_cfg.get("OPTIMAL_ZONE", [])
-                if not isinstance(optimal_zones, list):
-                    optimal_zones = [optimal_zones]
+                if not isinstance(optimal_zones, list): optimal_zones = [optimal_zones]
                 if market_zone in optimal_zones:
                     indicators = indicator_results.get(symbol, {}).get(interval)
-                    if not (indicators and indicators.get('price', 0) > 0):
-                        continue
+                    if not (indicators and indicators.get('price', 0) > 0): continue
+                    
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
-                    adjusted_score = decision.get("final_score", 0.0) * get_mtf_adjustment_coefficient(symbol, interval)
+                    raw_score = decision.get("final_score", 0.0)
+
+                    mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
+                    
+                    ez_coeff = 1.0
+                    if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
+                        ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, interval)
+
+                    contextual_score = raw_score * mtf_coeff * ez_coeff
+                    
                     if is_in_cooldown:
-                        if adjusted_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
-                            log_message(f"🔥 {symbol}-{interval} có điểm {adjusted_score:.2f}, phá vỡ cooldown từ {cooldown_source}.", state)
-                        else:
-                            continue
-                    potential_opportunities.append({"decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, "score": adjusted_score, "symbol": symbol, "interval": interval, "zone": market_zone})
+                        if contextual_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
+                            log_message(f"🔥 {symbol}-{interval} có điểm {contextual_score:.2f}, phá vỡ cooldown từ {cooldown_source}.", state)
+                        else: continue
+                    potential_opportunities.append({"decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, "score": contextual_score, "symbol": symbol, "interval": interval, "zone": market_zone})
+    
     log_message("---[🔍 Quét Cơ Hội Mới 🔍]---", state=state)
     if not potential_opportunities:
         log_message("  => Không tìm thấy cơ hội tiềm năng nào.", state=state)
         return
+    
     timeframe_priority = {"1h": 0, "4h": 1, "1d": 2}
     sorted_opportunities = sorted(potential_opportunities, key=lambda x: (x['score'], timeframe_priority.get(x['interval'], 0)), reverse=True)
-    num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 3)
+    num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 7)
     top_opportunities = sorted_opportunities[:num_to_check]
     log_message(f"---[🏆 Xem xét {len(top_opportunities)} cơ hội hàng đầu (tối đa {num_to_check})]--", state=state)
+    
     found_executable_trade = False
     for i, opportunity in enumerate(top_opportunities):
         score = opportunity['score']
         entry_score_threshold = opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
-        adjusted_score = opportunity['score']
-        raw_score = opportunity['decision'].get('final_score', 0.0)
-        mtf_coeff = adjusted_score / raw_score if raw_score > 0 else 1.0
-        log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {opportunity['tactic_name']} | Gốc: {raw_score:.2f} | Cuối: {adjusted_score:.2f} (MTF x{mtf_coeff:.2f}) (Ngưỡng: {entry_score_threshold})", state=state)
-        if score >= entry_score_threshold:
-            # --- BẮT ĐẦU KHỐI LOGIC MỚI ---
-            tactic_cfg = opportunity.get('tactic_cfg', {})
-            tactic_name = opportunity.get('tactic_name', 'Unknown')
+        tactic_cfg = opportunity.get('tactic_cfg', {})
+        tactic_name = opportunity.get('tactic_name', 'Unknown')
+        
+        raw_score_val = opportunity['decision'].get('final_score', 0.0)
+        
+        # Lấy lại hệ số để logging
+        indicators_log = indicator_results.get(opportunity['symbol'], {}).get(opportunity['interval'], {})
+        mtf_log_coeff = get_mtf_adjustment_coefficient(opportunity['symbol'], opportunity['interval'])
+        ez_log_coeff = 1.0
+        if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False) and indicators_log:
+            ez_log_coeff = get_extreme_zone_adjustment_coefficient(indicators_log, opportunity['interval'])
+            
+        # Dòng log chính
+        log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {tactic_name} | Gốc: {raw_score_val:.2f} | Bối cảnh: {score:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
+        # Dòng log chi tiết (GIỮ LẠI)
+        if mtf_log_coeff != 1.0 or ez_log_coeff != 1.0:
+            log_message(f"      Chi tiết điều chỉnh: [MTF: x{mtf_log_coeff:.2f}] [Vùng Cực đoan: x{ez_log_coeff:.2f}]", state)
 
-            # Kiểm tra xem Tactic này có yêu cầu bộ lọc không
+        if score >= entry_score_threshold:
             if not tactic_cfg.get("USE_MOMENTUM_FILTER", False):
-                log_message(f"      => ✅ Đạt ngưỡng! Tactic '{tactic_name}' không cần lọc. Đưa vào hàng chờ.", state=state)
+                log_message(f"      => ✅ Đạt ngưỡng! Tactic '{tactic_name}' không cần lọc động lượng. Đưa vào hàng chờ.", state=state)
                 state['pending_trade_opportunity'] = opportunity
                 state['pending_trade_opportunity']['retry_count'] = 0
                 found_executable_trade = True
-                break # Dừng quét và thực thi cơ hội này
-
-            # Nếu Tactic có yêu cầu, gọi hàm "vệ sĩ"
+                break
             elif is_momentum_confirmed(opportunity['symbol'], opportunity['interval']):
                 log_message(f"      => ✅ Đạt ngưỡng VÀ Tactic '{tactic_name}' đã được xác nhận động lượng! Đưa vào hàng chờ.", state=state)
                 state['pending_trade_opportunity'] = opportunity
                 state['pending_trade_opportunity']['retry_count'] = 0
                 found_executable_trade = True
-                break # Dừng quét và thực thi cơ hội này
-
+                break
             else:
                 log_message(f"      => ⚠️ Đạt ngưỡng NHƯNG Tactic '{tactic_name}' không vượt qua bộ lọc động lượng. Bỏ qua.", state=state)
-                continue # Bỏ qua và xét cơ hội tiếp theo trong top N
+                continue
         else:
             log_message("      => 📉 Không đạt ngưỡng. Xem xét cơ hội tiếp theo...", state=state)
+            
     if not found_executable_trade:
         log_message(f"  => Không có cơ hội nào trong top {len(top_opportunities)} đạt ngưỡng vào lệnh. Chờ phiên sau.", state=state)
+
 
 def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt: float, total_usdt_fund: float):
     opportunity = state.get('pending_trade_opportunity')
@@ -975,6 +1040,79 @@ def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type
         return 1.0
 
     return 1.0
+
+def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> float:
+    cfg = EXTREME_ZONE_ADJUSTMENT_CONFIG
+    if not cfg.get("ENABLED", False):
+        return 1.0
+
+    weights = cfg.get("SCORING_WEIGHTS", {})
+    base_impact = cfg.get("BASE_IMPACT", {})
+    confluence_multiplier = cfg.get("CONFLUENCE_MULTIPLIER", 1.5)
+    
+    rules = cfg.get("RULES_BY_TIMEFRAME", {}).get(interval)
+    if not rules:
+        return 1.0
+
+    price = indicators.get("price", 0)
+    bbu, bbm, bbl = indicators.get("bb_upper", 0), indicators.get("bb_middle", 0), indicators.get("bb_lower", 0)
+    rsi = indicators.get("rsi_14", 50)
+    candle = indicators.get("candle_pattern") or indicators.get("doji_type")
+    sup_level, res_level = indicators.get("support_level", 0), indicators.get("resistance_level", 0)
+
+    if not all([price > 0, bbu > bbm, bbm > bbl]):
+        return 1.0
+
+    bonus_score, penalty_score = 0.0, 0.0
+    confirmation_cfg = cfg.get("CONFIRMATION_BOOST", {})
+
+    oversold_rule = rules.get("OVERSOLD", {})
+    bb_range_lower = bbm - bbl
+    if bb_range_lower > 0:
+        price_pos_lower = (price - bbl) / bb_range_lower
+        if rsi < oversold_rule.get("RSI_BELOW", 1):
+            bonus_score += weights.get("RSI", 0.4)
+        if price_pos_lower < oversold_rule.get("BB_POS_BELOW", -0.1):
+            bonus_score += weights.get("BB_POS", 0.4)
+
+    if confirmation_cfg.get("ENABLED"):
+        if candle in confirmation_cfg.get("BULLISH_CANDLES", []):
+            bonus_score += weights.get("CANDLE", 0.2)
+        is_near_support = sup_level > 0 and abs(price - sup_level) / price < confirmation_cfg.get("SUPPORT_PROXIMITY_PCT", 0.015)
+        if is_near_support:
+            bonus_score += weights.get("SR_LEVEL", 0.2)
+
+    overbought_rule = rules.get("OVERBOUGHT", {})
+    bb_range_upper = bbu - bbm
+    if bb_range_upper > 0:
+        price_pos_upper = (price - bbm) / bb_range_upper
+        if rsi > overbought_rule.get("RSI_ABOVE", 99):
+            penalty_score += weights.get("RSI", 0.4)
+        if price_pos_upper > overbought_rule.get("BB_POS_ABOVE", 1.1):
+            penalty_score += weights.get("BB_POS", 0.4)
+    
+    if confirmation_cfg.get("ENABLED"):
+        if candle in confirmation_cfg.get("BEARISH_CANDLES", []):
+            penalty_score += weights.get("CANDLE", 0.2)
+        is_near_resistance = res_level > 0 and abs(price - res_level) / price < confirmation_cfg.get("RESISTANCE_PROXIMITY_PCT", 0.015)
+        if is_near_resistance:
+            penalty_score += weights.get("SR_LEVEL", 0.2)
+
+    if bonus_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
+        bonus_score *= confluence_multiplier
+    if penalty_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
+        penalty_score *= confluence_multiplier
+
+    bonus_impact = base_impact.get("BONUS_PER_POINT", 0.05)
+    penalty_impact = base_impact.get("PENALTY_PER_POINT", -0.07)
+    
+    coeff_change = (bonus_score * bonus_impact) + (penalty_score * penalty_impact)
+    calculated_coeff = 1.0 + coeff_change
+
+    min_coeff = cfg.get("MIN_PENALTY_COEFF", 0.90)
+    max_coeff = cfg.get("MAX_BONUS_COEFF", 1.05)
+    
+    return max(min_coeff, min(calculated_coeff, max_coeff))
 
 
 
@@ -1376,11 +1514,20 @@ def run_heavy_tasks(bnc: BinanceConnector, state: Dict, available_usdt: float, t
     for trade in state.get("active_trades", []):
         indicators = indicator_results.get(trade['symbol'], {}).get(trade['interval'])
         if indicators:
-            tactic_cfg = TACTICS_LAB.get(trade['opened_by_tactic'], {})
+            tactic_cfg = TACTICS_LAB.get(trade.get('opened_by_tactic'), {})
             decision = get_advisor_decision(trade['symbol'], trade['interval'], indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
-            trade['last_score'] = decision.get("final_score", 0.0)
+            raw_score = decision.get("final_score", 0.0)
+            mtf_coeff = get_mtf_adjustment_coefficient(trade['symbol'], trade['interval'])
+            ez_coeff = 1.0
+            if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
+                ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, trade['interval'])
+            contextual_score = raw_score * mtf_coeff * ez_coeff
+            if trade.get('last_score') is not None and contextual_score != trade.get('last_score'):
+                 log_message(f"  (i) Cập nhật điểm {trade['symbol']}-{trade['interval']}: {trade.get('last_score', 0.0):.2f} -> {contextual_score:.2f} (Gốc: {raw_score:.2f}, MTF: x{mtf_coeff:.2f}, EZ: x{ez_coeff:.2f})", state)
+            trade['last_score'] = contextual_score
             trade['last_zone'] = determine_market_zone_with_scoring(trade['symbol'], trade['interval'])
     find_and_open_new_trades(bnc, state, available_usdt, total_usdt)
+
 
 def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
     try:
