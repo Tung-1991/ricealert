@@ -99,25 +99,25 @@ MTF_ANALYSIS_CONFIG = {
 # --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
     "ENABLED": True,
-    "MAX_BONUS_COEFF": 1.10,                   # Thưởng tối đa +10%, quyết đoán hơn ở đáy.
-    "MIN_PENALTY_COEFF": 0.88,                   # Phạt tối đa -12%, rất nghiêm khắc ở đỉnh.
-    "SCORING_WEIGHTS": {                       # Trọng số cho từng bằng chứng, ưu tiên Nến và SR.
+    "MAX_BONUS_COEFF": 1.10,                   # Giữ nguyên +10%: Quyết đoán bắt đáy khi có cơ hội vàng.
+    "MIN_PENALTY_COEFF": 0.90,                   # Quay về -10%: Một hình phạt mạnh mẽ nhưng không quá cực đoan.
+    "SCORING_WEIGHTS": {                       # Giữ nguyên trọng số cao: Vẫn ưu tiên Nến và SR để bot thông minh hơn.
         "RSI": 0.4,
         "BB_POS": 0.4,
         "CANDLE": 0.35,
         "SR_LEVEL": 0.35
     },
-    "BASE_IMPACT": {                           # Mức độ tác động cơ bản, đã được tăng cường.
-        "BONUS_PER_POINT": 0.08,               # Thưởng +8% cho mỗi điểm bonus.
-        "PENALTY_PER_POINT": -0.10             # Phạt -10% cho mỗi điểm phạt, tác động mạnh.
+    "BASE_IMPACT": {                           # [TINH CHỈNH QUAN TRỌNG] - Giảm độ gắt của hình phạt.
+        "BONUS_PER_POINT": 0.07,               # Thưởng +7% cho mỗi điểm bonus.
+        "PENALTY_PER_POINT": -0.08             # Phạt -8% cho mỗi điểm phạt, có impact nhưng không quá lố.
     },
-    "CONFLUENCE_MULTIPLIER": 1.8,              # Khuếch đại x1.8 khi các yếu tố chính (RSI+BB) đồng thuận.
-    "RULES_BY_TIMEFRAME": {                    # Ngưỡng kích hoạt cho từng khung thời gian.
+    "CONFLUENCE_MULTIPLIER": 1.6,              # Giảm nhẹ: Vẫn khuếch đại mạnh sự đồng thuận nhưng không quá tay.
+    "RULES_BY_TIMEFRAME": {                    # Giữ nguyên: Các ngưỡng này đã rất logic.
         "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 25, "BB_POS_BELOW": 0.05}},
         "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 28, "BB_POS_BELOW": 0.08}},
         "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}}
     },
-    "CONFIRMATION_BOOST": {                    # Danh sách các yếu tố xác nhận.
+    "CONFIRMATION_BOOST": {                    # Giữ nguyên: Danh sách các yếu tố xác nhận đã rất tốt.
         "ENABLED": True,
         "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"],
         "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],
@@ -158,7 +158,7 @@ RISK_RULES_CONFIG = {
         "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 5.0},
         "4h": {"HOURS": 96, "PROGRESS_THRESHOLD_PCT": 8.0},
         "1d": {"HOURS": 240, "PROGRESS_THRESHOLD_PCT": 10.0},
-        "STAY_OF_EXECUTION_SCORE": 6.8           # [Ân xá] - Điểm số tối thiểu để "ân xá", không đóng lệnh "ì".
+        "STAY_OF_EXECUTION_SCORE": 6.5           # [Ân xá] - Điểm số tối thiểu để "ân xá", không đóng lệnh "ì".
     }
 }
 
@@ -212,7 +212,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": [LAGGING_ZONE, COINCIDENT_ZONE],
         "NOTES": "Chiến binh SWING TRADE chủ lực. Vào lệnh sớm hơn, gồng lệnh lì đòn qua các đợt điều chỉnh.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
-        "ENTRY_SCORE": 6.5,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
+        "ENTRY_SCORE": 6.3,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
         "RR": 1.5,                                       # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
         "ATR_SL_MULTIPLIER": 2.5,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.6, "TRAIL_DISTANCE_RR": 1.2,
@@ -264,7 +264,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": NOISE_ZONE,
         "NOTES": "Bắn tỉa cơ hội VÀNG trong vùng nhiễu. SL chặt, ăn nhanh, sai là cắt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
-        "ENTRY_SCORE": 8.0,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
+        "ENTRY_SCORE": 7.0,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
         "RR": 1.4,                                       # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
         "ATR_SL_MULTIPLIER": 1.8,                        # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
