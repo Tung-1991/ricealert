@@ -129,7 +129,7 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.23,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,              # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
@@ -155,8 +155,8 @@ RISK_RULES_CONFIG = {
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.15, "4h": 0.25, "1d": 0.30}, # [Thực tế hóa] - Mức lãi TỐI ĐA, tránh các mục tiêu viển vông.
     "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.08, "4h": 0.10, "1d": 0.15}, # [SÀN AN TOÀN] - Mức lỗ TỐI THIỂU, tránh SL quá gần khi ATR thấp.
     "STALE_TRADE_RULES": {                       # [GỒNG LỆNH] - Cho các lệnh "ì", không chạy thêm thời gian.
-        "1h": {"HOURS": 48, "PROGRESS_THRESHOLD_PCT": 5.0},
-        "4h": {"HOURS": 96, "PROGRESS_THRESHOLD_PCT": 8.0},
+        "1h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 5.0},
+        "4h": {"HOURS": 144, "PROGRESS_THRESHOLD_PCT": 8.0},
         "1d": {"HOURS": 240, "PROGRESS_THRESHOLD_PCT": 10.0},
         "STAY_OF_EXECUTION_SCORE": 6.5           # [Ân xá] - Điểm số tối thiểu để "ân xá", không đóng lệnh "ì".
     }
@@ -213,10 +213,10 @@ TACTICS_LAB = {
         "NOTES": "Chiến binh SWING TRADE chủ lực. Vào lệnh sớm hơn, gồng lệnh lì đòn qua các đợt điều chỉnh.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
         "ENTRY_SCORE": 6.5,                              # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
-        "RR": 1.5,                                       # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
+        "RR": 2.0,                                       # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
         "ATR_SL_MULTIPLIER": 2.5,                        # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.6, "TRAIL_DISTANCE_RR": 1.2,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.5,
+        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 1.1,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": True
     },
@@ -226,12 +226,12 @@ TACTICS_LAB = {
         "NOTES": "Chuyên săn các điểm PHÁ VỠ đã được xác nhận. SL rộng để sống sót qua cú retest.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3},
         "ENTRY_SCORE": 7.0,                              # [NỚI LỎNG] - Vào lệnh ngay khi breakout vừa xảy ra, không cần đợi quá lâu.
-        "RR": 1.7,                                       # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
+        "RR": 2.5,                                       # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
         "ATR_SL_MULTIPLIER": 2.4,                        # [CHỊU ĐÒN] - SL đủ rộng để không bị cú retest đá ra khỏi lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.5,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,                      # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
-        "USE_EXTREME_ZONE_FILTER": False 
+        "USE_EXTREME_ZONE_FILTER": False
     },
     # == TACTIC 3: Bậc Thầy Bắt Sóng Hồi ==
     "Dip_Hunter": {
@@ -239,10 +239,10 @@ TACTICS_LAB = {
         "NOTES": "Bắt đáy/sóng hồi với một cái lưới an toàn CỰC RỘNG. Ăn nhanh, thoát nhanh.",
         "WEIGHTS": {'tech': 0.5, 'context': 0.2, 'ai': 0.3},
         "ENTRY_SCORE": 6.8,                              # [NỚI LỎNG] - Chấp nhận tín hiệu bắt đáy chưa hoàn hảo.
-        "RR": 1.4,                                       # [AN TOÀN] - Bắt đáy rủi ro, không nên tham lam.
+        "RR": 1.5,                                       # [AN TOÀN] - Bắt đáy rủi ro, không nên tham lam.
         "ATR_SL_MULTIPLIER": 3.2,                        # [CHỊU ĐÒN] - "Lưới an toàn" dày nhất, cho phép giá quét sâu trước khi đảo chiều.
         "USE_TRAILING_SL": False,                        # [LOGIC] - Không kéo SL vì dễ bị quét khi giá hồi.
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
         "USE_MOMENTUM_FILTER": False,                     # [LOGIC] - Khi bắt đáy, động lượng thường đang yếu.
         "USE_EXTREME_ZONE_FILTER": True
     },
@@ -252,10 +252,10 @@ TACTICS_LAB = {
         "NOTES": "Chuyên gia chớp nhoáng: Tận dụng điểm AI siêu cao để vào nhanh, ăn ngắn, thoát nhanh.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6},
         "ENTRY_SCORE": 6.8,                              # [SIẾT CHẶT] - Đã dựa vào AI thì tín hiệu phải thực sự xuất sắc.
-        "RR": 1.5,                                       # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
+        "RR": 1.8,                                       # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
         "ATR_SL_MULTIPLIER": 2.2,                        # [CHIẾN LƯỢC] - SL chặt hơn, phù hợp với việc đánh nhanh.
-        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 0.9,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.6,
+        "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.1, "TRAIL_DISTANCE_RR": 0.7,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": False
     },
@@ -264,11 +264,11 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": NOISE_ZONE,
         "NOTES": "Bắn tỉa cơ hội VÀNG trong vùng nhiễu. SL chặt, ăn nhanh, sai là cắt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
-        "ENTRY_SCORE": 7.0,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
-        "RR": 1.4,                                       # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
+        "ENTRY_SCORE": 7.2,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
+        "RR": 1.5,                                       # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
         "ATR_SL_MULTIPLIER": 1.8,                        # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.7,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.8,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": True
     },
@@ -644,10 +644,14 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                     close_pct = 1.0
                 if close_trade_on_binance(bnc, trade, f"EC_Rel_{last_score:.1f}", state, close_pct=close_pct):
                     trade['partial_closed_by_score'] = True
-                    #if close_pct < 1.0: trade['sl'] = trade['entry_price']
         _, pnl_percent = get_current_pnl(trade, realtime_price=current_price)
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
-        initial_risk_dist = abs(trade['initial_entry']['price'] - trade['initial_sl'])
+        
+        initial_risk_dist = trade.get('atr_risk_dist', 0)
+        if initial_risk_dist <= 0:
+            initial_risk_dist = abs(trade.get('initial_entry', {}).get('price', 0) - trade.get('initial_sl', 0))
+            if initial_risk_dist <= 0: continue
+        
         if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get("tp1_hit", False) and initial_risk_dist > 0:
             pnl_ratio = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio >= tactic_cfg.get("TP1_RR_RATIO", 1.0):
@@ -679,6 +683,7 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                     trade['sl'] = new_sl
                     if "Trailing_SL_Active" not in trade.get('tactic_used', []):
                         trade.setdefault('tactic_used', []).append("Trailing_SL_Active")
+
 
 def handle_stale_trades(bnc: BinanceConnector, state: Dict, realtime_prices: Dict[str, float]):
     now_aware = datetime.now(VIETNAM_TZ)
@@ -835,51 +840,51 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
                 if market_zone in optimal_zones:
                     indicators = indicator_results.get(symbol, {}).get(interval)
                     if not (indicators and indicators.get('price', 0) > 0): continue
-                    
+
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
                     raw_score = decision.get("final_score", 0.0)
 
                     mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
-                    
+
                     ez_coeff = 1.0
                     if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
                         ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, interval)
 
                     contextual_score = raw_score * mtf_coeff * ez_coeff
-                    
+
                     if is_in_cooldown:
                         if contextual_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
                             log_message(f"🔥 {symbol}-{interval} có điểm {contextual_score:.2f}, phá vỡ cooldown từ {cooldown_source}.", state)
                         else: continue
                     potential_opportunities.append({"decision": decision, "tactic_name": tactic_name, "tactic_cfg": tactic_cfg, "score": contextual_score, "symbol": symbol, "interval": interval, "zone": market_zone})
-    
+
     log_message("---[🔍 Quét Cơ Hội Mới 🔍]---", state=state)
     if not potential_opportunities:
         log_message("  => Không tìm thấy cơ hội tiềm năng nào.", state=state)
         return
-    
+
     timeframe_priority = {"1h": 0, "4h": 1, "1d": 2}
     sorted_opportunities = sorted(potential_opportunities, key=lambda x: (x['score'], timeframe_priority.get(x['interval'], 0)), reverse=True)
     num_to_check = GENERAL_CONFIG.get("TOP_N_OPPORTUNITIES_TO_CHECK", 7)
     top_opportunities = sorted_opportunities[:num_to_check]
     log_message(f"---[🏆 Xem xét {len(top_opportunities)} cơ hội hàng đầu (tối đa {num_to_check})]--", state=state)
-    
+
     found_executable_trade = False
     for i, opportunity in enumerate(top_opportunities):
         score = opportunity['score']
         entry_score_threshold = opportunity['tactic_cfg'].get("ENTRY_SCORE", 9.9)
         tactic_cfg = opportunity.get('tactic_cfg', {})
         tactic_name = opportunity.get('tactic_name', 'Unknown')
-        
+
         raw_score_val = opportunity['decision'].get('final_score', 0.0)
-        
+
         # Lấy lại hệ số để logging
         indicators_log = indicator_results.get(opportunity['symbol'], {}).get(opportunity['interval'], {})
         mtf_log_coeff = get_mtf_adjustment_coefficient(opportunity['symbol'], opportunity['interval'])
         ez_log_coeff = 1.0
         if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False) and indicators_log:
             ez_log_coeff = get_extreme_zone_adjustment_coefficient(indicators_log, opportunity['interval'])
-            
+
         # Dòng log chính
         log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {tactic_name} | Gốc: {raw_score_val:.2f} | Bối cảnh: {score:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
         # Dòng log chi tiết (GIỮ LẠI)
@@ -904,7 +909,7 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
                 continue
         else:
             log_message("      => 📉 Không đạt ngưỡng. Xem xét cơ hội tiếp theo...", state=state)
-            
+
     if not found_executable_trade:
         log_message(f"  => Không có cơ hội nào trong top {len(top_opportunities)} đạt ngưỡng vào lệnh. Chờ phiên sau.", state=state)
 
@@ -922,34 +927,44 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state.pop('pending_trade_opportunity', None)
         return
     entry_price_estimate = realtime_price
+    
     risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
+    if risk_dist_from_atr <= 0:
+        log_error(f"Tính toán risk_dist_from_atr cho {symbol} không hợp lệ. Hủy cơ hội.", state=state)
+        state.pop('pending_trade_opportunity', None)
+        return
+
     min_risk_map = RISK_RULES_CONFIG.get("MIN_RISK_DIST_PERCENT_BY_TIMEFRAME", {})
     max_risk_map = RISK_RULES_CONFIG.get("MAX_SL_PERCENT_BY_TIMEFRAME", {})
     min_risk_pct = min_risk_map.get(interval, 0.02)
     max_risk_pct = max_risk_map.get(interval, 0.10)
-    min_risk_dist_from_price = entry_price_estimate * min_risk_pct
-    max_risk_dist_from_price = entry_price_estimate * max_risk_pct
-    effective_risk_dist = max(risk_dist_from_atr, min_risk_dist_from_price)
-    final_risk_dist = min(effective_risk_dist, max_risk_dist_from_price)
-    if final_risk_dist <= 0:
-        log_error(f"Tính toán risk_dist cho {symbol} không hợp lệ. Hủy cơ hội.", state=state)
-        state.pop('pending_trade_opportunity', None)
-        return
+    min_sl_dist = entry_price_estimate * min_risk_pct
+    max_sl_dist = entry_price_estimate * max_risk_pct
+
+    if sl_risk_dist == risk_dist_from_atr:
+        log_message(f"  ... 🛡️ SL được đặt theo ATR: {sl_risk_dist:.4f}", state=state)
+    else:
+        log_message(f"  ... 🛡️ SL theo ATR ({risk_dist_from_atr:.4f}) nhỏ hơn 'khiên' ({min_sl_dist:.4f}). SL được đặt theo 'khiên'.", state=state)
+
+    if sl_risk_dist > max_sl_dist:
+        sl_risk_dist = max_sl_dist
+        log_message(f"  ... 🛑 SL theo ATR quá rộng ({risk_dist_from_atr:.4f}), áp dụng Trần an toàn: {max_risk_pct*100:.2f}%", state=state)
+
     capital_pct = ZONE_BASED_POLICIES.get(zone, {}).get("CAPITAL_PCT", 0.03)
     stable_capital_base = state.get('initial_capital', total_usdt_fund)
     invested_amount = stable_capital_base * capital_pct
-    log_message(f"  ... Tính vốn dựa trên nền tảng Vốn BĐ năng động: ${stable_capital_base:,.2f}", state=state)
+    log_message(f"  ... Tính vốn dựa trên nền tảng Vốn BĐ năng động: ${stable_capital_base:,.2f}", state=state)
     current_exposure_usd = sum(t.get('total_invested_usd', 0.0) for t in state.get("active_trades", []))
     min_order_value = GENERAL_CONFIG.get("MIN_ORDER_VALUE_USDT", 11.0)
     if invested_amount < min_order_value:
-        log_message(f"  ⚠️ Vốn tính toán (${invested_amount:.2f}) nhỏ hơn mức tối thiểu. Tăng lên mức tối thiểu là ${min_order_value}.", state=state)
+        log_message(f"  ⚠️ Vốn tính toán (${invested_amount:.2f}) nhỏ hơn mức tối thiểu. Tăng lên mức tối thiểu là ${min_order_value}.", state=state)
         invested_amount = min_order_value
     if invested_amount > available_usdt or (current_exposure_usd + invested_amount) > total_usdt_fund * CAPITAL_MANAGEMENT_CONFIG["MAX_TOTAL_EXPOSURE_PCT"]:
-        log_message(f"  => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro cho {symbol} (Sau khi điều chỉnh: ${invested_amount:.2f}). Hủy cơ hội.", state=state)
+        log_message(f"  => ❌ Không đủ vốn hoặc vượt ngưỡng rủi ro cho {symbol} (Sau khi điều chỉnh: ${invested_amount:.2f}). Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
     try:
-        log_message(f"  => 🔥 Gửi lệnh MUA {symbol} với ${invested_amount:,.2f} (Vùng: {zone}, Vốn: {capital_pct*100:.1f}%)", state=state)
+        log_message(f"  => 🔥 Gửi lệnh MUA {symbol} với ${invested_amount:,.2f} (Vùng: {zone}, Vốn: {capital_pct*100:.1f}%)", state=state)
         market_order = bnc.place_market_order(symbol=symbol, side="BUY", quote_order_qty=round(invested_amount, 2))
         if not (market_order and float(market_order.get('executedQty', 0)) > 0):
             raise Exception("Lệnh Market không khớp hoặc không có thông tin trả về.")
@@ -957,8 +972,10 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state['money_spent_on_trades_last_session'] += cost_of_trade
         filled_qty = float(market_order['executedQty'])
         avg_price = float(market_order['cummulativeQuoteQty']) / filled_qty
-        sl_p = avg_price - final_risk_dist
-        tp_p = avg_price + (final_risk_dist * tactic_cfg.get("RR", 2.0))
+        
+        sl_p = avg_price - sl_risk_dist
+        tp_p = avg_price + (risk_dist_from_atr * tactic_cfg.get("RR", 2.0))
+        
         max_tp_pct_cfg = RISK_RULES_CONFIG["MAX_TP_PERCENT_BY_TIMEFRAME"].get(interval)
         if max_tp_pct_cfg is not None and tp_p > avg_price * (1 + max_tp_pct_cfg):
             tp_p = avg_price * (1 + max_tp_pct_cfg)
@@ -968,6 +985,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
             "trade_id": str(uuid.uuid4()), "symbol": symbol, "interval": interval, "status": "ACTIVE",
             "opened_by_tactic": tactic_name, "trade_type": "LONG", "entry_price": avg_price,
             "quantity": filled_qty, "tp": tp_p, "sl": sl_p, "initial_sl": sl_p,
+            "atr_risk_dist": risk_dist_from_atr,
             "initial_entry": {
                 "price": avg_price,
                 "quantity": filled_qty,
@@ -991,7 +1009,6 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         if retry_count >= GENERAL_CONFIG["PENDING_TRADE_RETRY_LIMIT"]:
             log_error(f"Không thể mở lệnh {symbol} sau {retry_count} lần thử. Hủy bỏ.", send_to_discord=True, force_discord=True, state=state)
             state.pop('pending_trade_opportunity', None)
-
 
 def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type: str = "LONG") -> float:
     if not MTF_ANALYSIS_CONFIG["ENABLED"]:
@@ -1024,7 +1041,7 @@ def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type
         return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
 
     elif target_interval == "1d":
-        return 1.0
+        return cfg.get("BONUS_COEFFICIENT", 1.03) 
 
     return 1.0
 
@@ -1036,7 +1053,7 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
     weights = cfg.get("SCORING_WEIGHTS", {})
     base_impact = cfg.get("BASE_IMPACT", {})
     confluence_multiplier = cfg.get("CONFLUENCE_MULTIPLIER", 1.5)
-    
+
     rules = cfg.get("RULES_BY_TIMEFRAME", {}).get(interval)
     if not rules:
         return 1.0
@@ -1077,7 +1094,7 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
             penalty_score += weights.get("RSI", 0.4)
         if price_pos_upper > overbought_rule.get("BB_POS_ABOVE", 1.1):
             penalty_score += weights.get("BB_POS", 0.4)
-    
+
     if confirmation_cfg.get("ENABLED"):
         if candle in confirmation_cfg.get("BEARISH_CANDLES", []):
             penalty_score += weights.get("CANDLE", 0.2)
@@ -1092,13 +1109,13 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
 
     bonus_impact = base_impact.get("BONUS_PER_POINT", 0.05)
     penalty_impact = base_impact.get("PENALTY_PER_POINT", -0.07)
-    
+
     coeff_change = (bonus_score * bonus_impact) + (penalty_score * penalty_impact)
     calculated_coeff = 1.0 + coeff_change
 
     min_coeff = cfg.get("MIN_PENALTY_COEFF", 0.90)
     max_coeff = cfg.get("MAX_BONUS_COEFF", 1.05)
-    
+
     return max(min_coeff, min(calculated_coeff, max_coeff))
 
 
