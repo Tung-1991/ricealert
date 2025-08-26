@@ -108,14 +108,14 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
         "SR_LEVEL": 0.35
     },
     "BASE_IMPACT": {                           # [TINH CHỈNH QUAN TRỌNG] - Giảm độ gắt của hình phạt.
-        "BONUS_PER_POINT": 0.07,               # Thưởng +7% cho mỗi điểm bonus.
-        "PENALTY_PER_POINT": -0.08             # Phạt -8% cho mỗi điểm phạt, có impact nhưng không quá lố.
+        "BONUS_PER_POINT": 0.09,               # Thưởng +7% cho mỗi điểm bonus.
+        "PENALTY_PER_POINT": -0.09             # Phạt -8% cho mỗi điểm phạt, có impact nhưng không quá lố.
     },
-    "CONFLUENCE_MULTIPLIER": 1.6,              # Giảm nhẹ: Vẫn khuếch đại mạnh sự đồng thuận nhưng không quá tay.
+    "CONFLUENCE_MULTIPLIER": 1.7,              # Giảm nhẹ: Vẫn khuếch đại mạnh sự đồng thuận nhưng không quá tay.
     "RULES_BY_TIMEFRAME": {                    # Giữ nguyên: Các ngưỡng này đã rất logic.
-        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 25, "BB_POS_BELOW": 0.05}},
-        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 28, "BB_POS_BELOW": 0.08}},
-        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}}
+        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 27, "BB_POS_BELOW": 0.07}},
+        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}},
+        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 32, "BB_POS_BELOW": 0.12}}
     },
     "CONFIRMATION_BOOST": {                    # Giữ nguyên: Danh sách các yếu tố xác nhận đã rất tốt.
         "ENABLED": True,
@@ -128,8 +128,8 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
-    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.8,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.23,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.5,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,       # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,              # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     "PROFIT_PROTECTION": {
         "ENABLED": True,                         # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
@@ -264,7 +264,7 @@ TACTICS_LAB = {
         "OPTIMAL_ZONE": NOISE_ZONE,
         "NOTES": "Bắn tỉa cơ hội VÀNG trong vùng nhiễu. SL chặt, ăn nhanh, sai là cắt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
-        "ENTRY_SCORE": 7.2,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
+        "ENTRY_SCORE": 7.5,                              # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
         "RR": 1.5,                                       # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
         "ATR_SL_MULTIPLIER": 1.8,                        # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
