@@ -98,58 +98,73 @@ MTF_ANALYSIS_CONFIG = {
 
 # --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
-    "ENABLED": True,                                 # Bật/tắt toàn bộ mô-đun này.
-    "MAX_BONUS_COEFF": 1.15,                         # Mức thưởng điểm TỐI ĐA, chống việc điểm số bị đẩy lên quá cao (1.15 = tăng 15%).
-    "MIN_PENALTY_COEFF": 0.90,                         # Mức phạt điểm TỐI ĐA, đảm bảo điểm số không bị dìm xuống quá thấp (0.90 = giảm 10%).
-    "SCORING_WEIGHTS": {                             # Trọng số, quyết định mức độ quan trọng của từng yếu tố.
-        "RSI": 0.4,                                  # RSI là yếu tố quan trọng.
-        "BB_POS": 0.4,                               # Vị trí giá trong dải Bollinger Bands cũng quan trọng tương đương.
-        "CANDLE": 0.35,                              # Mẫu nến xác nhận có trọng số thấp hơn một chút.
-        "SR_LEVEL": 0.35                             # Vị trí gần Hỗ trợ/Kháng cự cũng là yếu tố phụ.
+    "ENABLED": True,                                  # Bật/tắt toàn bộ mô-đun này.
+
+    # --- Giới Hạn An Toàn ---
+    "MAX_BONUS_COEFF": 1.35,                          # Trần thưởng điểm TỐI ĐA. Dù tính toán thế nào cũng không vượt qua con số này (1.35 = tăng tối đa 35%).
+    "MIN_PENALTY_COEFF": 0.90,                          # Sàn phạt điểm TỐI ĐA. Điểm số sẽ không bị dìm xuống thấp hơn mức này (0.90 = giảm tối đa 10%).
+
+    # --- Trọng Số Các Yếu Tố ---
+    "SCORING_WEIGHTS": {
+        "RSI": 0.4,                                   # Độ quan trọng của tín hiệu RSI.
+        "BB_POS": 0.4,                                # Độ quan trọng của vị trí giá trong Bollinger Bands.
+        "CANDLE": 0.35,                               # Độ quan trọng của mẫu nến xác nhận.
+        "SR_LEVEL": 0.35                              # Độ quan trọng của việc giá gần Hỗ trợ/Kháng cự.
     },
-    "BASE_IMPACT": {                                 # Tác động cơ bản của điểm thưởng/phạt lên hệ số cuối cùng.
-        "BONUS_PER_POINT": 0.09,                     # Mỗi 1 điểm "thưởng" sẽ làm hệ số tăng 0.09.
-        "PENALTY_PER_POINT": -0.09                   # Mỗi 1 điểm "phạt" sẽ làm hệ số giảm 0.09.
+
+    # --- Sức Mạnh Của Điểm Thưởng/Phạt ---
+    "BASE_IMPACT": {
+        "BONUS_PER_POINT": 0.20,                      # Mỗi 1 điểm 'thưởng' (tính từ SCORING_WEIGHTS) sẽ làm hệ số TĂNG 0.20.
+        "PENALTY_PER_POINT": -0.08                     # Mỗi 1 điểm 'phạt' sẽ làm hệ số GIẢM 0.08.
     },
-    "CONFLUENCE_MULTIPLIER": 1.7,                    # Khi cả RSI và BB cùng báo tín hiệu, nhân tác động lên 1.7 lần để tăng độ tin cậy.
-    "RULES_BY_TIMEFRAME": {                          # Ngưỡng quá mua/quá bán cho từng khung thời gian.
-        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 27, "BB_POS_BELOW": 0.07}}, # Khung 1h cần tín hiệu rất cực đoan (RSI > 78) vì nhiễu cao.
-        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}}, # Khung 4h có ngưỡng cân bằng hơn.
-        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 32, "BB_POS_BELOW": 0.12}}  # Khung 1d chỉ cần RSI > 72 là đã đáng chú ý.
+
+    # --- Thưởng Combo Đặc Biệt ---
+    "CONFLUENCE_MULTIPLIER": 2.0,                     # Hệ số THƯỞNG COMBO. Khi cả RSI và BB cùng báo tín hiệu tốt, nhân tác động lên 2 LẦN.
+
+    # --- Ngưỡng Kích Hoạt (Phần Tuning Quan Trọng Nhất) ---
+    "RULES_BY_TIMEFRAME": {
+        # Điều kiện để được coi là QUÁ BÁN (dẫn đến được thưởng) đã được NỚI LỎNG.
+        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 38, "BB_POS_BELOW": 0.20}},
+        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 40, "BB_POS_BELOW": 0.22}},
+        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 42, "BB_POS_BELOW": 0.25}}
     },
-    "CONFIRMATION_BOOST": {                          # Các yếu tố xác nhận bổ sung.
-        "ENABLED": True,                             # Bật/tắt việc dùng mẫu nến và S/R.
-        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"], # Các mẫu nến báo hiệu sự đảo chiều giảm.
-        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"], # Các mẫu nến báo hiệu sự đảo chiều tăng.
-        "RESISTANCE_PROXIMITY_PCT": 0.015,           # Coi là "gần" kháng cự nếu khoảng cách nhỏ hơn 1.5%.
-        "SUPPORT_PROXIMITY_PCT": 0.015               # Coi là "gần" hỗ trợ nếu khoảng cách nhỏ hơn 1.5%.
+
+    # --- Yếu Tố Xác Nhận Bổ Sung (Nến và S/R) ---
+    "CONFIRMATION_BOOST": {
+        "ENABLED": True,                              # Bật/tắt việc dùng các yếu tố này.
+        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"], # Danh sách các mẫu nến báo hiệu sự đảo chiều GIẢM.
+        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],         # Danh sách các mẫu nến báo hiệu sự đảo chiều TĂNG.
+        "RESISTANCE_PROXIMITY_PCT": 0.015,            # Coi là 'gần' kháng cự nếu khoảng cách nhỏ hơn 1.5%.
+        "SUPPORT_PROXIMITY_PCT": 0.015               # Coi là 'gần' hỗ trợ nếu khoảng cách nhỏ hơn 1.5%.
     },
-    "PRICE_ACTION_VOL_ANALYSIS": {                   # Phân tích hành động giá & volume để xác nhận.
-        "ENABLED": True,                             # Bật/tắt logic cốt lõi này.
+
+    # --- Bộ Lọc Nâng Cao: Phân Tích Hành Động Giá & Volume ---
+    "PRICE_ACTION_VOL_ANALYSIS": {
+        "ENABLED": True,
         "RULES_BY_TIMEFRAME": {
             "1h": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 3.0,        # [1h] Nến breakout phải có thân lớn gấp 3 lần ATR (yêu cầu cao).
-                "BREAKOUT_VOLUME_MA_RATIO": 3.5,       # [1h] Volume breakout phải lớn gấp 3.5 lần trung bình (yêu cầu cao).
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.3, # [1h] Khi có breakout, giảm hình phạt quá mua xuống còn 30%.
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.5,      # [1h] Nến kiệt sức phải có thân lớn gấp 2.5 lần ATR.
-                "EXHAUSTION_VOLUME_MA_RATIO": 4.0,     # [1h] Volume kiệt sức phải cực lớn, gấp 4 lần trung bình.
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.4       # [1h] Tăng thưởng 1.4 lần khi có tín hiệu kiệt sức.
+                "BREAKOUT_CANDLE_ATR_RATIO": 3.0,       # Nến breakout phải có thân lớn gấp 3 lần ATR.
+                "BREAKOUT_VOLUME_MA_RATIO": 3.5,        # Volume breakout phải lớn gấp 3.5 lần trung bình.
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.3,# Khi có breakout, GIẢM hình phạt quá mua xuống còn 30%.
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.5,     # Nến kiệt sức phải có thân lớn gấp 2.5 lần ATR.
+                "EXHAUSTION_VOLUME_MA_RATIO": 4.0,      # Volume kiệt sức phải cực lớn, gấp 4 lần trung bình.
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.4      # Khi có tín hiệu kiệt sức, TĂNG thưởng 1.4 lần.
             },
             "4h": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 2.5,        # [4h] Yêu cầu về nến breakout thấp hơn khung 1h.
-                "BREAKOUT_VOLUME_MA_RATIO": 3.0,       # [4h] Yêu cầu về volume breakout thấp hơn khung 1h.
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2, # [4h] Tin tưởng breakout hơn, giảm hình phạt xuống còn 20%.
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.2,      # [4h] Nến kiệt sức không cần quá lớn như khung 1h.
-                "EXHAUSTION_VOLUME_MA_RATIO": 3.5,     # [4h] Volume kiệt sức không cần quá đột biến như khung 1h.
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.5       # [4h] Tin tưởng tín hiệu kiệt sức hơn, tăng thưởng 1.5 lần.
+                "BREAKOUT_CANDLE_ATR_RATIO": 2.5,
+                "BREAKOUT_VOLUME_MA_RATIO": 3.0,
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2,
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.2,
+                "EXHAUSTION_VOLUME_MA_RATIO": 3.5,
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.5
             },
             "1d": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 2.0,        # [1d] Nến breakout chỉ cần gấp 2 lần ATR là đủ mạnh.
-                "BREAKOUT_VOLUME_MA_RATIO": 2.5,       # [1d] Volume chỉ cần gấp 2.5 lần là đủ xác nhận.
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1, # [1d] Rất tin tưởng breakout, giảm hình phạt xuống còn 10%.
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.0,      # [1d] Nến kiệt sức tương tự breakout.
-                "EXHAUSTION_VOLUME_MA_RATIO": 3.0,     # [1d] Volume xác nhận ở mức vừa phải.
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.6       # [1d] Rất tin tưởng tín hiệu kiệt sức, tăng thưởng 1.6 lần.
+                "BREAKOUT_CANDLE_ATR_RATIO": 2.0,
+                "BREAKOUT_VOLUME_MA_RATIO": 2.5,
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1,
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.0,
+                "EXHAUSTION_VOLUME_MA_RATIO": 3.0,
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.6
             }
         }
     }
