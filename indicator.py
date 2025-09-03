@@ -64,6 +64,7 @@ def get_price_data(symbol: str, interval: str, limit: int = 200, startTime: int 
         except Exception: pass
         return final_df
     return existing_df if existing_df is not None else pd.DataFrame()
+
 def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
     closed_candle_idx = -2
     if len(df) < 51:
@@ -137,9 +138,11 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
     if not np.isnan(bb_upper) and bb_upper > 0: tp_plan = max(bb_upper, price * 1.05)
     trade_plan = {"entry": round(entry_plan_price, 8), "tp": round(tp_plan, 8), "sl": round(sl_plan, 8)}
     doji_type = "none"; candle_pattern = "none"
+    o, cl, h, l, candle_body_size = 0, 0, 0, 0, 0
     if len(df) >= abs(closed_candle_idx):
         c = df.iloc[closed_candle_idx]
         o, cl, h, l = c["open"], c["close"], c["high"], c["low"]
+        candle_body_size = abs(cl - o)
         body = abs(cl - o); candle_range = h - l
         if candle_range > 0 and body <= 0.1 * candle_range:
             upper_shadow = h - max(o, cl); lower_shadow = min(o, cl) - l
@@ -177,6 +180,7 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
     elif is_squeezing and price_breaks_lower and volume_confirmed:
         breakout_signal = "bearish"
     result = {
+        "open": o, "high": h, "low": l, "candle_body_size": candle_body_size,
         "symbol": symbol, "interval": interval, "price": current_live_price, "closed_candle_price": price,
         "ema_9": ema_9, "ema_20": ema_20, "ema_50": ema_50, "ema_200": ema_200, "trend": trend,
         "rsi_14": rsi_14, "rsi_divergence": rsi_divergence,
@@ -186,8 +190,7 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
         "atr": atr_value, "atr_percent": atr_percent,
         "fib_0_618": fib_0_618, "trade_plan": trade_plan,
         "doji_type": doji_type, "candle_pattern": candle_pattern, "tag": tag, "is_doji": doji_type != "none",
-        "support_level": support_level,
-        "resistance_level": resistance_level,
+        "support_level": support_level, "resistance_level": resistance_level,
         "breakout_signal": breakout_signal,
     }
     for k, v in result.items():
@@ -195,6 +198,7 @@ def calculate_indicators(df: pd.DataFrame, symbol: str, interval: str) -> dict:
             result[k] = 0.0
     result["entry_price"] = result.get("closed_candle_price", result["price"])
     return result
+
 if __name__ == "__main__":
     sample_symbol = "ETHUSDT"; sample_interval = "1h"
     df_sample = get_price_data(sample_symbol, sample_interval, limit=200)

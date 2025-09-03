@@ -98,31 +98,60 @@ MTF_ANALYSIS_CONFIG = {
 
 # --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
-    "ENABLED": True,
-    "MAX_BONUS_COEFF": 1.10,                   # Giữ nguyên +10%: Quyết đoán bắt đáy khi có cơ hội vàng.
-    "MIN_PENALTY_COEFF": 0.90,                   # Quay về -10%: Một hình phạt mạnh mẽ nhưng không quá cực đoan.
-    "SCORING_WEIGHTS": {                       # Giữ nguyên trọng số cao: Vẫn ưu tiên Nến và SR để bot thông minh hơn.
-        "RSI": 0.4,
-        "BB_POS": 0.4,
-        "CANDLE": 0.35,
-        "SR_LEVEL": 0.35
+    "ENABLED": True,                                 # Bật/tắt toàn bộ mô-đun này.
+    "MAX_BONUS_COEFF": 1.15,                         # Mức thưởng điểm TỐI ĐA, chống việc điểm số bị đẩy lên quá cao (1.15 = tăng 15%).
+    "MIN_PENALTY_COEFF": 0.90,                         # Mức phạt điểm TỐI ĐA, đảm bảo điểm số không bị dìm xuống quá thấp (0.90 = giảm 10%).
+    "SCORING_WEIGHTS": {                             # Trọng số, quyết định mức độ quan trọng của từng yếu tố.
+        "RSI": 0.4,                                  # RSI là yếu tố quan trọng.
+        "BB_POS": 0.4,                               # Vị trí giá trong dải Bollinger Bands cũng quan trọng tương đương.
+        "CANDLE": 0.35,                              # Mẫu nến xác nhận có trọng số thấp hơn một chút.
+        "SR_LEVEL": 0.35                             # Vị trí gần Hỗ trợ/Kháng cự cũng là yếu tố phụ.
     },
-    "BASE_IMPACT": {                           # [TINH CHỈNH QUAN TRỌNG] - Giảm độ gắt của hình phạt.
-        "BONUS_PER_POINT": 0.09,               # Thưởng +7% cho mỗi điểm bonus.
-        "PENALTY_PER_POINT": -0.09             # Phạt -8% cho mỗi điểm phạt, có impact nhưng không quá lố.
+    "BASE_IMPACT": {                                 # Tác động cơ bản của điểm thưởng/phạt lên hệ số cuối cùng.
+        "BONUS_PER_POINT": 0.09,                     # Mỗi 1 điểm "thưởng" sẽ làm hệ số tăng 0.09.
+        "PENALTY_PER_POINT": -0.09                   # Mỗi 1 điểm "phạt" sẽ làm hệ số giảm 0.09.
     },
-    "CONFLUENCE_MULTIPLIER": 1.7,              # Giảm nhẹ: Vẫn khuếch đại mạnh sự đồng thuận nhưng không quá tay.
-    "RULES_BY_TIMEFRAME": {                    # Giữ nguyên: Các ngưỡng này đã rất logic.
-        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 27, "BB_POS_BELOW": 0.07}},
-        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}},
-        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 32, "BB_POS_BELOW": 0.12}}
+    "CONFLUENCE_MULTIPLIER": 1.7,                    # Khi cả RSI và BB cùng báo tín hiệu, nhân tác động lên 1.7 lần để tăng độ tin cậy.
+    "RULES_BY_TIMEFRAME": {                          # Ngưỡng quá mua/quá bán cho từng khung thời gian.
+        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 27, "BB_POS_BELOW": 0.07}}, # Khung 1h cần tín hiệu rất cực đoan (RSI > 78) vì nhiễu cao.
+        "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 30, "BB_POS_BELOW": 0.10}}, # Khung 4h có ngưỡng cân bằng hơn.
+        "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 32, "BB_POS_BELOW": 0.12}}  # Khung 1d chỉ cần RSI > 72 là đã đáng chú ý.
     },
-    "CONFIRMATION_BOOST": {                    # Giữ nguyên: Danh sách các yếu tố xác nhận đã rất tốt.
-        "ENABLED": True,
-        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"],
-        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],
-        "RESISTANCE_PROXIMITY_PCT": 0.015,
-        "SUPPORT_PROXIMITY_PCT": 0.015
+    "CONFIRMATION_BOOST": {                          # Các yếu tố xác nhận bổ sung.
+        "ENABLED": True,                             # Bật/tắt việc dùng mẫu nến và S/R.
+        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"], # Các mẫu nến báo hiệu sự đảo chiều giảm.
+        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"], # Các mẫu nến báo hiệu sự đảo chiều tăng.
+        "RESISTANCE_PROXIMITY_PCT": 0.015,           # Coi là "gần" kháng cự nếu khoảng cách nhỏ hơn 1.5%.
+        "SUPPORT_PROXIMITY_PCT": 0.015               # Coi là "gần" hỗ trợ nếu khoảng cách nhỏ hơn 1.5%.
+    },
+    "PRICE_ACTION_VOL_ANALYSIS": {                   # Phân tích hành động giá & volume để xác nhận.
+        "ENABLED": True,                             # Bật/tắt logic cốt lõi này.
+        "RULES_BY_TIMEFRAME": {
+            "1h": {
+                "BREAKOUT_CANDLE_ATR_RATIO": 3.0,        # [1h] Nến breakout phải có thân lớn gấp 3 lần ATR (yêu cầu cao).
+                "BREAKOUT_VOLUME_MA_RATIO": 3.5,       # [1h] Volume breakout phải lớn gấp 3.5 lần trung bình (yêu cầu cao).
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.3, # [1h] Khi có breakout, giảm hình phạt quá mua xuống còn 30%.
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.5,      # [1h] Nến kiệt sức phải có thân lớn gấp 2.5 lần ATR.
+                "EXHAUSTION_VOLUME_MA_RATIO": 4.0,     # [1h] Volume kiệt sức phải cực lớn, gấp 4 lần trung bình.
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.4       # [1h] Tăng thưởng 1.4 lần khi có tín hiệu kiệt sức.
+            },
+            "4h": {
+                "BREAKOUT_CANDLE_ATR_RATIO": 2.5,        # [4h] Yêu cầu về nến breakout thấp hơn khung 1h.
+                "BREAKOUT_VOLUME_MA_RATIO": 3.0,       # [4h] Yêu cầu về volume breakout thấp hơn khung 1h.
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2, # [4h] Tin tưởng breakout hơn, giảm hình phạt xuống còn 20%.
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.2,      # [4h] Nến kiệt sức không cần quá lớn như khung 1h.
+                "EXHAUSTION_VOLUME_MA_RATIO": 3.5,     # [4h] Volume kiệt sức không cần quá đột biến như khung 1h.
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.5       # [4h] Tin tưởng tín hiệu kiệt sức hơn, tăng thưởng 1.5 lần.
+            },
+            "1d": {
+                "BREAKOUT_CANDLE_ATR_RATIO": 2.0,        # [1d] Nến breakout chỉ cần gấp 2 lần ATR là đủ mạnh.
+                "BREAKOUT_VOLUME_MA_RATIO": 2.5,       # [1d] Volume chỉ cần gấp 2.5 lần là đủ xác nhận.
+                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1, # [1d] Rất tin tưởng breakout, giảm hình phạt xuống còn 10%.
+                "EXHAUSTION_CANDLE_ATR_RATIO": 2.0,      # [1d] Nến kiệt sức tương tự breakout.
+                "EXHAUSTION_VOLUME_MA_RATIO": 3.0,     # [1d] Volume xác nhận ở mức vừa phải.
+                "EXHAUSTION_BONUS_MULTIPLIER": 1.6       # [1d] Rất tin tưởng tín hiệu kiệt sức, tăng thưởng 1.6 lần.
+            }
+        }
     }
 }
 
@@ -414,9 +443,11 @@ def get_usdt_fund(bnc: BinanceConnector) -> Tuple[float, float]:
     return 0.0, 0.0
 
 def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tuple[float, float]:
-    if not (trade and trade.get('entry_price', 0) > 0 and realtime_price and realtime_price > 0): return 0.0, 0.0
+    entry_price = trade.get('entry_price', 0) # Lấy giá entry ra biến riêng
+    if not (trade and entry_price > 0 and realtime_price and realtime_price > 0): return 0.0, 0.0 # Kiểm tra entry_price > 0 là đủ
+    
     pnl_multiplier = 1.0
-    pnl_percent = (realtime_price - trade['entry_price']) / trade['entry_price'] * 100 * pnl_multiplier
+    pnl_percent = (realtime_price - entry_price) / entry_price * 100 * pnl_multiplier
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
     return pnl_usd, pnl_percent
 
@@ -646,12 +677,12 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                     trade['partial_closed_by_score'] = True
         _, pnl_percent = get_current_pnl(trade, realtime_price=current_price)
         trade['peak_pnl_percent'] = max(trade.get('peak_pnl_percent', 0.0), pnl_percent)
-        
+
         initial_risk_dist = trade.get('atr_risk_dist', 0)
         if initial_risk_dist <= 0:
             initial_risk_dist = abs(trade.get('initial_entry', {}).get('price', 0) - trade.get('initial_sl', 0))
             if initial_risk_dist <= 0: continue
-        
+
         if tactic_cfg.get("ENABLE_PARTIAL_TP", False) and not trade.get("tp1_hit", False) and initial_risk_dist > 0:
             pnl_ratio = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio >= tactic_cfg.get("TP1_RR_RATIO", 1.0):
@@ -927,28 +958,24 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state.pop('pending_trade_opportunity', None)
         return
     entry_price_estimate = realtime_price
-    
+
     risk_dist_from_atr = full_indicators.get('atr', 0) * tactic_cfg.get("ATR_SL_MULTIPLIER", 2.0)
     if risk_dist_from_atr <= 0:
         log_error(f"Tính toán risk_dist_from_atr cho {symbol} không hợp lệ. Hủy cơ hội.", state=state)
         state.pop('pending_trade_opportunity', None)
         return
 
-    min_risk_map = RISK_RULES_CONFIG.get("MIN_RISK_DIST_PERCENT_BY_TIMEFRAME", {})
-    max_risk_map = RISK_RULES_CONFIG.get("MAX_SL_PERCENT_BY_TIMEFRAME", {})
-    min_risk_pct = min_risk_map.get(interval, 0.02)
-    max_risk_pct = max_risk_map.get(interval, 0.10)
-    min_sl_dist = entry_price_estimate * min_risk_pct
-    max_sl_dist = entry_price_estimate * max_risk_pct
+    min_sl_dist = entry_price_estimate * RISK_RULES_CONFIG["MIN_RISK_DIST_PERCENT_BY_TIMEFRAME"].get(interval, 0.02)
+    max_sl_dist = entry_price_estimate * RISK_RULES_CONFIG["MAX_SL_PERCENT_BY_TIMEFRAME"].get(interval, 0.10)
 
-    if sl_risk_dist == risk_dist_from_atr:
-        log_message(f"  ... 🛡️ SL được đặt theo ATR: {sl_risk_dist:.4f}", state=state)
-    else:
-        log_message(f"  ... 🛡️ SL theo ATR ({risk_dist_from_atr:.4f}) nhỏ hơn 'khiên' ({min_sl_dist:.4f}). SL được đặt theo 'khiên'.", state=state)
-
+    sl_risk_dist = risk_dist_from_atr
+    if sl_risk_dist < min_sl_dist:
+        log_message(f"  ... 🛡️ SL theo ATR ({risk_dist_from_atr:.4f}) nhỏ hơn 'khiên' ({min_sl_dist:.4f}). Đặt theo 'khiên'.", state=state)
+        sl_risk_dist = min_sl_dist
+    
     if sl_risk_dist > max_sl_dist:
+        log_message(f"  ... 🛑 SL ({sl_risk_dist:.4f}) quá rộng. Đặt theo Trần an toàn: {max_sl_dist:.4f}", state=state)
         sl_risk_dist = max_sl_dist
-        log_message(f"  ... 🛑 SL theo ATR quá rộng ({risk_dist_from_atr:.4f}), áp dụng Trần an toàn: {max_risk_pct*100:.2f}%", state=state)
 
     capital_pct = ZONE_BASED_POLICIES.get(zone, {}).get("CAPITAL_PCT", 0.03)
     stable_capital_base = state.get('initial_capital', total_usdt_fund)
@@ -972,10 +999,10 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
         state['money_spent_on_trades_last_session'] += cost_of_trade
         filled_qty = float(market_order['executedQty'])
         avg_price = float(market_order['cummulativeQuoteQty']) / filled_qty
-        
+
         sl_p = avg_price - sl_risk_dist
         tp_p = avg_price + (risk_dist_from_atr * tactic_cfg.get("RR", 2.0))
-        
+
         max_tp_pct_cfg = RISK_RULES_CONFIG["MAX_TP_PERCENT_BY_TIMEFRAME"].get(interval)
         if max_tp_pct_cfg is not None and tp_p > avg_price * (1 + max_tp_pct_cfg):
             tp_p = avg_price * (1 + max_tp_pct_cfg)
@@ -1041,35 +1068,29 @@ def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type
         return cfg["SIDEWAYS_PENALTY_COEFFICIENT"]
 
     elif target_interval == "1d":
-        return cfg.get("BONUS_COEFFICIENT", 1.03) 
+        return cfg.get("BONUS_COEFFICIENT", 1.03)
 
     return 1.0
 
 def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> float:
     cfg = EXTREME_ZONE_ADJUSTMENT_CONFIG
-    if not cfg.get("ENABLED", False):
+    if not cfg.get("ENABLED", False) or not indicators:
         return 1.0
-
     weights = cfg.get("SCORING_WEIGHTS", {})
     base_impact = cfg.get("BASE_IMPACT", {})
     confluence_multiplier = cfg.get("CONFLUENCE_MULTIPLIER", 1.5)
-
     rules = cfg.get("RULES_BY_TIMEFRAME", {}).get(interval)
     if not rules:
         return 1.0
-
     price = indicators.get("price", 0)
     bbu, bbm, bbl = indicators.get("bb_upper", 0), indicators.get("bb_middle", 0), indicators.get("bb_lower", 0)
     rsi = indicators.get("rsi_14", 50)
     candle = indicators.get("candle_pattern") or indicators.get("doji_type")
     sup_level, res_level = indicators.get("support_level", 0), indicators.get("resistance_level", 0)
-
     if not all([price > 0, bbu > bbm, bbm > bbl]):
         return 1.0
-
     bonus_score, penalty_score = 0.0, 0.0
     confirmation_cfg = cfg.get("CONFIRMATION_BOOST", {})
-
     oversold_rule = rules.get("OVERSOLD", {})
     bb_range_lower = bbm - bbl
     if bb_range_lower > 0:
@@ -1078,14 +1099,12 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
             bonus_score += weights.get("RSI", 0.4)
         if price_pos_lower < oversold_rule.get("BB_POS_BELOW", -0.1):
             bonus_score += weights.get("BB_POS", 0.4)
-
     if confirmation_cfg.get("ENABLED"):
         if candle in confirmation_cfg.get("BULLISH_CANDLES", []):
             bonus_score += weights.get("CANDLE", 0.2)
         is_near_support = sup_level > 0 and abs(price - sup_level) / price < confirmation_cfg.get("SUPPORT_PROXIMITY_PCT", 0.015)
         if is_near_support:
             bonus_score += weights.get("SR_LEVEL", 0.2)
-
     overbought_rule = rules.get("OVERBOUGHT", {})
     bb_range_upper = bbu - bbm
     if bb_range_upper > 0:
@@ -1094,31 +1113,53 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
             penalty_score += weights.get("RSI", 0.4)
         if price_pos_upper > overbought_rule.get("BB_POS_ABOVE", 1.1):
             penalty_score += weights.get("BB_POS", 0.4)
-
     if confirmation_cfg.get("ENABLED"):
         if candle in confirmation_cfg.get("BEARISH_CANDLES", []):
             penalty_score += weights.get("CANDLE", 0.2)
         is_near_resistance = res_level > 0 and abs(price - res_level) / price < confirmation_cfg.get("RESISTANCE_PROXIMITY_PCT", 0.015)
         if is_near_resistance:
             penalty_score += weights.get("SR_LEVEL", 0.2)
-
+    pv_config = cfg.get("PRICE_ACTION_VOL_ANALYSIS", {})
+    if pv_config.get("ENABLED"):
+        pv_rules = pv_config.get("RULES_BY_TIMEFRAME", {}).get(interval)
+        if pv_rules:
+            atr = indicators.get("atr", 0)
+            volume = indicators.get("volume", 0)
+            volume_ma = indicators.get("vol_ma20", 0)
+            candle_body_size = indicators.get("candle_body_size", 0)
+            closed_candle_open = indicators.get("open", 0)
+            closed_candle_close = indicators.get("closed_candle_price", 0)
+            closed_candle_high = indicators.get("high", 0)
+            closed_candle_low = indicators.get("low", 0)
+            live_price = indicators.get("price", 0)
+            is_bullish_candle = closed_candle_close > closed_candle_open
+            is_bearish_candle = closed_candle_close < closed_candle_open
+            if atr > 1e-8 and volume_ma > 1:
+                if penalty_score > 0 and is_bullish_candle:
+                    is_strong_momentum_candle = candle_body_size > (atr * pv_rules.get("BREAKOUT_CANDLE_ATR_RATIO", 2.5))
+                    is_volume_spike = volume > (volume_ma * pv_rules.get("BREAKOUT_VOLUME_MA_RATIO", 3.0))
+                    if is_strong_momentum_candle and is_volume_spike:
+                        penalty_score *= pv_rules.get("BREAKOUT_PENALTY_REDUCTION_COEFF", 0.2)
+                        if live_price > closed_candle_high:
+                            penalty_score *= 0.5
+                elif bonus_score > 0 and is_bearish_candle:
+                    is_strong_exhaust_candle = candle_body_size > (atr * pv_rules.get("EXHAUSTION_CANDLE_ATR_RATIO", 2.0))
+                    is_exhaust_volume_spike = volume > (volume_ma * pv_rules.get("EXHAUSTION_VOLUME_MA_RATIO", 3.5))
+                    if is_strong_exhaust_candle and is_exhaust_volume_spike:
+                        bonus_score *= pv_rules.get("EXHAUSTION_BONUS_MULTIPLIER", 1.5)
+                        if live_price > closed_candle_low:
+                            bonus_score *= 1.2
     if bonus_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
         bonus_score *= confluence_multiplier
     if penalty_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
         penalty_score *= confluence_multiplier
-
     bonus_impact = base_impact.get("BONUS_PER_POINT", 0.05)
     penalty_impact = base_impact.get("PENALTY_PER_POINT", -0.07)
-
     coeff_change = (bonus_score * bonus_impact) + (penalty_score * penalty_impact)
     calculated_coeff = 1.0 + coeff_change
-
     min_coeff = cfg.get("MIN_PENALTY_COEFF", 0.90)
     max_coeff = cfg.get("MAX_BONUS_COEFF", 1.05)
-
     return max(min_coeff, min(calculated_coeff, max_coeff))
-
-
 
 # ==============================================================================
 # ==================== ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) =======================
