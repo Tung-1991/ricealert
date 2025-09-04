@@ -261,7 +261,7 @@ def get_ai_analysis(prompt: str, timeout: int = 20) -> Optional[str]:
 
 def should_send_summary(last_summary_ts: float) -> bool:
     now_dt = datetime.now(VN_TZ)
-    target_times = [(8, 2), (22, 2)]
+    target_times = [(8, 2), (20, 2)]
     for hour, minute in target_times:
         target_dt_today = now_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if now_dt >= target_dt_today and last_summary_ts < target_dt_today.timestamp():
