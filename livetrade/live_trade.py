@@ -96,76 +96,62 @@ MTF_ANALYSIS_CONFIG = {
     "SIDEWAYS_PENALTY_COEFFICIENT": 0.97,        # [Phạt nhẹ] - Phạt nhẹ khi khung lớn đi ngang.
 }
 
-# --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) ---
+# --- BỘ LỌC ĐIỀU CHỈNH VÙNG CỰC ĐOAN (EZ) - PHIÊN BẢN NÂNG CẤP ---
 EXTREME_ZONE_ADJUSTMENT_CONFIG = {
-    "ENABLED": True,                                  # Bật/tắt toàn bộ mô-đun này.
+    "ENABLED": True,
 
     # --- Giới Hạn An Toàn ---
-    "MAX_BONUS_COEFF": 1.35,                          # Trần thưởng điểm TỐI ĐA. Dù tính toán thế nào cũng không vượt qua con số này (1.35 = tăng tối đa 35%).
-    "MIN_PENALTY_COEFF": 0.90,                          # Sàn phạt điểm TỐI ĐA. Điểm số sẽ không bị dìm xuống thấp hơn mức này (0.90 = giảm tối đa 10%).
+    "MAX_BONUS_COEFF": 1.15,                          # [Tuning] Hạ trần bonus xuống +15% để an toàn hơn.
+    "MIN_PENALTY_COEFF": 0.90,                          # Giữ nguyên sàn phạt -10%.
 
     # --- Trọng Số Các Yếu Tố ---
     "SCORING_WEIGHTS": {
-        "RSI": 0.4,                                   # Độ quan trọng của tín hiệu RSI.
-        "BB_POS": 0.4,                                # Độ quan trọng của vị trí giá trong Bollinger Bands.
-        "CANDLE": 0.35,                               # Độ quan trọng của mẫu nến xác nhận.
-        "SR_LEVEL": 0.35                              # Độ quan trọng của việc giá gần Hỗ trợ/Kháng cự.
+        "RSI": 0.4,                                   # Độ quan trọng của RSI.
+        "BB_POS": 0.4,                                # Độ quan trọng của vị trí giá trong BB.
+        "CANDLE": 0.35,                               # Độ quan trọng của mẫu nến.
+        "SR_LEVEL": 0.35                              # Độ quan trọng của mức Hỗ trợ/Kháng cự.
     },
 
     # --- Sức Mạnh Của Điểm Thưởng/Phạt ---
     "BASE_IMPACT": {
-        "BONUS_PER_POINT": 0.20,                      # Mỗi 1 điểm 'thưởng' (tính từ SCORING_WEIGHTS) sẽ làm hệ số TĂNG 0.20.
-        "PENALTY_PER_POINT": -0.08                     # Mỗi 1 điểm 'phạt' sẽ làm hệ số GIẢM 0.08.
+        "BONUS_PER_POINT": 0.15,                      # [Tuning] Giảm sức mạnh bonus để điểm tăng ôn hòa hơn.
+        "PENALTY_PER_POINT": -0.08                     # Giữ nguyên sức mạnh của điểm phạt.
     },
 
     # --- Thưởng Combo Đặc Biệt ---
-    "CONFLUENCE_MULTIPLIER": 2.0,                     # Hệ số THƯỞNG COMBO. Khi cả RSI và BB cùng báo tín hiệu tốt, nhân tác động lên 2 LẦN.
+    "CONFLUENCE_MULTIPLIER": 2.0,                     # Nhân đôi tác động khi RSI và BB cùng đồng thuận.
 
-    # --- Ngưỡng Kích Hoạt (Phần Tuning Quan Trọng Nhất) ---
+    # --- Ngưỡng Kích Hoạt ---
     "RULES_BY_TIMEFRAME": {
-        # Điều kiện để được coi là QUÁ BÁN (dẫn đến được thưởng) đã được NỚI LỎNG.
-        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 38, "BB_POS_BELOW": 0.20}},
+        "1h": {"OVERBOUGHT": {"RSI_ABOVE": 78, "BB_POS_ABOVE": 0.98}, "OVERSOLD": {"RSI_BELOW": 35, "BB_POS_BELOW": 0.15}}, # [Tuning] Siết chặt ngưỡng 1h, yêu cầu tín hiệu rõ ràng hơn.
         "4h": {"OVERBOUGHT": {"RSI_ABOVE": 75, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 40, "BB_POS_BELOW": 0.22}},
         "1d": {"OVERBOUGHT": {"RSI_ABOVE": 72, "BB_POS_ABOVE": 0.95}, "OVERSOLD": {"RSI_BELOW": 42, "BB_POS_BELOW": 0.25}}
     },
 
-    # --- Yếu Tố Xác Nhận Bổ Sung (Nến và S/R) ---
+    # --- Yếu Tố Xác Nhận Bổ Sung ---
     "CONFIRMATION_BOOST": {
-        "ENABLED": True,                              # Bật/tắt việc dùng các yếu tố này.
-        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"], # Danh sách các mẫu nến báo hiệu sự đảo chiều GIẢM.
-        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],         # Danh sách các mẫu nến báo hiệu sự đảo chiều TĂNG.
-        "RESISTANCE_PROXIMITY_PCT": 0.015,            # Coi là 'gần' kháng cự nếu khoảng cách nhỏ hơn 1.5%.
-        "SUPPORT_PROXIMITY_PCT": 0.015               # Coi là 'gần' hỗ trợ nếu khoảng cách nhỏ hơn 1.5%.
+        "ENABLED": True,
+        "BEARISH_CANDLES": ["shooting_star", "bearish_engulfing", "gravestone"],
+        "BULLISH_CANDLES": ["hammer", "bullish_engulfing", "dragonfly"],
+        "RESISTANCE_PROXIMITY_PCT": 0.015,
+        "SUPPORT_PROXIMITY_PCT": 0.015
+    },
+    
+    # --- [NÂNG CẤP] PHÂN TÍCH BỐI CẢNH BB SQUEEZE ---
+    "SQUEEZE_ANALYSIS": {
+        "ENABLED": True,
+        "LOOKBACK_PERIOD": 200,                       # Lịch sử quét: 200 nến.
+        "SQUEEZE_PERCENTILE": 10.0,                   # Ngưỡng "hẹp": độ rộng BB nằm trong 10% thấp nhất.
+        "IMPACT_MULTIPLIER": 1.25                     # Khuếch đại bonus/penalty lên 25% khi có Squeeze.
     },
 
-    # --- Bộ Lọc Nâng Cao: Phân Tích Hành Động Giá & Volume ---
+    # --- Phân Tích Hành Động Giá & Volume ---
     "PRICE_ACTION_VOL_ANALYSIS": {
         "ENABLED": True,
         "RULES_BY_TIMEFRAME": {
-            "1h": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 3.0,       # Nến breakout phải có thân lớn gấp 3 lần ATR.
-                "BREAKOUT_VOLUME_MA_RATIO": 3.5,        # Volume breakout phải lớn gấp 3.5 lần trung bình.
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.3,# Khi có breakout, GIẢM hình phạt quá mua xuống còn 30%.
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.5,     # Nến kiệt sức phải có thân lớn gấp 2.5 lần ATR.
-                "EXHAUSTION_VOLUME_MA_RATIO": 4.0,      # Volume kiệt sức phải cực lớn, gấp 4 lần trung bình.
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.4      # Khi có tín hiệu kiệt sức, TĂNG thưởng 1.4 lần.
-            },
-            "4h": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 2.5,
-                "BREAKOUT_VOLUME_MA_RATIO": 3.0,
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2,
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.2,
-                "EXHAUSTION_VOLUME_MA_RATIO": 3.5,
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.5
-            },
-            "1d": {
-                "BREAKOUT_CANDLE_ATR_RATIO": 2.0,
-                "BREAKOUT_VOLUME_MA_RATIO": 2.5,
-                "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1,
-                "EXHAUSTION_CANDLE_ATR_RATIO": 2.0,
-                "EXHAUSTION_VOLUME_MA_RATIO": 3.0,
-                "EXHAUSTION_BONUS_MULTIPLIER": 1.6
-            }
+            "1h": { "BREAKOUT_CANDLE_ATR_RATIO": 3.0, "BREAKOUT_VOLUME_MA_RATIO": 3.5, "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.3, "EXHAUSTION_CANDLE_ATR_RATIO": 2.5, "EXHAUSTION_VOLUME_MA_RATIO": 4.0, "EXHAUSTION_BONUS_MULTIPLIER": 1.4 },
+            "4h": { "BREAKOUT_CANDLE_ATR_RATIO": 2.5, "BREAKOUT_VOLUME_MA_RATIO": 3.0, "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2, "EXHAUSTION_CANDLE_ATR_RATIO": 2.2, "EXHAUSTION_VOLUME_MA_RATIO": 3.5, "EXHAUSTION_BONUS_MULTIPLIER": 1.5 },
+            "1d": { "BREAKOUT_CANDLE_ATR_RATIO": 2.0, "BREAKOUT_VOLUME_MA_RATIO": 2.5, "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1, "EXHAUSTION_CANDLE_ATR_RATIO": 2.0, "EXHAUSTION_VOLUME_MA_RATIO": 3.0, "EXHAUSTION_BONUS_MULTIPLIER": 1.6 }
         }
     }
 }
@@ -1088,52 +1074,79 @@ def get_mtf_adjustment_coefficient(symbol: str, target_interval: str, trade_type
     return 1.0
 
 def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> float:
+    """
+    Tính toán hệ số điều chỉnh điểm số dựa trên các điều kiện thị trường cực đoan.
+    Hàm này sẽ thưởng điểm (hệ số > 1.0) cho các tín hiệu mua trong vùng quá bán
+    và phạt điểm (hệ số < 1.0) cho các tín hiệu mua trong vùng quá mua.
+    PHIÊN BẢN NÂNG CẤP: Có khả năng nhận diện bối cảnh "BB Squeeze" để khuếch đại
+    tác động của điểm thưởng/phạt, giúp bot hành động quyết đoán hơn khi thị trường
+    sắp có biến động mạnh.
+    """
     cfg = EXTREME_ZONE_ADJUSTMENT_CONFIG
     if not cfg.get("ENABLED", False) or not indicators:
         return 1.0
+
+    # --- Lấy các cấu hình và chỉ báo cần thiết ---
     weights = cfg.get("SCORING_WEIGHTS", {})
     base_impact = cfg.get("BASE_IMPACT", {})
     confluence_multiplier = cfg.get("CONFLUENCE_MULTIPLIER", 1.5)
     rules = cfg.get("RULES_BY_TIMEFRAME", {}).get(interval)
     if not rules:
         return 1.0
+
+    # Lấy giá trị các chỉ báo từ dictionary
     price = indicators.get("price", 0)
     bbu, bbm, bbl = indicators.get("bb_upper", 0), indicators.get("bb_middle", 0), indicators.get("bb_lower", 0)
     rsi = indicators.get("rsi_14", 50)
     candle = indicators.get("candle_pattern") or indicators.get("doji_type")
     sup_level, res_level = indicators.get("support_level", 0), indicators.get("resistance_level", 0)
+
+    # Kiểm tra dữ liệu đầu vào có hợp lệ không
     if not all([price > 0, bbu > bbm, bbm > bbl]):
         return 1.0
+
     bonus_score, penalty_score = 0.0, 0.0
     confirmation_cfg = cfg.get("CONFIRMATION_BOOST", {})
+
+    # --- 1. TÍNH TOÁN ĐIỂM THƯỞNG (CHO TÍN HIỆU QUÁ BÁN) ---
     oversold_rule = rules.get("OVERSOLD", {})
     bb_range_lower = bbm - bbl
     if bb_range_lower > 0:
+        # Vị trí giá tương đối trong nửa dưới của dải BB (0-1)
         price_pos_lower = (price - bbl) / bb_range_lower
         if rsi < oversold_rule.get("RSI_BELOW", 1):
             bonus_score += weights.get("RSI", 0.4)
         if price_pos_lower < oversold_rule.get("BB_POS_BELOW", -0.1):
             bonus_score += weights.get("BB_POS", 0.4)
+
+    # Yếu tố xác nhận bổ sung cho điểm thưởng
     if confirmation_cfg.get("ENABLED"):
         if candle in confirmation_cfg.get("BULLISH_CANDLES", []):
             bonus_score += weights.get("CANDLE", 0.2)
         is_near_support = sup_level > 0 and abs(price - sup_level) / price < confirmation_cfg.get("SUPPORT_PROXIMITY_PCT", 0.015)
         if is_near_support:
             bonus_score += weights.get("SR_LEVEL", 0.2)
+
+    # --- 2. TÍNH TOÁN ĐIỂM PHẠT (CHO TÍN HIỆU QUÁ MUA) ---
     overbought_rule = rules.get("OVERBOUGHT", {})
     bb_range_upper = bbu - bbm
     if bb_range_upper > 0:
+        # Vị trí giá tương đối trong nửa trên của dải BB (0-1)
         price_pos_upper = (price - bbm) / bb_range_upper
         if rsi > overbought_rule.get("RSI_ABOVE", 99):
             penalty_score += weights.get("RSI", 0.4)
         if price_pos_upper > overbought_rule.get("BB_POS_ABOVE", 1.1):
             penalty_score += weights.get("BB_POS", 0.4)
+
+    # Yếu tố xác nhận bổ sung cho điểm phạt
     if confirmation_cfg.get("ENABLED"):
         if candle in confirmation_cfg.get("BEARISH_CANDLES", []):
             penalty_score += weights.get("CANDLE", 0.2)
         is_near_resistance = res_level > 0 and abs(price - res_level) / price < confirmation_cfg.get("RESISTANCE_PROXIMITY_PCT", 0.015)
         if is_near_resistance:
             penalty_score += weights.get("SR_LEVEL", 0.2)
+
+    # --- 3. PHÂN TÍCH NÂNG CAO VỀ HÀNH ĐỘNG GIÁ & VOLUME ---
     pv_config = cfg.get("PRICE_ACTION_VOL_ANALYSIS", {})
     if pv_config.get("ENABLED"):
         pv_rules = pv_config.get("RULES_BY_TIMEFRAME", {}).get(interval)
@@ -1142,38 +1155,47 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
             volume = indicators.get("volume", 0)
             volume_ma = indicators.get("vol_ma20", 0)
             candle_body_size = indicators.get("candle_body_size", 0)
-            closed_candle_open = indicators.get("open", 0)
-            closed_candle_close = indicators.get("closed_candle_price", 0)
-            closed_candle_high = indicators.get("high", 0)
-            closed_candle_low = indicators.get("low", 0)
-            live_price = indicators.get("price", 0)
-            is_bullish_candle = closed_candle_close > closed_candle_open
-            is_bearish_candle = closed_candle_close < closed_candle_open
+            
             if atr > 1e-8 and volume_ma > 1:
-                if penalty_score > 0 and is_bullish_candle:
+                # Kịch bản 1: Giảm phạt nếu có breakout mạnh
+                if penalty_score > 0 and indicators.get("closed_candle_price", 0) > indicators.get("open", 0):
                     is_strong_momentum_candle = candle_body_size > (atr * pv_rules.get("BREAKOUT_CANDLE_ATR_RATIO", 2.5))
                     is_volume_spike = volume > (volume_ma * pv_rules.get("BREAKOUT_VOLUME_MA_RATIO", 3.0))
                     if is_strong_momentum_candle and is_volume_spike:
                         penalty_score *= pv_rules.get("BREAKOUT_PENALTY_REDUCTION_COEFF", 0.2)
-                        if live_price > closed_candle_high:
-                            penalty_score *= 0.5
-                elif bonus_score > 0 and is_bearish_candle:
+
+                # Kịch bản 2: Tăng thưởng nếu có tín hiệu kiệt sức
+                elif bonus_score > 0 and indicators.get("closed_candle_price", 0) < indicators.get("open", 0):
                     is_strong_exhaust_candle = candle_body_size > (atr * pv_rules.get("EXHAUSTION_CANDLE_ATR_RATIO", 2.0))
                     is_exhaust_volume_spike = volume > (volume_ma * pv_rules.get("EXHAUSTION_VOLUME_MA_RATIO", 3.5))
                     if is_strong_exhaust_candle and is_exhaust_volume_spike:
                         bonus_score *= pv_rules.get("EXHAUSTION_BONUS_MULTIPLIER", 1.5)
-                        if live_price > closed_candle_low:
-                            bonus_score *= 1.2
+
+    # --- 4. ÁP DỤNG HỆ SỐ THƯỞNG ĐỒNG THUẬN (CONFLUENCE) ---
+    # Tăng mạnh bonus/penalty nếu cả 2 tín hiệu chính cùng xuất hiện
     if bonus_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
         bonus_score *= confluence_multiplier
     if penalty_score >= (weights.get("RSI", 0.4) + weights.get("BB_POS", 0.4)):
         penalty_score *= confluence_multiplier
+
+    # --- 5. TÍNH TOÁN SỰ THAY ĐỔI HỆ SỐ CƠ BẢN ---
     bonus_impact = base_impact.get("BONUS_PER_POINT", 0.05)
     penalty_impact = base_impact.get("PENALTY_PER_POINT", -0.07)
     coeff_change = (bonus_score * bonus_impact) + (penalty_score * penalty_impact)
+
+    # --- 6. NÂNG CẤP: KHUẾCH ĐẠI TÁC ĐỘNG KHI CÓ BB SQUEEZE ---
+    squeeze_cfg = cfg.get("SQUEEZE_ANALYSIS", {})
+    if squeeze_cfg.get("ENABLED") and indicators.get("is_bb_squeeze"):
+        multiplier = squeeze_cfg.get("IMPACT_MULTIPLIER", 1.0)
+        # Khuếch đại cả tác động của bonus (dương) và penalty (âm)
+        coeff_change *= multiplier
+    # --- KẾT THÚC PHẦN NÂNG CẤP ---
+
+    # --- 7. TÍNH TOÁN HỆ SỐ CUỐI CÙNG VÀ ÁP DỤNG GIỚI HẠN AN TOÀN ---
     calculated_coeff = 1.0 + coeff_change
     min_coeff = cfg.get("MIN_PENALTY_COEFF", 0.90)
-    max_coeff = cfg.get("MAX_BONUS_COEFF", 1.05)
+    max_coeff = cfg.get("MAX_BONUS_COEFF", 1.15) # Sử dụng trần mới là 1.15
+
     return max(min_coeff, min(calculated_coeff, max_coeff))
 
 # ==============================================================================
