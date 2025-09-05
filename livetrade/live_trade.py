@@ -185,9 +185,9 @@ RISK_RULES_CONFIG = {
     "MAX_TP_PERCENT_BY_TIMEFRAME": {"1h": 0.15, "4h": 0.25, "1d": 0.30}, # [Thực tế hóa] - Mức lãi TỐI ĐA, tránh các mục tiêu viển vông.
     "MIN_RISK_DIST_PERCENT_BY_TIMEFRAME": {"1h": 0.08, "4h": 0.10, "1d": 0.15}, # [SÀN AN TOÀN] - Mức lỗ TỐI THIỂU, tránh SL quá gần khi ATR thấp.
     "STALE_TRADE_RULES": {                       # [GỒNG LỆNH] - Cho các lệnh "ì", không chạy thêm thời gian.
-        "1h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 5.0},
-        "4h": {"HOURS": 144, "PROGRESS_THRESHOLD_PCT": 8.0},
-        "1d": {"HOURS": 240, "PROGRESS_THRESHOLD_PCT": 10.0},
+        "1h": {"HOURS": 72, "PROGRESS_THRESHOLD_PCT": 2.0},
+        "4h": {"HOURS": 144, "PROGRESS_THRESHOLD_PCT": 3.0},
+        "1d": {"HOURS": 240, "PROGRESS_THRESHOLD_PCT": 5.0},
         "STAY_OF_EXECUTION_SCORE": 6.5           # [Ân xá] - Điểm số tối thiểu để "ân xá", không đóng lệnh "ì".
     }
 }
