@@ -801,26 +801,54 @@ def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -
     config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
+    
     rules = config.get("RULES_BY_TIMEFRAME", {}).get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
     window = rules.get("WINDOW", 3)
     required_candles = rules.get("REQUIRED_CANDLES", 2)
+    
     try:
         df = price_dataframes.get(symbol, {}).get(interval)
-        if df is None or len(df) < window:
+        if df is None or len(df) < window + 1:
             return True
-        recent_candles = df.iloc[-window:]
+        
+        # Bỏ qua nến cuối cùng (chưa đóng)
+        recent_candles = df.iloc[-(window+1):-1]
+        
         good_candles_count = 0
-        for _, candle in recent_candles.iterrows():
+        debug_info = []
+        
+        for idx, (timestamp, candle) in enumerate(recent_candles.iterrows()):
             candle_range = candle['high'] - candle['low']
-            if candle_range == 0: continue
-            is_green = candle['close'] > candle['open']
-            closing_position_ratio = (candle['close'] - candle['low']) / candle_range
-            if is_green or closing_position_ratio > 0.6:
+            
+            if candle_range <= 0:
+                debug_info.append(f"Nến {idx+1}: SKIP (range=0)")
+                continue
+            
+            is_green = candle['close'] >= candle['open']
+            closing_position = (candle['close'] - candle['low']) / candle_range
+            
+            if is_green:
                 good_candles_count += 1
-        return good_candles_count >= required_candles
+                debug_info.append(f"Nến {idx+1}: ✅ XANH")
+            elif closing_position > 0.6:
+                good_candles_count += 1
+                debug_info.append(f"Nến {idx+1}: ✅ ĐỎ-TỐT (đóng {closing_position:.1%})")
+            else:
+                debug_info.append(f"Nến {idx+1}: ❌ ĐỎ-XẤU (đóng {closing_position:.1%})")
+        
+        # Debug log khi KHÔNG ĐẠT
+        passed = good_candles_count >= required_candles
+        if not passed:
+            log_message(f"⚠️ Momentum Filter - {symbol}-{interval}: {good_candles_count}/{required_candles} nến tốt")  # BỎ state
+            for info in debug_info:
+                log_message(f"     {info}")  # BỎ state
+        
+        return passed
+        
     except Exception as e:
         log_error(f"Lỗi trong is_momentum_confirmed cho {symbol}-{interval}", error_details=str(e))
         return True
+
 
 def determine_market_zone_with_scoring(symbol: str, interval: str) -> str:
     indicators = indicator_results.get(symbol, {}).get(interval, {})
@@ -1700,8 +1728,11 @@ def run_session():
             manage_dynamic_capital(state, bnc, current_equity)
             now_vn = datetime.now(VIETNAM_TZ)
             last_refresh_str = state.get("last_indicator_refresh")
-            is_heavy_task_time = not last_refresh_str or \
-                                 (now_vn - datetime.fromisoformat(last_refresh_str)).total_seconds() / 60 >= GENERAL_CONFIG["HEAVY_REFRESH_MINUTES"]
+            current_minute = now_vn.minute
+            safe_refresh_minutes = GENERAL_CONFIG["HEAVY_REFRESH_MINUTES"] - 1
+            is_heavy_task_time = (current_minute in [5, 20, 35, 50]) and \
+                     (not last_refresh_str or \
+                     (now_vn - datetime.fromisoformat(last_refresh_str)).total_seconds() / 60 >= safe_refresh_minutes)
             if is_heavy_task_time:
                 if not state.get('pending_trade_opportunity'):
                     run_heavy_tasks(bnc, state, available_usdt, total_usdt_at_start)
