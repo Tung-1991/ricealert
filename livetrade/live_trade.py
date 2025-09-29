@@ -2,17 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 Live Trade - The 4-Zone Strategy
-Version: 8.7.0 - Dynamic Capital Engine
-Date: 2025-08-04
+Version: 9.1.0 - Scalable Statistics Engine
+Date: 2025-09-29
+
+CHANGELOG (v9.1.0):
+- PERFORMANCE (Scalable Statistics): Replaced the on-the-fly calculation of trade history statistics with a persistent `trade_stats` object in the state file.
+  - This completely removes the 100-trade window limitation for statistics, allowing the bot to maintain accurate, long-term performance tracking over thousands of trades.
+  - Performance for generating reports is now instantaneous, regardless of the size of the trade history.
+- AUTOMATION (Auto-Initialization): The bot now automatically initializes the `trade_stats` object on its first run by reading the entire `live_trade_history.csv`. This makes the transition seamless and requires no manual intervention.
+- REFACTOR: Modified `close_trade_on_binance` to update the new `trade_stats` object in real-time.
+- REFACTOR: Modified `build_pnl_summary_line` to read directly from the `trade_stats` object for maximum efficiency.
+- REFACTOR: Modified `run_session` to include the one-time auto-initialization logic.
+
+CHANGELOG (v9.0.0):
+- FEATURE (Price Action Momentum): Integrated the PAM module to score short-term price action and volume, adjusting the final contextual score.
 
 CHANGELOG (v8.7.0):
-- FEATURE (Dynamic Capital Engine): Implemented a fully autonomous capital management system. The bot now automatically adjusts its core capital base (`initial_capital`) based on performance, eliminating the need for manual intervention.
-  - Auto-Compounding: When total equity grows beyond a configurable percentage (`AUTO_COMPOUND_THRESHOLD_PCT`) of the current capital base, the bot raises the capital base to reinvest profits and scale up position sizes.
-  - Auto-Deleveraging: Conversely, during a drawdown, if equity falls below a threshold (`AUTO_DELEVERAGE_THRESHOLD_PCT`), the bot reduces the capital base to decrease position sizes and preserve capital.
-  - Adjustment Cooldown: A cooldown period (`CAPITAL_ADJUSTMENT_COOLDOWN_HOURS`) prevents the capital base from changing too frequently, ensuring stability.
-- REFACTOR (Code Clarity): Centralized all capital adjustment logic (initial setup, deposit/withdrawal detection, and dynamic adjustments) into a new, clean helper function: `manage_dynamic_capital()`.
-- ROBUSTNESS (Equity Calculation): Optimized the main session loop to calculate total equity at the start of the session, ensuring that capital management decisions are based on the most timely and accurate data.
-- CONFIG: Added `AUTO_COMPOUND_THRESHOLD_PCT`, `AUTO_DELEVERAGE_THRESHOLD_PCT`, and `CAPITAL_ADJUSTMENT_COOLDOWN_HOURS` to GENERAL_CONFIG.
+- FEATURE (Dynamic Capital Engine): Implemented a fully autonomous capital management system.
 """
 import os
 import sys
@@ -136,7 +142,7 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
         "RESISTANCE_PROXIMITY_PCT": 0.015,
         "SUPPORT_PROXIMITY_PCT": 0.015
     },
-    
+
     # --- [NÂNG CẤP] PHÂN TÍCH BỐI CẢNH BB SQUEEZE ---
     "SQUEEZE_ANALYSIS": {
         "ENABLED": True,
@@ -153,6 +159,26 @@ EXTREME_ZONE_ADJUSTMENT_CONFIG = {
             "4h": { "BREAKOUT_CANDLE_ATR_RATIO": 2.5, "BREAKOUT_VOLUME_MA_RATIO": 3.0, "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.2, "EXHAUSTION_CANDLE_ATR_RATIO": 2.2, "EXHAUSTION_VOLUME_MA_RATIO": 3.5, "EXHAUSTION_BONUS_MULTIPLIER": 1.5 },
             "1d": { "BREAKOUT_CANDLE_ATR_RATIO": 2.0, "BREAKOUT_VOLUME_MA_RATIO": 2.5, "BREAKOUT_PENALTY_REDUCTION_COEFF": 0.1, "EXHAUSTION_CANDLE_ATR_RATIO": 2.0, "EXHAUSTION_VOLUME_MA_RATIO": 3.0, "EXHAUSTION_BONUS_MULTIPLIER": 1.6 }
         }
+    }
+}
+
+# --- PRICE ACTION MOMENTUM (PAM) ---
+PRICE_ACTION_MOMENTUM_CONFIG = {
+    "ENABLED": True,
+    "MAX_BONUS_COEFF": 1.10,
+    "MIN_PENALTY_COEFF": 0.95,
+
+    "SCORING_WEIGHTS": {
+        "CONSECUTIVE_GREENS": 0.30,
+        "PRICE_VS_MA": 0.25,
+        "VOLUME_SURGE": 0.25,
+        "HIGHER_LOWS": 0.20
+    },
+
+    "RULES_BY_TIMEFRAME": {
+        "1h": {"LOOKBACK_CANDLES": 10, "MIN_GREEN_STREAK": 3, "VOLUME_SURGE_RATIO": 1.5, "MIN_HIGHER_LOWS": 5},
+        "4h": {"LOOKBACK_CANDLES": 8, "MIN_GREEN_STREAK": 3, "VOLUME_SURGE_RATIO": 1.3, "MIN_HIGHER_LOWS": 4},
+        "1d": {"LOOKBACK_CANDLES": 6, "MIN_GREEN_STREAK": 2, "VOLUME_SURGE_RATIO": 1.2, "MIN_HIGHER_LOWS": 3}
     }
 }
 
@@ -248,7 +274,8 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 1.1,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
-        "USE_EXTREME_ZONE_FILTER": True
+        "USE_EXTREME_ZONE_FILTER": True,
+        "USE_PRICE_ACTION_MOMENTUM": True,
     },
     # == TACTIC 2: Kẻ Săn Mồi Bùng Nổ ==
     "Breakout_Hunter": {
@@ -261,7 +288,8 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,                      # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
-        "USE_EXTREME_ZONE_FILTER": False
+        "USE_EXTREME_ZONE_FILTER": False,
+        "USE_PRICE_ACTION_MOMENTUM": True,
     },
     # == TACTIC 3: Bậc Thầy Bắt Sóng Hồi ==
     "Dip_Hunter": {
@@ -274,7 +302,8 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": False,                        # [LOGIC] - Không kéo SL vì dễ bị quét khi giá hồi.
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
         "USE_MOMENTUM_FILTER": False,                     # [LOGIC] - Khi bắt đáy, động lượng thường đang yếu.
-        "USE_EXTREME_ZONE_FILTER": True
+        "USE_EXTREME_ZONE_FILTER": True,
+        "USE_PRICE_ACTION_MOMENTUM": True,
     },
     # == TACTIC 4: Chuyên Gia Chớp Nhoáng ==
     "AI_Aggressor": {
@@ -287,7 +316,8 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.1, "TRAIL_DISTANCE_RR": 0.7,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6,
         "USE_MOMENTUM_FILTER": True,
-        "USE_EXTREME_ZONE_FILTER": False
+        "USE_EXTREME_ZONE_FILTER": False,
+        "USE_PRICE_ACTION_MOMENTUM": True,
     },
     # == TACTIC 5: Tay Bắn Tỉa ==
     "Cautious_Observer": {
@@ -300,7 +330,8 @@ TACTICS_LAB = {
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.8,
         "USE_MOMENTUM_FILTER": True,
-        "USE_EXTREME_ZONE_FILTER": True
+        "USE_EXTREME_ZONE_FILTER": True,
+        "USE_PRICE_ACTION_MOMENTUM": True,
     },
 }
 
@@ -446,7 +477,7 @@ def get_usdt_fund(bnc: BinanceConnector) -> Tuple[float, float]:
 def get_current_pnl(trade: Dict, realtime_price: Optional[float] = None) -> Tuple[float, float]:
     entry_price = trade.get('entry_price', 0) # Lấy giá entry ra biến riêng
     if not (trade and entry_price > 0 and realtime_price and realtime_price > 0): return 0.0, 0.0 # Kiểm tra entry_price > 0 là đủ
-    
+
     pnl_multiplier = 1.0
     pnl_percent = (realtime_price - entry_price) / entry_price * 100 * pnl_multiplier
     pnl_usd = trade.get('total_invested_usd', 0.0) * (pnl_percent / 100)
@@ -621,6 +652,21 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
         state['active_trades'] = [t for t in state['active_trades'] if t['trade_id'] != trade['trade_id']]
         state['trade_history'].append(trade)
         state['trade_history'] = state['trade_history'][-100:]
+
+        # --- [BẮT ĐẦU] CẬP NHẬT THỐNG KÊ GIAO DỊCH ---
+        stats = state.setdefault('trade_stats', {
+            "total_trades_closed": 0, "winning_trades": 0, "total_pnl_usd": 0.0,
+            "total_win_pnl_usd": 0.0, "total_loss_pnl_usd": 0.0
+        })
+        stats['total_trades_closed'] += 1
+        stats['total_pnl_usd'] += total_final_pnl_usd
+        if total_final_pnl_usd > 0:
+            stats['winning_trades'] += 1
+            stats['total_win_pnl_usd'] += total_final_pnl_usd
+        else:
+            stats['total_loss_pnl_usd'] += total_final_pnl_usd
+        # --- [KẾT THÚC] CẬP NHẬT THỐNG KÊ GIAO DỊCH ---
+
         trade_interval = trade.get('interval', '1h')
         cooldown_dict = state.setdefault('cooldown_until', {})
         symbol_cooldowns = cooldown_dict.setdefault(symbol, {})
@@ -801,32 +847,32 @@ def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -
     config = GENERAL_CONFIG.get("MOMENTUM_FILTER_CONFIG", {})
     if not config.get("ENABLED", False):
         return True
-    
+
     rules = config.get("RULES_BY_TIMEFRAME", {}).get(interval, {"WINDOW": 3, "REQUIRED_CANDLES": 2})
     window = rules.get("WINDOW", 3)
     required_candles = rules.get("REQUIRED_CANDLES", 2)
-    
+
     try:
         df = price_dataframes.get(symbol, {}).get(interval)
         if df is None or len(df) < window + 1:
             return True
-        
+
         # Bỏ qua nến cuối cùng (chưa đóng)
         recent_candles = df.iloc[-(window+1):-1]
-        
+
         good_candles_count = 0
         debug_info = []
-        
+
         for idx, (timestamp, candle) in enumerate(recent_candles.iterrows()):
             candle_range = candle['high'] - candle['low']
-            
+
             if candle_range <= 0:
                 debug_info.append(f"Nến {idx+1}: SKIP (range=0)")
                 continue
-            
+
             is_green = candle['close'] >= candle['open']
             closing_position = (candle['close'] - candle['low']) / candle_range
-            
+
             if is_green:
                 good_candles_count += 1
                 debug_info.append(f"Nến {idx+1}: ✅ XANH")
@@ -835,16 +881,16 @@ def is_momentum_confirmed(symbol: str, interval: str, direction: str = "LONG") -
                 debug_info.append(f"Nến {idx+1}: ✅ ĐỎ-TỐT (đóng {closing_position:.1%})")
             else:
                 debug_info.append(f"Nến {idx+1}: ❌ ĐỎ-XẤU (đóng {closing_position:.1%})")
-        
+
         # Debug log khi KHÔNG ĐẠT
         passed = good_candles_count >= required_candles
         if not passed:
             log_message(f"⚠️ Momentum Filter - {symbol}-{interval}: {good_candles_count}/{required_candles} nến tốt")  # BỎ state
             for info in debug_info:
                 log_message(f"     {info}")  # BỎ state
-        
+
         return passed
-        
+
     except Exception as e:
         log_error(f"Lỗi trong is_momentum_confirmed cho {symbol}-{interval}", error_details=str(e))
         return True
@@ -910,7 +956,11 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
                     if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
                         ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, interval)
 
-                    contextual_score = raw_score * mtf_coeff * ez_coeff
+                    pam_coeff = 1.0
+                    if tactic_cfg.get("USE_PRICE_ACTION_MOMENTUM", False):
+                        pam_coeff = get_price_action_momentum_coefficient(symbol, interval)
+
+                    contextual_score = raw_score * mtf_coeff * ez_coeff * pam_coeff
 
                     if is_in_cooldown:
                         if contextual_score >= GENERAL_CONFIG["OVERRIDE_COOLDOWN_SCORE"]:
@@ -945,11 +995,15 @@ def find_and_open_new_trades(bnc: BinanceConnector, state: Dict, available_usdt:
         if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False) and indicators_log:
             ez_log_coeff = get_extreme_zone_adjustment_coefficient(indicators_log, opportunity['interval'])
 
+        pam_log_coeff = 1.0
+        if tactic_cfg.get("USE_PRICE_ACTION_MOMENTUM", False):
+            pam_log_coeff = get_price_action_momentum_coefficient(opportunity['symbol'], opportunity['interval'])
+
         # Dòng log chính
         log_message(f"  #{i+1}: {opportunity['symbol']}-{opportunity['interval']} | Tactic: {tactic_name} | Gốc: {raw_score_val:.2f} | Bối cảnh: {score:.2f} (Ngưỡng: {entry_score_threshold})", state=state)
-        # Dòng log chi tiết (GIỮ LẠI)
-        if mtf_log_coeff != 1.0 or ez_log_coeff != 1.0:
-            log_message(f"      Chi tiết điều chỉnh: [MTF: x{mtf_log_coeff:.2f}] [Vùng Cực đoan: x{ez_log_coeff:.2f}]", state)
+        # Dòng log chi tiết
+        if mtf_log_coeff != 1.0 or ez_log_coeff != 1.0 or pam_log_coeff != 1.0:
+            log_message(f"      Chi tiết điều chỉnh: [MTF: x{mtf_log_coeff:.2f}] [EZ: x{ez_log_coeff:.2f}] [PAM: x{pam_log_coeff:.2f}]", state)
 
         if score >= entry_score_threshold:
             if not tactic_cfg.get("USE_MOMENTUM_FILTER", False):
@@ -1001,7 +1055,7 @@ def execute_trade_opportunity(bnc: BinanceConnector, state: Dict, available_usdt
     if sl_risk_dist < min_sl_dist:
         log_message(f"  ... 🛡️ SL theo ATR ({risk_dist_from_atr:.4f}) nhỏ hơn 'khiên' ({min_sl_dist:.4f}). Đặt theo 'khiên'.", state=state)
         sl_risk_dist = min_sl_dist
-    
+
     if sl_risk_dist > max_sl_dist:
         log_message(f"  ... 🛑 SL ({sl_risk_dist:.4f}) quá rộng. Đặt theo Trần an toàn: {max_sl_dist:.4f}", state=state)
         sl_risk_dist = max_sl_dist
@@ -1183,7 +1237,7 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
             volume = indicators.get("volume", 0)
             volume_ma = indicators.get("vol_ma20", 0)
             candle_body_size = indicators.get("candle_body_size", 0)
-            
+
             if atr > 1e-8 and volume_ma > 1:
                 # Kịch bản 1: Giảm phạt nếu có breakout mạnh
                 if penalty_score > 0 and indicators.get("closed_candle_price", 0) > indicators.get("open", 0):
@@ -1225,6 +1279,56 @@ def get_extreme_zone_adjustment_coefficient(indicators: Dict, interval: str) -> 
     max_coeff = cfg.get("MAX_BONUS_COEFF", 1.15) # Sử dụng trần mới là 1.15
 
     return max(min_coeff, min(calculated_coeff, max_coeff))
+
+def get_price_action_momentum_coefficient(symbol: str, interval: str) -> float:
+    cfg = PRICE_ACTION_MOMENTUM_CONFIG
+    if not cfg.get("ENABLED", False):
+        return 1.0
+
+    df = price_dataframes.get(symbol, {}).get(interval)
+    if df is None or len(df) < 20:
+        return 1.0
+
+    rules = cfg.get("RULES_BY_TIMEFRAME", {}).get(interval)
+    if not rules:
+        return 1.0
+
+    weights = cfg.get("SCORING_WEIGHTS", {})
+    lookback = rules.get("LOOKBACK_CANDLES", 10)
+    recent = df.tail(lookback)
+
+    momentum_score = 0.0
+
+    green_candles = (recent.tail(5)['close'] > recent.tail(5)['open']).sum()
+    if green_candles >= rules.get("MIN_GREEN_STREAK", 3):
+        momentum_score += weights.get("CONSECUTIVE_GREENS", 0.3)
+
+    if 'ema_20' in recent.columns:
+        above_ma_ratio = (recent['close'] > recent['ema_20']).sum() / len(recent)
+        momentum_score += weights.get("PRICE_VS_MA", 0.25) * above_ma_ratio
+
+    if 'volume' in df.columns and len(df) > 20:
+        recent_vol = recent.tail(5)['volume'].mean()
+        baseline_vol = df.tail(20).head(15)['volume'].mean()
+        if baseline_vol > 0 and recent_vol > baseline_vol * rules.get("VOLUME_SURGE_RATIO", 1.5):
+            momentum_score += weights.get("VOLUME_SURGE", 0.25)
+
+    lows = recent['low'].values
+    higher_lows = sum(lows[i] >= lows[i-1] for i in range(1, len(lows)))
+    if higher_lows >= rules.get("MIN_HIGHER_LOWS", 5):
+        momentum_score += weights.get("HIGHER_LOWS", 0.2)
+
+    if momentum_score >= 0.7:
+        coeff = 1.0 + (momentum_score * 0.12)
+    elif momentum_score <= 0.2:
+        coeff = 0.97
+    else:
+        coeff = 1.0
+
+    max_coeff = cfg.get("MAX_BONUS_COEFF", 1.12)
+    min_coeff = cfg.get("MIN_PENALTY_COEFF", 0.97)
+
+    return max(min_coeff, min(coeff, max_coeff))
 
 # ==============================================================================
 # ==================== ĐỘNG CƠ VỐN NĂNG ĐỘNG (v8.6.1) =======================
@@ -1300,40 +1404,32 @@ def build_report_header(state: Dict, equity: float, total_usdt: float, available
             f"📊 Tổng TS: **${equity:,.2f}** | 📈 PnL Tổng: {pnl_icon} **${pnl_since_start:,.2f} ({pnl_percent:+.2f}%)**")
 
 def build_pnl_summary_line(state: Dict, realtime_prices: Dict[str, float]) -> str:
-    trade_history = state.get('trade_history', [])
-    total_pnl_closed, win_rate_str, avg_win_str, avg_loss_str = 0.0, "N/A", "$0.00", "$0.00"
-    if trade_history:
-        # Lọc ra các lệnh đã đóng hoàn toàn và có pnl_usd để tính toán thống kê
-        closed_trades_df = pd.DataFrame([t for t in trade_history if 'Closed' in t.get('status', '') and pd.notna(t.get('pnl_usd'))])
-        if not closed_trades_df.empty:
-            total_trades = len(closed_trades_df)
-            winning_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] > 0]
-            num_wins = len(winning_trades_df)
-            win_rate_str = f"{num_wins / total_trades * 100:.2f}% ({num_wins}/{total_trades})" if total_trades > 0 else "N/A"
-            total_pnl_closed = closed_trades_df['pnl_usd'].sum()
-            if num_wins > 0: avg_win_str = f"${winning_trades_df['pnl_usd'].mean():,.2f}"
-            losing_trades_df = closed_trades_df[closed_trades_df['pnl_usd'] <= 0]
-            if not losing_trades_df.empty: avg_loss_str = f"${losing_trades_df['pnl_usd'].mean():,.2f}"
+    stats = state.get('trade_stats', {})
 
+    total_trades = stats.get('total_trades_closed', 0)
+    num_wins = stats.get('winning_trades', 0)
+    num_losses = total_trades - num_wins
+
+    win_rate_str = f"{num_wins / total_trades * 100:.2f}% ({num_wins}/{total_trades})" if total_trades > 0 else "N/A"
+    total_pnl_closed = stats.get('total_pnl_usd', 0.0)
+    avg_win_str = f"${stats.get('total_win_pnl_usd', 0.0) / num_wins:,.2f}" if num_wins > 0 else "$0.00"
+    avg_loss_str = f"${stats.get('total_loss_pnl_usd', 0.0) / num_losses:,.2f}" if num_losses > 0 else "$0.00"
+
+    # Phần tính PnL chốt lời một phần vẫn giữ nguyên vì nó là động
     total_tp1_pnl, total_pp_pnl = 0.0, 0.0
-    # *** FIX: Duyệt qua cả lệnh đang mở và lệnh trong lịch sử để tính PnL từ partial close ***
     all_trades_for_partials = state.get('active_trades', []) + state.get('trade_history', [])
     for t in all_trades_for_partials:
-        # Ưu tiên cấu trúc mới 'partial_pnl_details'
         if 'partial_pnl_details' in t and isinstance(t.get('partial_pnl_details'), dict):
             details = t['partial_pnl_details']
             total_tp1_pnl += details.get('TP1', 0.0)
             total_pp_pnl += details.get('PP', 0.0)
-        # Hỗ trợ cấu trúc cũ cho các lệnh cũ hơn
-        elif 'realized_pnl_usd' in t:
-             if t.get('tp1_hit'): total_tp1_pnl += t.get('realized_pnl_usd', 0.0)
-             elif t.get('profit_taken'): total_pp_pnl += t.get('realized_pnl_usd', 0.0)
 
     unrealized_pnl = sum(get_current_pnl(trade, realtime_price=realtime_prices.get(trade['symbol']))[0] for trade in state.get('active_trades', []))
+
     pnl_line_1 = f"🏆 Win Rate: **{win_rate_str}** | ✅ PnL Đóng: **${total_pnl_closed:,.2f}** | 📈 PnL Mở: **{'+' if unrealized_pnl >= 0 else ''}${unrealized_pnl:,.2f}**"
     pnl_line_2 = f"🎯 AVG Lãi: **{avg_win_str}** | 🛡️ AVG Lỗ: **{avg_loss_str}** | 💎 PnL TP1: **${total_tp1_pnl:,.2f}** | 🛡️ PnL PP: **${total_pp_pnl:,.2f}**"
-    return f"{pnl_line_1}\n{pnl_line_2}"
 
+    return f"{pnl_line_1}\n{pnl_line_2}"
 
 def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     pnl_usd, pnl_pct = get_current_pnl(trade, realtime_price=realtime_price)
@@ -1628,12 +1724,19 @@ def run_heavy_tasks(bnc: BinanceConnector, state: Dict, available_usdt: float, t
             decision = get_advisor_decision(trade['symbol'], trade['interval'], indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
             raw_score = decision.get("final_score", 0.0)
             mtf_coeff = get_mtf_adjustment_coefficient(trade['symbol'], trade['interval'])
+
             ez_coeff = 1.0
             if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
                 ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, trade['interval'])
-            contextual_score = raw_score * mtf_coeff * ez_coeff
+
+            pam_coeff = 1.0
+            if tactic_cfg.get("USE_PRICE_ACTION_MOMENTUM", False):
+                pam_coeff = get_price_action_momentum_coefficient(trade['symbol'], trade['interval'])
+
+            contextual_score = raw_score * mtf_coeff * ez_coeff * pam_coeff
+
             if trade.get('last_score') is not None and contextual_score != trade.get('last_score'):
-                 log_message(f"  (i) Cập nhật điểm {trade['symbol']}-{trade['interval']}: {trade.get('last_score', 0.0):.2f} -> {contextual_score:.2f} (Gốc: {raw_score:.2f}, MTF: x{mtf_coeff:.2f}, EZ: x{ez_coeff:.2f})", state)
+                 log_message(f"  (i) Cập nhật điểm {trade['symbol']}-{trade['interval']}: {trade.get('last_score', 0.0):.2f} -> {contextual_score:.2f} (Gốc: {raw_score:.2f}, MTF: x{mtf_coeff:.2f}, EZ: x{ez_coeff:.2f}, PAM: x{pam_coeff:.2f})", state)
             trade['last_score'] = contextual_score
             trade['last_zone'] = determine_market_zone_with_scoring(trade['symbol'], trade['interval'])
     find_and_open_new_trades(bnc, state, available_usdt, total_usdt)
@@ -1693,7 +1796,7 @@ def reconcile_positions_with_binance(bnc: BinanceConnector, state: Dict):
                         state['orphan_asset_alerts'][asset_code] = now.isoformat()
 
 # ==============================================================================
-# ==================== VÒNG LẶP CHÍNH (v8.6.1) =================================
+# ==================== VÒNG LẶP CHÍNH =================================
 # ==============================================================================
 def run_session():
     if not acquire_lock():
@@ -1708,6 +1811,37 @@ def run_session():
                 "active_trades": [], "trade_history": [], "initial_capital": 0.0,
                 "money_spent_on_trades_last_session": 0.0, "pnl_closed_last_session": 0.0
             })
+
+            # --- [BẮT ĐẦU] TỰ ĐỘNG KHỞI TẠO THỐNG KÊ (NẾU CẦN) ---
+            if 'trade_stats' not in state:
+                log_message("⚠️ Không tìm thấy 'trade_stats'. Đang khởi tạo từ file CSV...", state=state)
+                try:
+                    if os.path.exists(TRADE_HISTORY_CSV_FILE) and os.path.getsize(TRADE_HISTORY_CSV_FILE) > 0:
+                        df = pd.read_csv(TRADE_HISTORY_CSV_FILE)
+                        df_closed = df[df['status'].str.contains('Closed', na=False) & pd.to_numeric(df['pnl_usd'], errors='coerce').notna()].copy()
+                        df_closed['pnl_usd'] = pd.to_numeric(df_closed['pnl_usd'])
+
+                        wins_df = df_closed[df_closed['pnl_usd'] > 0]
+                        losses_df = df_closed[df_closed['pnl_usd'] <= 0]
+
+                        state['trade_stats'] = {
+                            "total_trades_closed": len(df_closed),
+                            "winning_trades": len(wins_df),
+                            "total_pnl_usd": df_closed['pnl_usd'].sum(),
+                            "total_win_pnl_usd": wins_df['pnl_usd'].sum(),
+                            "total_loss_pnl_usd": losses_df['pnl_usd'].sum()
+                        }
+                        log_message(f"✅ Đã khởi tạo thành công 'trade_stats' với {len(df_closed)} lệnh.", state=state)
+                    else:
+                        raise FileNotFoundError("File CSV không tồn tại hoặc trống.")
+                except Exception as e:
+                    log_error(f"Lỗi khi khởi tạo 'trade_stats' từ CSV: {e}. Sẽ bắt đầu với số liệu bằng 0.", state=state)
+                    state['trade_stats'] = {
+                        "total_trades_closed": 0, "winning_trades": 0, "total_pnl_usd": 0.0,
+                        "total_win_pnl_usd": 0.0, "total_loss_pnl_usd": 0.0
+                    }
+            # --- [KẾT THÚC] TỰ ĐỘNG KHỞI TẠO THỐNG KÊ ---
+
             state['temp_newly_opened_trades'], state['temp_newly_closed_trades'] = [], []
             state['temp_money_spent_on_trades'], state['temp_pnl_from_closed_trades'] = 0.0, 0.0
             state['session_has_events'] = False
@@ -1800,3 +1934,4 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
+

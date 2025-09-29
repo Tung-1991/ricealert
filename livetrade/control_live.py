@@ -21,6 +21,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 sys.path.append(PROJECT_ROOT)
 
+
 try:
     from binance_connector import BinanceConnector
     from indicator import calculate_indicators
@@ -30,6 +31,7 @@ try:
         calculate_total_equity, build_dynamic_alert_text, build_daily_summary_text,
         send_discord_message_chunks, ALERT_CONFIG,
         determine_market_zone_with_scoring, get_mtf_adjustment_coefficient,
+        get_price_action_momentum_coefficient, # <<< THÊM DÒNG NÀY VÀO
         indicator_results, price_dataframes,
         get_price_data_with_cache,
         close_trade_on_binance,
@@ -224,7 +226,7 @@ def show_full_dashboard(bnc: BinanceConnector):
             print("... Đang lấy giá real-time...", end="\r", flush=True)
             realtime_price = get_current_price(symbol)
             price_str = format_price_dynamically(realtime_price).replace("$", "") if realtime_price else "Không lấy được"
-            print(f"  Giá hiện tại (Live): ${price_str}   ")
+            print(f"  Giá hiện tại (Live): ${price_str}      ")
 
             for interval in ["1h", "4h", "1d"]:
                 indicators = indicator_results.get(symbol, {}).get(interval)
@@ -234,7 +236,7 @@ def show_full_dashboard(bnc: BinanceConnector):
 
                 zone = determine_market_zone_with_scoring(symbol, interval)
                 best_raw_score, best_final_score, best_tactic, entry_threshold = 0, 0, "N/A", "N/A"
-                final_mtf_coeff, final_ez_coeff = 1.0, 1.0
+                final_mtf_coeff, final_ez_coeff, final_pam_coeff = 1.0, 1.0, 1.0
 
                 for tactic_name, tactic_cfg in TACTICS_LAB.items():
                     optimal_zones = tactic_cfg.get("OPTIMAL_ZONE", [])
@@ -244,26 +246,34 @@ def show_full_dashboard(bnc: BinanceConnector):
                         decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG, weights_override=tactic_cfg.get("WEIGHTS"))
                         raw_score = decision.get("final_score", 0.0)
                         mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
+                        
                         ez_coeff = 1.0
                         if tactic_cfg.get("USE_EXTREME_ZONE_FILTER", False):
                             ez_coeff = get_extreme_zone_adjustment_coefficient(indicators, interval)
-                        final_score = raw_score * mtf_coeff * ez_coeff
+                        
+                        pam_coeff = 1.0
+                        if tactic_cfg.get("USE_PRICE_ACTION_MOMENTUM", True):
+                             pam_coeff = get_price_action_momentum_coefficient(symbol, interval)
+
+                        final_score = raw_score * mtf_coeff * ez_coeff * pam_coeff
+                        
                         if final_score > best_final_score:
                             best_raw_score, best_final_score, best_tactic = raw_score, final_score, tactic_name
                             entry_threshold = tactic_cfg.get("ENTRY_SCORE", "N/A")
-                            final_mtf_coeff, final_ez_coeff = mtf_coeff, ez_coeff
+                            final_mtf_coeff, final_ez_coeff, final_pam_coeff = mtf_coeff, ez_coeff, pam_coeff
 
                 if best_raw_score == 0:
                     decision = get_advisor_decision(symbol, interval, indicators, ADVISOR_BASE_CONFIG)
                     best_raw_score = decision.get("final_score", 0.0)
                     final_mtf_coeff = get_mtf_adjustment_coefficient(symbol, interval)
-                    final_ez_coeff = 1.0
-                    best_final_score = best_raw_score * final_mtf_coeff * final_ez_coeff
+                    final_ez_coeff = 1.0 # Default tactic doesn't use EZ
+                    final_pam_coeff = get_price_action_momentum_coefficient(symbol, interval)
+                    best_final_score = best_raw_score * final_mtf_coeff * final_ez_coeff * final_pam_coeff
                     best_tactic = "Default"
 
                 is_strong_signal = isinstance(entry_threshold, (int, float)) and best_final_score >= entry_threshold
                 icon = "🟢" if is_strong_signal else ("🟡" if best_final_score >= 5.5 else "🔴")
-                adjustment_display = f"MTF x{final_mtf_coeff:.2f} EZ x{final_ez_coeff:.2f}"
+                adjustment_display = f"MTF x{final_mtf_coeff:.2f} EZ x{final_ez_coeff:.2f} PAM x{final_pam_coeff:.2f}"
                 score_display = f"Gốc: {best_raw_score:.2f} | Cuối: {best_final_score:.2f} ({adjustment_display})"
                 print(f"  {icon} [{interval}]: Zone: {zone.ljust(10)} | {score_display} | Tactic: {best_tactic} (Ngưỡng: {entry_threshold})")
     print("="*80)
