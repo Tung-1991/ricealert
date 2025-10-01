@@ -1,0 +1,1 @@
+echo "trade_id,symbol,interval,status,opened_by_tactic,tactic_used,trade_type,entry_price,exit_price,tp,sl,initial_sl,total_invested_usd,pnl_usd,pnl_percent,entry_time,exit_time,holding_duration_hours,entry_score,last_score,dca_entries,partial_pnl_details,realized_pnl_usd,binance_market_order_id,entry_zone,last_zone,initial_entry" > live_trade_history.csv
