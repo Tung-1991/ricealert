@@ -255,7 +255,7 @@ ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 # --- QUẢN LÝ VỐN THEO VÙNG ---
 ZONE_BASED_POLICIES = {
     # Giảm nhẹ vốn trên mỗi lệnh để quản lý rủi ro tốt hơn khi SL rộng hơn.
-    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.05},
+    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.04},
     COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.05},
     LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.06},
     NOISE_ZONE: {"NOTES": "Nguy hiểm, vốn siêu nhỏ.", "CAPITAL_PCT": 0.03}
