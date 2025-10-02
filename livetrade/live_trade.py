@@ -184,8 +184,8 @@ PRICE_ACTION_MOMENTUM_CONFIG = {
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
-    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.5,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.25,      # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.0,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.30,      # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,             # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     "PROFIT_PROTECTION": {
         "ENABLED": True,                      # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
@@ -255,10 +255,10 @@ ZONES = [LEADING_ZONE, COINCIDENT_ZONE, LAGGING_ZONE, NOISE_ZONE]
 # --- QUẢN LÝ VỐN THEO VÙNG ---
 ZONE_BASED_POLICIES = {
     # Giảm nhẹ vốn trên mỗi lệnh để quản lý rủi ro tốt hơn khi SL rộng hơn.
-    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.025},
-    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.040},
-    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.035},
-    NOISE_ZONE: {"NOTES": "Nguy hiểm, vốn siêu nhỏ.", "CAPITAL_PCT": 0.020}
+    LEADING_ZONE: {"NOTES": "Dò mìn cơ hội tiềm năng.", "CAPITAL_PCT": 0.05},
+    COINCIDENT_ZONE: {"NOTES": "Vùng tốt nhất, quyết đoán vào lệnh.", "CAPITAL_PCT": 0.05},
+    LAGGING_ZONE: {"NOTES": "An toàn, đi theo trend đã rõ.", "CAPITAL_PCT": 0.06},
+    NOISE_ZONE: {"NOTES": "Nguy hiểm, vốn siêu nhỏ.", "CAPITAL_PCT": 0.03}
 }
 
 # --- PHÒNG THÍ NGHIỆM CHIẾN THUẬT (TACTICS LAB) ---
@@ -269,7 +269,7 @@ TACTICS_LAB = {
         "NOTES": "Chiến binh SWING TRADE chủ lực. Vào lệnh sớm hơn, gồng lệnh lì đòn qua các đợt điều chỉnh.",
         "WEIGHTS": {'tech': 0.4, 'context': 0.2, 'ai': 0.4},
         "ENTRY_SCORE": 6.5,                         # [NỚI LỎNG] - Chấp nhận tín hiệu sớm hơn vì hệ thống phòng thủ đã mạnh.
-        "RR": 2.0,                                  # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
+        "RR": 2.2,                                  # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
         "ATR_SL_MULTIPLIER": 2.5,                   # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 1.1,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
@@ -283,7 +283,7 @@ TACTICS_LAB = {
         "NOTES": "Chuyên săn các điểm PHÁ VỠ đã được xác nhận. SL rộng để sống sót qua cú retest.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.1, 'ai': 0.3},
         "ENTRY_SCORE": 7.0,                         # [NỚI LỎNG] - Vào lệnh ngay khi breakout vừa xảy ra, không cần đợi quá lâu.
-        "RR": 2.5,                                  # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
+        "RR": 2.8,                                  # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
         "ATR_SL_MULTIPLIER": 2.4,                   # [CHỊU ĐÒN] - SL đủ rộng để không bị cú retest đá ra khỏi lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
@@ -297,7 +297,7 @@ TACTICS_LAB = {
         "NOTES": "Bắt đáy/sóng hồi với một cái lưới an toàn CỰC RỘNG. Ăn nhanh, thoát nhanh.",
         "WEIGHTS": {'tech': 0.5, 'context': 0.2, 'ai': 0.3},
         "ENTRY_SCORE": 6.8,                         # [NỚI LỎNG] - Chấp nhận tín hiệu bắt đáy chưa hoàn hảo.
-        "RR": 1.5,                                  # [AN TOÀN] - Bắt đáy rủi ro, không nên tham lam.
+        "RR": 1.8,                                  # [AN TOÀN] - Bắt đáy rủi ro, không nên tham lam.
         "ATR_SL_MULTIPLIER": 3.2,                   # [CHỊU ĐÒN] - "Lưới an toàn" dày nhất, cho phép giá quét sâu trước khi đảo chiều.
         "USE_TRAILING_SL": False,                   # [LOGIC] - Không kéo SL vì dễ bị quét khi giá hồi.
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
@@ -311,7 +311,7 @@ TACTICS_LAB = {
         "NOTES": "Chuyên gia chớp nhoáng: Tận dụng điểm AI siêu cao để vào nhanh, ăn ngắn, thoát nhanh.",
         "WEIGHTS": {'tech': 0.3, 'context': 0.1, 'ai': 0.6},
         "ENTRY_SCORE": 6.8,                         # [SIẾT CHẶT] - Đã dựa vào AI thì tín hiệu phải thực sự xuất sắc.
-        "RR": 1.8,                                  # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
+        "RR": 2.0,                                  # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
         "ATR_SL_MULTIPLIER": 2.2,                   # [CHIẾN LƯỢC] - SL chặt hơn, phù hợp với việc đánh nhanh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.1, "TRAIL_DISTANCE_RR": 0.7,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6,
@@ -325,7 +325,7 @@ TACTICS_LAB = {
         "NOTES": "Bắn tỉa cơ hội VÀNG trong vùng nhiễu. SL chặt, ăn nhanh, sai là cắt.",
         "WEIGHTS": {'tech': 0.6, 'context': 0.2, 'ai': 0.2},
         "ENTRY_SCORE": 7.5,                         # [SIẾT CHẶT] - Ngưỡng CỰC CAO để giao dịch an toàn trong vùng nguy hiểm.
-        "RR": 1.5,                                  # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
+        "RR": 2.0,                                  # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
         "ATR_SL_MULTIPLIER": 1.8,                   # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
         "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.8,
