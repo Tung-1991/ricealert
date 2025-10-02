@@ -187,11 +187,26 @@ ACTIVE_TRADE_MANAGEMENT_CONFIG = {
     "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.0,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
     "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.30,      # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,             # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
+    # ----- [NÂNG CẤP] LƯỚI AN TOÀN THÍCH ỨNG THEO KHUNG THỜI GIAN -----
     "PROFIT_PROTECTION": {
-        "ENABLED": True,                      # [Bảo vệ lãi] - Bật tính năng khóa một phần lợi nhuận.
-        "MIN_PEAK_PNL_TRIGGER": 4.5,            # [Kích hoạt] - Khi lãi đạt 4.5% thì bắt đầu canh chừng.
-        "PNL_DROP_TRIGGER_PCT": 2.0,            # [Hành động] - Nếu lãi sụt 2.0% từ đỉnh, bán một phần để bảo vệ thành quả.
-        "PARTIAL_CLOSE_PCT": 0.5              # [Tỷ lệ] - Bán 50% để khóa lợi nhuận.
+        "ENABLED": True,
+        "PARTIAL_CLOSE_PCT": 0.6, # Dùng chung tỷ lệ chốt lời
+
+        # Cấu hình cho trade lướt sóng ngắn (nhạy cảm)
+        "1h": {
+            "MIN_PEAK_PNL_TRIGGER": 1.5,
+            "PNL_DROP_TRIGGER_PCT": 0.75
+        },
+        # Cấu hình cho swing trade (kiên nhẫn hơn)
+        "4h": {
+            "MIN_PEAK_PNL_TRIGGER": 3.0,
+            "PNL_DROP_TRIGGER_PCT": 1.5
+        },
+        # Cấu hình cho position trade (rất kiên nhẫn)
+        "1d": {
+            "MIN_PEAK_PNL_TRIGGER": 5.0,
+            "PNL_DROP_TRIGGER_PCT": 3.0
+        }
     }
 }
 
@@ -666,7 +681,7 @@ def close_trade_on_binance(bnc: BinanceConnector, trade: Dict, reason: str, stat
             stats['total_win_pnl_usd'] += total_final_pnl_usd
         else:
             stats['total_loss_pnl_usd'] += total_final_pnl_usd
-        
+
         # Cập nhật PnL từ chốt lời một phần vào thống kê tổng
         if 'partial_pnl_details' in trade and isinstance(trade.get('partial_pnl_details'), dict):
              partial_details = trade['partial_pnl_details']
@@ -750,17 +765,26 @@ def check_and_manage_open_positions(bnc: BinanceConnector, state: Dict, realtime
                 if close_trade_on_binance(bnc, trade, f"TP1_{tactic_cfg.get('TP1_RR_RATIO', 1.0):.1f}R", state, close_pct=close_pct):
                     trade['tp1_hit'] = True
                     if close_pct < 1.0: trade['sl'] = trade['entry_price']
-        pp_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PROFIT_PROTECTION", {})
-        if pp_config.get("ENABLED", False) and not trade.get('profit_taken', False) and trade['peak_pnl_percent'] >= pp_config.get("MIN_PEAK_PNL_TRIGGER", 3.5):
-            if (trade['peak_pnl_percent'] - pnl_percent) >= pp_config.get("PNL_DROP_TRIGGER_PCT", 2.0):
-                close_pct = pp_config.get("PARTIAL_CLOSE_PCT", 0.7)
-                remaining_value = (trade.get('quantity', 0) * (1 - close_pct)) * current_price
-                if remaining_value < min_order_value:
-                    log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau Profit-Protect quá nhỏ. Đóng toàn bộ.", state)
-                    close_pct = 1.0
-                if close_trade_on_binance(bnc, trade, "Protect_Profit", state, close_pct=close_pct):
-                    trade['profit_taken'] = True
-                    if close_pct < 1.0: trade['sl'] = trade['entry_price']
+        pp_base_config = ACTIVE_TRADE_MANAGEMENT_CONFIG.get("PROFIT_PROTECTION", {})
+        trade_interval = trade.get('interval', '1h')
+        # Lấy cấu hình theo timeframe, nếu không có thì dùng cấu hình mặc định (nếu có)
+        pp_config_for_tf = pp_base_config.get(trade_interval, {})
+
+        # Chỉ chạy nếu tính năng được bật VÀ có cấu hình cho timeframe này
+        if pp_base_config.get("ENABLED", False) and pp_config_for_tf and not trade.get('profit_taken', False):
+            min_peak_trigger = pp_config_for_tf.get("MIN_PEAK_PNL_TRIGGER", 999)
+            pnl_drop_trigger = pp_config_for_tf.get("PNL_DROP_TRIGGER_PCT", 999)
+            close_pct = pp_base_config.get("PARTIAL_CLOSE_PCT", 0.7) # Lấy close_pct từ config gốc
+
+            if trade['peak_pnl_percent'] >= min_peak_trigger:
+                if (trade['peak_pnl_percent'] - pnl_percent) >= pnl_drop_trigger:
+                    remaining_value = (trade.get('quantity', 0) * (1 - close_pct)) * current_price
+                    if remaining_value < min_order_value:
+                        log_message(f"⚠️ {symbol}: Giá trị còn lại ({remaining_value:.2f}$) sau Profit-Protect quá nhỏ. Đóng toàn bộ.", state)
+                        close_pct = 1.0
+                    if close_trade_on_binance(bnc, trade, "Protect_Profit", state, close_pct=close_pct):
+                        trade['profit_taken'] = True
+                        if close_pct < 1.0: trade['sl'] = trade['entry_price']
         if tactic_cfg.get("USE_TRAILING_SL", False) and initial_risk_dist > 0:
             pnl_ratio_from_entry = (current_price - trade['entry_price']) / initial_risk_dist
             if pnl_ratio_from_entry >= tactic_cfg.get("TRAIL_ACTIVATION_RR", float('inf')):
@@ -1457,12 +1481,12 @@ def build_trade_details_for_report(trade: Dict, realtime_price: float) -> str:
     last_zone = trade.get('last_zone')
     zone_display = f"{entry_zone}→{last_zone}" if last_zone and last_zone != entry_zone else entry_zone
     tactic_info = f"({trade.get('opened_by_tactic')} | {score_display} | {zone_display})"
-    
+
     # [v9.2] Hiển thị vốn ban đầu
     invested_usd = trade.get('initial_entry', {}).get('invested_usd', trade.get('total_invested_usd', 0))
     # Giá trị hiện tại vẫn tính trên vốn còn lại
     current_value = trade.get('total_invested_usd', 0.0) + pnl_usd
-    
+
     line1 = f"  {icon} **{trade['symbol']}-{trade['interval']}** {tactic_info} PnL: **${pnl_usd:,.2f} ({pnl_pct:+.2f}%)** | Giữ:{holding_h:.1f}h{dca_info}{tp1_info}"
     line2 = f"   Vốn:${invested_usd:,.2f} -> **${current_value:,.2f}** | Entry:{format_price_dynamically(trade['entry_price'])} Cur:{format_price_dynamically(realtime_price)} TP:{format_price_dynamically(trade['tp'])} SL:{format_price_dynamically(sl_price)}{tsl_info}"
     return f"{line1}\n{line2}"
@@ -1590,7 +1614,7 @@ def build_daily_summary_text(state: dict, total_usdt: float, available_usdt: flo
             if trade.get('tp1_hit', False): status_tags.append("TP1✅")
             if trade.get('profit_taken', False): status_tags.append("PP✅")
             status_display = " " + " ".join(status_tags) if status_tags else ""
-            
+
             dca_info = f"(DCA:{len(trade.get('dca_entries',[]))})" if trade.get('dca_entries') else ""
 
             line1 = f"  {pnl_emote_trade} **{symbol}-{trade.get('interval', 'N/A')}** {tactic_info} PnL: **${pnl_usd:+.2f} ({pnl_percent:+.2f}%)**{status_display}"
