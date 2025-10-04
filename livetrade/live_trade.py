@@ -301,7 +301,7 @@ TACTICS_LAB = {
         "RR": 2.8,                                  # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
         "ATR_SL_MULTIPLIER": 2.4,                   # [CHỊU ĐÒN] - SL đủ rộng để không bị cú retest đá ra khỏi lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
-        "ENABLE_PARTIAL_TP": False, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.5, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,                # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
         "USE_EXTREME_ZONE_FILTER": False,
         "USE_PRICE_ACTION_MOMENTUM": True,
@@ -315,10 +315,10 @@ TACTICS_LAB = {
         "RR": 1.8,                                  # [AN TOÀN] - Bắt đáy rủi ro, không nên tham lam.
         "ATR_SL_MULTIPLIER": 3.2,                   # [CHỊU ĐÒN] - "Lưới an toàn" dày nhất, cho phép giá quét sâu trước khi đảo chiều.
         "USE_TRAILING_SL": False,                   # [LOGIC] - Không kéo SL vì dễ bị quét khi giá hồi.
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6, # Chốt phần lớn ở TP1.
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5, # Chốt phần lớn ở TP1.
         "USE_MOMENTUM_FILTER": False,                 # [LOGIC] - Khi bắt đáy, động lượng thường đang yếu.
         "USE_EXTREME_ZONE_FILTER": True,
-        "USE_PRICE_ACTION_MOMENTUM": True,
+        "USE_PRICE_ACTION_MOMENTUM": FALSE,
     },
     # == TACTIC 4: Chuyên Gia Chớp Nhoáng ==
     "AI_Aggressor": {
@@ -329,7 +329,7 @@ TACTICS_LAB = {
         "RR": 2.0,                                  # [CHIẾN LƯỢC] - Đánh nhanh, ăn ngắn.
         "ATR_SL_MULTIPLIER": 2.2,                   # [CHIẾN LƯỢC] - SL chặt hơn, phù hợp với việc đánh nhanh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.1, "TRAIL_DISTANCE_RR": 0.7,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.7, "TP1_PROFIT_PCT": 0.6,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": False,
         "USE_PRICE_ACTION_MOMENTUM": True,
@@ -343,10 +343,10 @@ TACTICS_LAB = {
         "RR": 2.0,                                  # [CHIẾN LƯỢC] - RR thấp, bản chất "ăn nhanh".
         "ATR_SL_MULTIPLIER": 1.8,                   # [CHIẾN LƯỢC] - SL hẹp hơn, sai trong vùng nhiễu là phải cắt ngay.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.0, "TRAIL_DISTANCE_RR": 0.7,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.6, "TP1_PROFIT_PCT": 0.8,
+        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 0.8, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": True,
-        "USE_PRICE_ACTION_MOMENTUM": True,
+        "USE_PRICE_ACTION_MOMENTUM": False,
     },
 }
 
