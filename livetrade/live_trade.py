@@ -184,28 +184,28 @@ PRICE_ACTION_MOMENTUM_CONFIG = {
 
 # --- QUẢN LÝ LỆNH ĐANG MỞ ---
 ACTIVE_TRADE_MANAGEMENT_CONFIG = {
-    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 4.0,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
-    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.30,      # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
+    "EARLY_CLOSE_ABSOLUTE_THRESHOLD": 2.0,       # [Thoát hiểm] - Nếu điểm số tụt dưới 4.8 (tín hiệu cực xấu), đóng lệnh ngay.
+    "EARLY_CLOSE_RELATIVE_DROP_PCT": 0.99,      # [Cảnh báo] - Nếu điểm số sụt 25% so với lúc vào, xem xét đóng một phần.
     "PARTIAL_EARLY_CLOSE_PCT": 0.4,             # [Hành động] - Đóng 50% nếu điểm sụt giảm mạnh.
     # ----- [NÂNG CẤP] LƯỚI AN TOÀN THÍCH ỨNG THEO KHUNG THỜI GIAN -----
     "PROFIT_PROTECTION": {
         "ENABLED": True,
-        "PARTIAL_CLOSE_PCT": 0.6, # Dùng chung tỷ lệ chốt lời
+        "PARTIAL_CLOSE_PCT": 0.5, # Dùng chung tỷ lệ chốt lời
 
         # Cấu hình cho trade lướt sóng ngắn (nhạy cảm)
         "1h": {
             "MIN_PEAK_PNL_TRIGGER": 1.5,
-            "PNL_DROP_TRIGGER_PCT": 0.75
+            "PNL_DROP_TRIGGER_PCT": 0.5
         },
         # Cấu hình cho swing trade (kiên nhẫn hơn)
         "4h": {
             "MIN_PEAK_PNL_TRIGGER": 3.0,
-            "PNL_DROP_TRIGGER_PCT": 1.5
+            "PNL_DROP_TRIGGER_PCT": 1.25
         },
         # Cấu hình cho position trade (rất kiên nhẫn)
         "1d": {
             "MIN_PEAK_PNL_TRIGGER": 5.0,
-            "PNL_DROP_TRIGGER_PCT": 3.0
+            "PNL_DROP_TRIGGER_PCT": 2.0
         }
     }
 }
@@ -287,7 +287,7 @@ TACTICS_LAB = {
         "RR": 2.2,                                  # [TỐI ƯU] - Kỳ vọng RR cao hơn vì vào sớm và gồng được lệnh.
         "ATR_SL_MULTIPLIER": 2.5,                   # [CHỊU ĐÒN] - "Khiên" cực dày, cốt lõi của việc gồng lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.3, "TRAIL_DISTANCE_RR": 1.1,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
+        "ENABLE_PARTIAL_TP": False, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,
         "USE_EXTREME_ZONE_FILTER": True,
         "USE_PRICE_ACTION_MOMENTUM": True,
@@ -301,7 +301,7 @@ TACTICS_LAB = {
         "RR": 2.8,                                  # [TỐI ƯU] - Breakout thật thường có tiềm năng lợi nhuận lớn.
         "ATR_SL_MULTIPLIER": 2.4,                   # [CHỊU ĐÒN] - SL đủ rộng để không bị cú retest đá ra khỏi lệnh.
         "USE_TRAILING_SL": True, "TRAIL_ACTIVATION_RR": 1.5, "TRAIL_DISTANCE_RR": 1.0,
-        "ENABLE_PARTIAL_TP": True, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
+        "ENABLE_PARTIAL_TP": False, "TP1_RR_RATIO": 1.0, "TP1_PROFIT_PCT": 0.5,
         "USE_MOMENTUM_FILTER": True,                # [BẮT BUỘC] - Breakout không có momentum là breakout chết.
         "USE_EXTREME_ZONE_FILTER": False,
         "USE_PRICE_ACTION_MOMENTUM": True,
